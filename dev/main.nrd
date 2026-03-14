@@ -1,0 +1,104 @@
+//! ============================================================
+//! Language Syntax Guide: A Living Playground
+//! ------------------------------------------------------------
+//! This file acts as a reference for the language's grammar,
+//! from basic types to complex control flow.
+//! ============================================================
+
+/// LESSON 1: The Scheduler
+/// High-level entry points use the 'scheduler' keyword.
+/// This defines how the application initializes and runs.
+scheduler system_monitor {
+    resources {
+        // Method calls use double-colon for namespaces
+        hardware::sensors::calibrate()
+    }
+
+    systems {
+        // Lists of lifecycle stages or task groups
+        boot_sequence
+        background_polling
+    }
+}
+
+/// LESSON 2: Variables & Types
+/// Use 'var' for declarations. Types follow a colon.
+function type_demonstration() {
+    // Basic types and explicit typing
+    var count: int = 42
+    var ratio: f32 = 3.14
+    var active: bool = true
+
+    // Character types with Unicode support
+    var symbol: char = 'Ω'
+    var hex_char: char = '\u{0x03A9}'
+
+    // Arrays can hold mixed-literal types in this grammar
+    var collection = [
+        100,
+        0b101101, // Binary literals
+        'A',
+        "Text"
+    ]
+
+    bla: loop => true
+}
+
+/// LESSON 3: Strings & Raw Literals
+/// The language supports standard and "Raw" strings using # delimiters.
+function string_tour() {
+    // 1. Standard: Supports escapes like \n, \t, and \u{}
+    var standard = "Line one\nLine two with \u{0x2728}"
+
+    // 2. Raw: No escapes processed. Syntax: #"..."#
+    var raw = #"C:\Users\Name\Desktop"#
+
+    // 3. Multi-Hash Raw: Use more hashes if your string contains #"
+    // This allows you to include any sequence of characters.
+    var complex_raw = ##"This is a #"raw string"# inside hashes"##
+    var deep_nesting = ###"Allows ###" without breaking"###
+}
+
+/// LESSON 4: Functions & Expressions
+/// Functions support multiple parameters, trailing commas, and arrows.
+function analyze_data(value: int, factor: f32,): int {
+
+    // Complex expressions: Note the prefix operator chaining !!-!!
+    // The language allows dense operator stacking.
+    var logic_test = !!-!!-----factor.**&[0.5]()
+
+    // Arrays/Buffers can be indexed using bracket notation immediately after calls
+    var status = driver.get_status(value,)[0b1]
+
+    // Block return
+    return value
+}
+
+/// Short-hand function: Use '=>' for single-expression bodies
+function quick_check(): bool => sensor.is_active
+
+/// LESSON 5: Control Flow & Loops
+/// Supports labeled loops, break/continue, and standard if/else.
+function loop_mastery(limit: int) {
+
+    // Labels are defined with a trailing colon
+    outer_gate: loop {
+
+        // Single-line loops using arrows
+        tick: loop => print("Pulse...")
+
+        if limit > 100 {
+            // Standard block-based while
+            while true {
+                // Nested logic
+            }
+        } else if limit == 0 {
+            // Else-if branch
+        } else {
+            // Fallback branch
+        }
+
+        // Labeled break to exit specific scopes
+        exit_point: break
+    }
+}

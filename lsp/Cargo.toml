@@ -1,0 +1,14 @@
+[package]
+name = "lsp"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ruparse.workspace = true
+line-index = "0.1.2"
+parser = { path = "../parser" }
+ir = { path = "../ir" }
+tower-lsp = "0.20.0"
+tokio = { version = "1.50.0", features = ["full"] }
+dashmap = "6.1.0"
+strip-ansi-escapes = "0.2.1"

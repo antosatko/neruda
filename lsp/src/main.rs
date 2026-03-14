@@ -1,0 +1,373 @@
+use core::panic;
+use dashmap::DashMap;
+use ir::{
+    Body, Expression, Function, IdentifierPath, Literal, Module, Object, Parameter, Postfix,
+    Statement, Type, Value,
+};
+use line_index::{LineCol, LineIndex, TextSize};
+use parser::{
+    grammar::{Token, gen_parser},
+    lowering::module_named,
+};
+use ruparse::{Parser, lexer::PreprocessorError, parser::ParseError};
+use tower_lsp::{LspService, Server};
+
+use crate::server::Backend;
+
+mod server;
+
+#[tokio::main]
+async fn main() {
+    let stdin = tokio::io::stdin();
+    let stdout = tokio::io::stdout();
+
+    let (service, socket) = LspService::new(|client| Backend {
+        client,
+        document_map: DashMap::new(),
+        parser: gen_parser(),
+    });
+
+    Server::new(stdin, stdout, socket).serve(service).await;
+}
+#[derive(Debug, Copy, Clone)]
+pub struct Span {
+    len: usize,
+    line: usize,
+    column: usize,
+    ty: u8,
+}
+
+#[derive(Debug, Copy, Clone)]
+#[repr(u8)]
+pub enum Types {
+    Comment,
+    Ident,
+    Keyword,
+    String,
+    Number,
+    Operator,
+    Type,
+    SpecialOperator,
+    Label,
+}
+
+pub enum IndexErr<'a> {
+    Lex(PreprocessorError),
+    Parse(ParseError<'a>),
+    Idk,
+}
+
+pub fn index_file<'p, 'src>(
+    parser: &'p Parser<'p>,
+    src: &'src str,
+) -> Result<Vec<Span>, IndexErr<'p>>
+where
+    'p: 'src,
+    'src: 'p,
+{
+    let line_index = LineIndex::new(src);
+    let mut spans = Vec::new();
+
+    let tokens = match parser.lexer.lex_utf8(src) {
+        Ok(t) => t,
+        Err(e) => return Err(IndexErr::Lex(e)),
+    };
+    index_tokens(&tokens, &mut spans);
+    let module = match parser.parse(&tokens, src) {
+        Ok(m) => m,
+        Err(e) => return Err(IndexErr::Parse(e)),
+    };
+
+    let ast = match module_named("", src, module.entry) {
+        Some(ast) => ast,
+        None => return Err(IndexErr::Idk),
+    };
+
+    ast.index(&line_index, &mut spans);
+
+    Ok(spans)
+}
+
+impl IntoSpan for Token<'_> {
+    fn span(&self, ty: Types, _: &LineIndex) -> Span {
+        Span {
+            len: self.len,
+            line: self.location.line - 1,
+            column: self.location.column - 1,
+            ty: ty as _,
+        }
+    }
+}
+
+fn index_tokens(tokens: &Vec<Token>, spans: &mut Vec<Span>) {
+    let line_index = &LineIndex::new("");
+    for token in tokens {
+        match &token.kind {
+            ruparse::lexer::TokenKinds::Complex(t) => match *t {
+                "tl docstr" | "docstr" | "comment" => {
+                    spans.push(token.span(Types::Comment, line_index))
+                }
+                "numeric" | "float" => spans.push(token.span(Types::Number, line_index)),
+                "char" | "string" => spans.push(token.span(Types::String, line_index)),
+                a => panic!("got a: {a}"),
+            },
+            _ => (),
+        }
+    }
+}
+
+trait IndexedWalk {
+    fn index(&self, line_index: &LineIndex, spans: &mut Vec<Span>);
+}
+
+trait IntoSpan {
+    #[must_use]
+    fn span(&self, ty: Types, line_index: &LineIndex) -> Span;
+    #[must_use]
+    fn span_word(&self, ty: Types, line_index: &LineIndex, word: &str) -> Span {
+        let mut this = self.span(ty, line_index);
+        this.len = word.chars().count();
+        this
+    }
+}
+
+impl<T> IntoSpan for ir::Span<T> {
+    fn span(&self, ty: Types, line_index: &LineIndex) -> Span {
+        let LineCol { line, col } = line_index.line_col(TextSize::new(self.location.index as _));
+        Span {
+            len: self.location.len,
+            line: line as usize,
+            column: col as usize,
+            ty: ty as _,
+        }
+    }
+}
+
+/* ===================== IMPLEMENTATIONS ===================== */
+
+impl IndexedWalk for Module {
+    fn index(&self, line_index: &LineIndex, spans: &mut Vec<Span>) {
+        self.objects.iter().for_each(|o| o.index(line_index, spans));
+    }
+}
+
+impl IndexedWalk for ir::Span<Object> {
+    fn index(&self, line_index: &LineIndex, spans: &mut Vec<Span>) {
+        match &self.inner {
+            Object::Scheduler {
+                ident,
+                resources,
+                systems,
+                docs: _,
+            } => {
+                spans.push(self.span_word(Types::Keyword, line_index, "scheduler"));
+                spans.push(ident.span(Types::Ident, line_index));
+
+                if let Some(resources) = resources {
+                    spans.push(resources.span_word(Types::Keyword, line_index, "resources"));
+                    resources.iter().for_each(|r| r.index(line_index, spans));
+                }
+                if let Some(systems) = systems {
+                    spans.push(systems.span_word(Types::Keyword, line_index, "systems"));
+                    systems.iter().for_each(|r| r.index(line_index, spans));
+                }
+            }
+            Object::Function(Function {
+                ident,
+                parameters,
+                return_type,
+                body,
+                docs: _,
+            }) => {
+                spans.push(self.span_word(Types::Keyword, line_index, "function"));
+                spans.push(ident.span(Types::Ident, line_index));
+
+                parameters.iter().for_each(|p| p.index(line_index, spans));
+                if let Some(ret) = return_type {
+                    ret.index(line_index, spans);
+                }
+                body.index(line_index, spans);
+            }
+        }
+    }
+}
+
+impl IndexedWalk for ir::Span<Body> {
+    fn index(&self, line_index: &LineIndex, spans: &mut Vec<Span>) {
+        match &self.inner {
+            Body::Block(stmts) => stmts.iter().for_each(|s| s.index(line_index, spans)),
+            Body::Statement(expr) => {
+                spans.push(self.span_word(Types::SpecialOperator, line_index, "=>"));
+                expr.index(line_index, spans)
+            }
+        }
+    }
+}
+
+impl IndexedWalk for ir::Span<Statement> {
+    fn index(&self, line_index: &LineIndex, spans: &mut Vec<Span>) {
+        match &self.inner {
+            Statement::Var {
+                ident,
+                ty,
+                expression,
+            } => {
+                spans.push(self.span_word(Types::Keyword, line_index, "var"));
+                spans.push(ident.span(Types::Ident, line_index));
+                if let Some(t) = ty {
+                    t.index(line_index, spans);
+                }
+                if let Some(e) = expression {
+                    e.index(line_index, spans);
+                }
+            }
+            Statement::If {
+                condition,
+                then_block,
+                else_if,
+                else_block,
+            } => {
+                spans.push(self.span_word(Types::Keyword, line_index, "if"));
+                condition.index(line_index, spans);
+                then_block.index(line_index, spans);
+
+                for elif in else_if {
+                    spans.push(elif.span_word(Types::Keyword, line_index, "else if"));
+                    elif.inner.condition.index(line_index, spans);
+                    elif.inner.block.index(line_index, spans);
+                }
+                if let Some(eb) = else_block {
+                    spans.push(eb.span_word(Types::Keyword, line_index, "else"));
+                    eb.inner.block.index(line_index, spans);
+                }
+            }
+            Statement::While {
+                label,
+                condition,
+                body,
+            } => {
+                spans.push(self.span_word(Types::Keyword, line_index, "while"));
+                if let Some(l) = label {
+                    spans.push(l.span(Types::Label, line_index)); // Highlight as Label
+                }
+                condition.index(line_index, spans);
+                body.index(line_index, spans);
+            }
+            Statement::Loop { label, body } => {
+                spans.push(self.span_word(Types::Keyword, line_index, "loop"));
+                if let Some(l) = label {
+                    spans.push(l.span(Types::Label, line_index)); // Highlight as Label
+                }
+                body.index(line_index, spans);
+            }
+            Statement::Break { label } => {
+                spans.push(self.span_word(Types::Keyword, line_index, "break"));
+                if let Some(l) = label {
+                    spans.push(l.span(Types::Label, line_index));
+                }
+            }
+            Statement::Continue { label } => {
+                spans.push(self.span_word(Types::Keyword, line_index, "continue"));
+                if let Some(l) = label {
+                    spans.push(l.span(Types::Label, line_index));
+                }
+            }
+            Statement::Return { expression } => {
+                spans.push(self.span_word(Types::Keyword, line_index, "return"));
+                expression.index(line_index, spans);
+            }
+            Statement::Expr { expression } => expression.index(line_index, spans),
+        }
+    }
+}
+impl IndexedWalk for ir::Span<Parameter> {
+    fn index(&self, line_index: &LineIndex, spans: &mut Vec<Span>) {
+        spans.push(self.inner.ident.span(Types::Ident, line_index));
+        self.inner.ty.index(line_index, spans);
+    }
+}
+
+impl IndexedWalk for ir::Span<Type> {
+    fn index(&self, line_index: &LineIndex, spans: &mut Vec<Span>) {
+        // Differentiate Type highlighting from Standard Identifiers
+        for ident in &self.inner.path.inner.path {
+            spans.push(ident.span(Types::Type, line_index));
+        }
+    }
+}
+
+impl IndexedWalk for ir::Span<IdentifierPath> {
+    fn index(&self, line_index: &LineIndex, spans: &mut Vec<Span>) {
+        for ident in &self.inner.path {
+            spans.push(ident.span(Types::Ident, line_index));
+        }
+    }
+}
+
+impl IndexedWalk for ir::Span<Expression> {
+    fn index(&self, line_index: &LineIndex, spans: &mut Vec<Span>) {
+        match &self.inner {
+            Expression::Value(v) => v.index(line_index, spans),
+            Expression::Binary { l, r, op } => {
+                l.index(line_index, spans);
+                spans.push(op.span(Types::Operator, line_index));
+                r.index(line_index, spans);
+            }
+        }
+    }
+}
+
+impl IndexedWalk for ir::Span<Box<Expression>> {
+    fn index(&self, line_index: &LineIndex, spans: &mut Vec<Span>) {
+        let inner_span = ir::Span {
+            location: self.location,
+            inner: *self.inner.clone(),
+        };
+        inner_span.index(line_index, spans);
+    }
+}
+
+// Kept one consistent Value implementation and fixed the missing literal call
+impl IndexedWalk for Value {
+    fn index(&self, line_index: &LineIndex, spans: &mut Vec<Span>) {
+        self.literal.index(line_index, spans); // Fixed missing call
+        for p in &self.postfix {
+            p.index(line_index, spans);
+        }
+    }
+}
+
+impl IndexedWalk for ir::Span<Value> {
+    fn index(&self, line_index: &LineIndex, spans: &mut Vec<Span>) {
+        self.inner.index(line_index, spans);
+    }
+}
+
+impl IndexedWalk for ir::Span<Postfix> {
+    fn index(&self, line_index: &LineIndex, spans: &mut Vec<Span>) {
+        match &self.inner {
+            Postfix::Field(ident) => spans.push(ident.span(Types::Ident, line_index)),
+            Postfix::Call(args) => args.iter().for_each(|a| a.index(line_index, spans)),
+            Postfix::Index(expr) => expr.index(line_index, spans),
+            Postfix::Refs(_) | Postfix::Derefs(_) => {
+                spans.push(self.span(Types::Operator, line_index));
+            }
+        }
+    }
+}
+
+impl IndexedWalk for ir::Span<Literal> {
+    fn index(&self, line_index: &LineIndex, spans: &mut Vec<Span>) {
+        match &self.inner {
+            Literal::Identifier(path) => {
+                for ident in &path.path {
+                    spans.push(ident.span(Types::Ident, line_index));
+                }
+            }
+            Literal::Array(exprs) | Literal::Tuple(exprs) => {
+                exprs.iter().for_each(|e| e.index(line_index, spans));
+            }
+            _ => (),
+        }
+    }
+}

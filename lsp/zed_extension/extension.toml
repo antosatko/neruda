@@ -1,0 +1,16 @@
+id = "neruda"
+name = "Neruda"
+version = "0.1.0"
+schema_version = 1
+authors = ["antosatko"]
+description = "LSP highlighting for ECS"
+repository = "https://github.com/antosatko/neruda/lsp/zed_extension"
+
+languages = ["languages/neruda"]
+
+[language_servers.neruda-lsp]
+name = "neruda-lsp"
+languages = ["neruda"]
+
+[lib]
+kind = "Rust"

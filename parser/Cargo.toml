@@ -1,0 +1,10 @@
+[package]
+name = "parser"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ruparse.workspace = true
+arena.workspace = true
+smol_str.workspace = true
+ir = { path = "../ir" }

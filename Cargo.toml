@@ -1,0 +1,16 @@
+[workspace]
+members = ["ir", "lsp", "parser", "runtime"]
+
+[package]
+name = "neruda"
+version = "0.1.0"
+edition = "2024"
+
+[workspace.dependencies]
+arena = { git = "https://github.com/antosatko/arena" }
+ruparse = { git = "https://github.com/antosatko/ruparse" }
+smol_str = { version = "0.3.5" }
+
+[dependencies]
+clap = { version = "4.6.0", features = ["derive"] }
+parser = { path = "parser" }

@@ -1,0 +1,9 @@
+name = "neruda"
+path_suffixes = ["nrd"]
+line_comments = ["//"]
+language_servers = ["neruda-lsp"]
+brackets = [
+    { start = "{", end = "}", close = true, newline = true },
+    { start = "[", end = "]", close = true, newline = true },
+    { start = "(", end = ")", close = true, newline = true }
+]

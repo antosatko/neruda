@@ -1,0 +1,9 @@
+(comment) @comment
+(variable) @variable
+(keyword) @keyword
+(string) @string
+(number) @number
+(operator) @operator
+(type) @type
+(decorator) @operator
+(label) @label

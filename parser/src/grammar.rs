@@ -24,6 +24,13 @@ const KEYWORDS: &[&'static str] = &[
     "while",
     "break",
     "continue",
+    "as",
+    "mut",
+    "on",
+    "where",
+    "before",
+    "after",
+    "type",
 ];
 
 static _ERR: ErrorDefinition = ErrorDefinition {
@@ -439,6 +446,7 @@ pub fn gen_parser<'src>() -> Parser<'static> {
         .grammar
         .new_enum("delimiters")
         .options(") ] }".split_whitespace().map(|c| token(c)))
+        .options([eof(), newline()])
         .build();
 
     let delimiters_peek = parser
@@ -450,7 +458,7 @@ pub fn gen_parser<'src>() -> Parser<'static> {
     let delimiters_consume = parser
         .grammar
         .new_enum("terminator")
-        .options([token(";"), newline()])
+        .options([token(";")])
         .build();
 
     let docstr = parser
@@ -487,6 +495,13 @@ pub fn gen_parser<'src>() -> Parser<'static> {
                 .hint("Static path must end on an identifier")]),
         ])
         .variables([list_var("path")])
+        .build();
+
+    let alias = parser
+        .grammar
+        .new_node("alias")
+        .rules([is(keyword("as")).commit(), is(ident).set(IDENTIFIER)])
+        .variables([IDENTIFIER_VAR])
         .build();
 
     let array_literal = parser
@@ -633,16 +648,37 @@ pub fn gen_parser<'src>() -> Parser<'static> {
         .grammar
         .new_node("end statement")
         .rules([
-            is_one_of([option(delimiters_consume), option(delimiters_peek)])
+            is_one_of([option(delimiters_peek), option(delimiters_consume)])
                 .hint("Expected to end statement on a delimiter"),
         ])
+        .build();
+
+    let struct_type_literal = parser
+        .grammar
+        .new_node("struct type literal")
+        .has(docstr, "docs")
+        .rules([
+            is(keyword("struct")).commit(),
+            is(token("{")),
+            loop_().then([is_one_of([
+                option(node("parameter")).set("parameters"),
+                option(token("}")).return_node(),
+            ])]),
+        ])
+        .variables([list_var("parameters")])
+        .build();
+
+    let type_literal = parser
+        .grammar
+        .new_enum("type literal")
+        .options([ident_path, struct_type_literal])
         .build();
 
     let type_ = parser
         .grammar
         .new_node("type")
-        .rules([is(ident_path).commit().set("path")])
-        .variables([node_var("path")])
+        .rules([is(type_literal).commit().set("literal")])
+        .variables([node_var("literal")])
         .build();
 
     let label = parser
@@ -655,6 +691,7 @@ pub fn gen_parser<'src>() -> Parser<'static> {
     let parameter = parser
         .grammar
         .new_node("parameter")
+        .has(docstr, "docs")
         .rules([
             is(ident).set("identifier").commit(),
             is(token(":")),
@@ -897,6 +934,109 @@ pub fn gen_parser<'src>() -> Parser<'static> {
         .variables([IDENTIFIER_VAR, node_var("resources"), node_var("systems")])
         .build();
 
+    let clause_select_component = parser
+        .grammar
+        .new_node("selection component")
+        .rules([
+            maybe(keyword("mut"))
+                .set("mutable")
+                .then([maybe(token("?")).set("modifier")])
+                .otherwise([maybe_one_of([
+                    option(token("?")).set("modifier"),
+                    option(token("!")).set("modifier"),
+                ])]),
+            is(ident_path).set("component"),
+            maybe(alias).set("alias"),
+        ])
+        .variables([
+            node_var("mutable"),
+            node_var("modifier"),
+            node_var("component"),
+            node_var("alias"),
+        ])
+        .build();
+
+    let clause_select_action = parser
+        .grammar
+        .new_node("selection action")
+        .rules([
+            is(keyword("on")).commit(),
+            is(ident_path).set("action"),
+            maybe(alias).set("alias"),
+        ])
+        .variables([node_var("action"), node_var("alias")])
+        .build();
+
+    let clause_select_restriction = parser
+        .grammar
+        .new_node("selection restriction")
+        .rules([
+            is(keyword("where")).commit(),
+            is(expression).set("expression"),
+        ])
+        .variables([node_var("action"), node_var("expression")])
+        .build();
+
+    let clause_select = parser
+        .grammar
+        .new_node("select")
+        .rules([
+            is(clause_select_component).set("components"),
+            while_(token("&")).then([is(clause_select_component)
+                .set("components")
+                .hint("Trailing separators not allowed")]),
+            maybe(clause_select_action).set("action"),
+            maybe(clause_select_restriction).set("restriction"),
+        ])
+        .variables([
+            list_var("components"),
+            node_var("action"),
+            node_var("restriction"),
+        ])
+        .build();
+
+    let clause = parser
+        .grammar
+        .new_node("clause")
+        .has(docstr, "docs")
+        .rules([
+            is(ident).set(IDENTIFIER).commit(),
+            is(token(":")),
+            is(clause_select).set("select"),
+        ])
+        .variables([node_var("modifier"), IDENTIFIER_VAR, node_var("select")])
+        .build();
+
+    let query = parser
+        .grammar
+        .new_node("query")
+        .rules([
+            is(token("(")).commit(),
+            loop_().then([
+                maybe(clause).set("clauses"),
+                is_one_of([
+                    option(token(",")).then([maybe(token(",")).fail(&MULTIPLE_TRAILING_COMMAS)]),
+                    option(token(")")).return_node(),
+                ]),
+            ]),
+        ])
+        .variables([list_var("clauses")])
+        .build();
+
+    let before_body = parser
+        .grammar
+        .new_node("before body")
+        .rules([is(keyword("before")).commit(), is(code_body).set("body")])
+        .variables([node_var("body")])
+        .build();
+
+    let after_body = parser
+        .grammar
+        .new_node("after body")
+        .rules([is(keyword("after")).commit(), is(code_body).set("body")])
+        .variables([node_var("body")])
+        .build();
+
     let system = parser
         .grammar
         .new_node("system")
@@ -904,17 +1044,52 @@ pub fn gen_parser<'src>() -> Parser<'static> {
         .rules([
             is(keyword("system")).commit().start(),
             is(ident).set(IDENTIFIER),
+            is(query).set("query"),
+            maybe(before_body).set("before body"),
             is(code_body)
-                .set("code body")
-                .hint("A system must contain a code body"),
+                .set("main body")
+                .hint("A system must contain main body"),
+            maybe(after_body).set("after body"),
         ])
-        .variables([IDENTIFIER_VAR, node_var("code body")])
+        .variables([
+            IDENTIFIER_VAR,
+            node_var("query"),
+            node_var("main body"),
+            node_var("before body"),
+            node_var("after body"),
+        ])
+        .build();
+
+    let component = parser
+        .grammar
+        .new_node("component")
+        .has(docstr, "docs")
+        .rules([
+            is(keyword("component")).commit().start(),
+            is(ident).set(IDENTIFIER),
+            maybe(token("=")).then([is(type_).set("type")]),
+            is(end_stmt),
+        ])
+        .variables([IDENTIFIER_VAR, node_var("type")])
+        .build();
+
+    let type_kw = parser
+        .grammar
+        .new_node("type definition")
+        .has(docstr, "docs")
+        .rules([
+            is(keyword("type")).commit().start(),
+            is(ident).set(IDENTIFIER),
+            maybe(token("=")).then([is(type_).set("type")]),
+            is(end_stmt),
+        ])
+        .variables([IDENTIFIER_VAR, node_var("type")])
         .build();
 
     let tls = parser
         .grammar
         .new_enum("top level statement")
-        .options([scheduler, function, system])
+        .options([scheduler, function, system, component, type_kw])
         .build();
 
     parser

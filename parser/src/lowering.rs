@@ -2,15 +2,15 @@ use std::collections::HashMap;
 
 use arena::Arena;
 use ruparse::{
-    lexer::Token,
+    lexer::{Token, TokenKinds},
     parser::{Node, Nodes},
 };
 use smol_str::SmolStr;
 
 use ir::{
-    Associativity, Body, Else, ElseIf, ExprItem, Expression, Function, IdentifierPath, Literal,
-    Module, Object, Operator, Parameter, Span, SpanIndex, Statement, Type, Value, char_literal,
-    numeric_literal, string_literal,
+    Alias, Associativity, Body, Clause, Else, ElseIf, ExprItem, Expression, Function,
+    IdentifierPath, Keyword, Literal, Module, Mutability, Object, Operator, Parameter, Span,
+    SpanIndex, Statement, Type, TypeLiteral, Value, char_literal, numeric_literal, string_literal,
 };
 
 pub fn module_named(name: impl Into<SmolStr>, src: &str, node: Node) -> Option<Module> {
@@ -77,11 +77,160 @@ pub fn module_named(name: impl Into<SmolStr>, src: &str, node: Node) -> Option<M
                 module.symbols.insert(ident.inner, key);
             }
 
+            "system" => {
+                let ident = expect_ident(src, s);
+                let sys_body = body(src, s.expect_node("main body"))?;
+                let docs = docstrings(src, s);
+                let mut query = Vec::new();
+                for clause in s
+                    .try_get_node("query")
+                    .as_ref()
+                    .unwrap()
+                    .get_list("clauses")
+                {
+                    let ident = expect_ident(src, clause);
+                    let docs = docstrings(src, clause);
+                    let mut include = Vec::new();
+                    let mut exclude = Vec::new();
+                    let mut optional = Vec::new();
+                    for component in clause
+                        .try_get_node("select")
+                        .as_ref()
+                        .unwrap()
+                        .get_list("components")
+                    {
+                        let mutable = component
+                            .try_get_node("mutable")
+                            .as_ref()
+                            .map(|m| span((), m));
+                        let component_path =
+                            ident_path(src, component.try_get_node("component").as_ref().unwrap());
+                        let alias = alias(src, component.try_get_node("alias").as_ref());
+                        match component.try_get_node("modifier") {
+                            Some(Nodes::Token(Token {
+                                kind: TokenKinds::Token("?"),
+                                ..
+                            })) => optional.push((component_path, Mutability(mutable), alias)),
+                            Some(Nodes::Token(Token {
+                                kind: TokenKinds::Token("!"),
+                                ..
+                            })) => {
+                                if mutable.is_none() {
+                                    exclude.push((component_path, alias))
+                                } else {
+                                    return None;
+                                }
+                            }
+                            _ => include.push((component_path, Mutability(mutable), alias)),
+                        }
+                    }
+                    let action = clause
+                        .try_get_node("select")
+                        .as_ref()
+                        .unwrap()
+                        .try_get_node("action")
+                        .as_ref()
+                        .map(|a| {
+                            (
+                                ident_path(src, a.try_get_node("action").as_ref().unwrap()),
+                                Keyword(span((), a)),
+                                alias(src, a.try_get_node("alias").as_ref()),
+                            )
+                        });
+                    let restriction = if let Some(r) = clause
+                        .try_get_node("select")
+                        .as_ref()
+                        .unwrap()
+                        .try_get_node("restriction")
+                        .as_ref()
+                    {
+                        Some((
+                            expression(src, r.try_get_node("expression").as_ref().unwrap())?,
+                            Keyword(span((), r)),
+                        ))
+                    } else {
+                        None
+                    };
+                    query.push(span(
+                        Clause {
+                            ident,
+                            docs,
+                            include,
+                            exclude,
+                            optional,
+                            action,
+                            restriction,
+                        },
+                        clause,
+                    ));
+                }
+                let before = match s.try_get_node("before body").as_ref() {
+                    Some(before) => Some(span(
+                        body(src, before.try_get_node("body").as_ref().unwrap())?,
+                        before,
+                    )),
+                    None => None,
+                };
+                let after = match s.try_get_node("after body").as_ref() {
+                    Some(after) => Some(span(
+                        body(src, after.try_get_node("body").as_ref().unwrap())?,
+                        after,
+                    )),
+                    None => None,
+                };
+
+                let obj = Object::System {
+                    ident: ident.clone(),
+                    query,
+                    docs,
+                    body: sys_body,
+                    before,
+                    after,
+                };
+
+                let key = module.objects.push(span(obj, s));
+                module.symbols.insert(ident.inner, key);
+            }
+
+            "component" => {
+                let ident = expect_ident(src, s);
+                let docs = docstrings(src, s);
+                let ty = s.try_get_node("type").as_ref().map(|t| ty(src, t));
+
+                let obj = Object::Component {
+                    ident: ident.clone(),
+                    ty,
+                    docs,
+                };
+
+                let key = module.objects.push(span(obj, s));
+                module.symbols.insert(ident.inner, key);
+            }
+
+            "type definition" => {
+                let ident = expect_ident(src, s);
+                let docs = docstrings(src, s);
+                let ty = s.try_get_node("type").as_ref().map(|t| ty(src, t));
+
+                let obj = Object::Type {
+                    ident: ident.clone(),
+                    ty,
+                    docs,
+                };
+
+                let key = module.objects.push(span(obj, s));
+                module.symbols.insert(ident.inner, key);
+            }
+
             other => s.ice(&format!("Unhandled top-level item: {}", other)),
         }
     }
 
     Some(module)
+}
+
+fn alias(src: &str, node: Option<&Nodes>) -> Alias {
+    Alias(node.map(|n| span(expect_ident(src, n), n)))
 }
 
 fn body(src: &str, node: &Nodes) -> Option<Span<Body>> {
@@ -285,7 +434,7 @@ fn expression_items(src: &str, node: &Nodes) -> Option<Vec<Span<ExprItem>>> {
     for entry in node.get_list("rest") {
         match entry {
             Nodes::Token(_) => {
-                let op = operator(src, entry);
+                let op = operator(entry);
                 items.push(op.map(ExprItem::Operator));
             }
             Nodes::Node(_) => {
@@ -298,8 +447,14 @@ fn expression_items(src: &str, node: &Nodes) -> Option<Vec<Span<ExprItem>>> {
     Some(items)
 }
 
-fn operator(src: &str, node: &Nodes) -> Span<Operator> {
-    let op = match node.stringify(src) {
+fn operator(node: &Nodes) -> Span<Operator> {
+    let token = node.expect_token();
+    let kind = if let TokenKinds::Token(kind) = token.kind {
+        kind
+    } else {
+        node.ice(&format!("Unknown operator: {:?}", token))
+    };
+    let op = match kind {
         "+" => Operator::Add,
         "-" => Operator::Sub,
         "*" => Operator::Mul,
@@ -322,7 +477,7 @@ fn operator(src: &str, node: &Nodes) -> Span<Operator> {
         other => node.ice(&format!("Unknown operator: {}", other)),
     };
 
-    span(op, node)
+    span_from_token(op, token)
 }
 
 #[track_caller]
@@ -411,14 +566,29 @@ fn value(src: &str, node: &Nodes) -> Option<Span<Value>> {
 }
 
 fn ty(src: &str, node: &Nodes) -> Span<Type> {
-    let path = ident_path(src, node.expect_node("path"));
-    span(Type { path }, node)
+    let literal = node.expect_node("literal");
+    match literal.get_name() {
+        "identifier path" => span(
+            Type {
+                literal: span(TypeLiteral::Path(ident_path(src, literal).inner), literal),
+            },
+            node,
+        ),
+        "struct type literal" => span(
+            Type {
+                literal: span(TypeLiteral::Struct(parameters(src, literal)), literal),
+            },
+            node,
+        ),
+        name => panic!("{name}"),
+    }
 }
 
 fn parameter(src: &str, node: &Nodes) -> Span<Parameter> {
     let ident = expect_ident(src, node.expect_node("identifier"));
     let ty = ty(src, node.expect_node("type"));
-    span(Parameter { ident, ty }, node)
+    let docs = docstrings(src, node);
+    span(Parameter { ident, ty, docs }, node)
 }
 
 fn parameters(src: &str, node: &Nodes) -> Vec<Span<Parameter>> {

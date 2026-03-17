@@ -1,7 +1,7 @@
 use core::panic;
 use dashmap::DashMap;
 use ir::{
-    Body, Expression, Function, IdentifierPath, Literal, Module, Object, Parameter, Postfix,
+    Alias, Body, Expression, Function, IdentifierPath, Literal, Module, Object, Parameter, Postfix,
     Statement, Type, Value,
 };
 use line_index::{LineCol, LineIndex, TextSize};
@@ -188,6 +188,90 @@ impl IndexedWalk for ir::Span<Object> {
                 }
                 body.index(line_index, spans);
             }
+            Object::Component { ident, ty, docs: _ } => {
+                spans.push(self.span_word(Types::Keyword, line_index, "component"));
+                spans.push(ident.span(Types::Ident, line_index));
+                if let Some(ty) = &ty {
+                    ty.index(line_index, spans);
+                }
+            }
+            Object::Type { ident, ty, docs: _ } => {
+                spans.push(self.span_word(Types::Keyword, line_index, "type"));
+                spans.push(ident.span(Types::Ident, line_index));
+                if let Some(ty) = &ty {
+                    ty.index(line_index, spans);
+                }
+            }
+            Object::System {
+                ident,
+                docs: _,
+                query,
+                body,
+                after,
+                before,
+            } => {
+                spans.push(self.span_word(Types::Keyword, line_index, "system"));
+                spans.push(ident.span(Types::Ident, line_index));
+                body.index(line_index, spans);
+                if let Some(before) = before {
+                    spans.push(before.span_word(Types::Keyword, line_index, "before"));
+                    before.inner.index(line_index, spans);
+                }
+                if let Some(after) = after {
+                    spans.push(after.span_word(Types::Keyword, line_index, "after"));
+                    after.inner.index(line_index, spans);
+                }
+                for clause in query {
+                    spans.push(clause.ident.span(Types::Ident, line_index));
+                    for (component, mutability, alias) in &clause.include {
+                        for ident in &component.inner.path {
+                            spans.push(ident.span(Types::Type, line_index));
+                        }
+                        if let Some(mutability) = &mutability.0 {
+                            spans.push(mutability.span_word(Types::Keyword, line_index, "mut"));
+                        }
+                        if let Alias(Some(alias)) = alias {
+                            spans.push(alias.span_word(Types::Keyword, line_index, "as"));
+                            spans.push(alias.inner.span(Types::Ident, line_index))
+                        }
+                    }
+                    for (component, mutability, alias) in &clause.optional {
+                        for ident in &component.inner.path {
+                            spans.push(ident.span(Types::Type, line_index));
+                        }
+                        if let Some(mutability) = &mutability.0 {
+                            spans.push(mutability.span_word(Types::Keyword, line_index, "mut"));
+                        }
+                        if let Alias(Some(alias)) = alias {
+                            spans.push(alias.span_word(Types::Keyword, line_index, "as"));
+                            spans.push(alias.inner.span(Types::Ident, line_index))
+                        }
+                    }
+                    for (component, alias) in &clause.exclude {
+                        for ident in &component.inner.path {
+                            spans.push(ident.span(Types::Type, line_index));
+                        }
+                        if let Alias(Some(alias)) = alias {
+                            spans.push(alias.span_word(Types::Keyword, line_index, "as"));
+                            spans.push(alias.inner.span(Types::Ident, line_index))
+                        }
+                    }
+                    if let Some((action, kw, alias)) = &clause.action {
+                        spans.push(kw.0.span_word(Types::Keyword, line_index, "on"));
+                        for ident in &action.inner.path {
+                            spans.push(ident.span(Types::Type, line_index));
+                        }
+                        if let Alias(Some(alias)) = alias {
+                            spans.push(alias.span_word(Types::Keyword, line_index, "as"));
+                            spans.push(alias.inner.span(Types::Ident, line_index))
+                        }
+                    }
+                    if let Some((restriction, kw)) = &clause.restriction {
+                        spans.push(kw.0.span_word(Types::Keyword, line_index, "where"));
+                        restriction.index(line_index, spans);
+                    }
+                }
+            }
         }
     }
 }
@@ -280,18 +364,29 @@ impl IndexedWalk for ir::Span<Statement> {
         }
     }
 }
+
 impl IndexedWalk for ir::Span<Parameter> {
     fn index(&self, line_index: &LineIndex, spans: &mut Vec<Span>) {
         spans.push(self.inner.ident.span(Types::Ident, line_index));
         self.inner.ty.index(line_index, spans);
+        spans.extend(self.docs.iter().map(|d| d.span(Types::Comment, line_index)));
     }
 }
 
 impl IndexedWalk for ir::Span<Type> {
     fn index(&self, line_index: &LineIndex, spans: &mut Vec<Span>) {
-        // Differentiate Type highlighting from Standard Identifiers
-        for ident in &self.inner.path.inner.path {
-            spans.push(ident.span(Types::Type, line_index));
+        match &self.literal.inner {
+            ir::TypeLiteral::Path(identifier_path) => {
+                for ident in &identifier_path.path {
+                    spans.push(ident.span(Types::Type, line_index));
+                }
+            }
+            ir::TypeLiteral::Struct(paramers) => {
+                spans.push(self.literal.span_word(Types::Keyword, line_index, "struct"));
+                for param in paramers {
+                    param.index(line_index, spans);
+                }
+            }
         }
     }
 }

@@ -39,9 +39,9 @@ impl Backend {
                     Diagnostic::new_simple(
                         Range::new(
                             Position::new(location.line as _, location.column as _),
-                            Position::new(location.line as _, location.column as u32 + 1),
+                            Position::new(location.line as _, location.column as _),
                         ),
-                        buf,
+                        strip_ansi_escapes::strip_str(&buf),
                     )
                 }
                 IndexErr::Parse(err) => {
@@ -51,9 +51,9 @@ impl Backend {
                     Diagnostic::new_simple(
                         Range::new(
                             Position::new(location.line as _, location.column as _),
-                            Position::new(location.line as _, location.column as u32 + 1),
+                            Position::new(location.line as _, location.column as _),
                         ),
-                        buf,
+                        strip_ansi_escapes::strip_str(&buf),
                     )
                 }
                 IndexErr::Idk => {

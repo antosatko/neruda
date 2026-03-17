@@ -71,6 +71,44 @@ pub enum Object {
     },
 
     Function(Function),
+
+    Component {
+        ident: Span<SmolStr>,
+        ty: Option<Span<Type>>,
+        docs: Vec<Span<SmolStr>>,
+    },
+
+    Type {
+        ident: Span<SmolStr>,
+        ty: Option<Span<Type>>,
+        docs: Vec<Span<SmolStr>>,
+    },
+
+    System {
+        ident: Span<SmolStr>,
+        docs: Vec<Span<SmolStr>>,
+        query: Vec<Span<Clause>>,
+        before: Option<Span<Span<Body>>>,
+        body: Span<Body>,
+        after: Option<Span<Span<Body>>>,
+    },
+}
+#[derive(Debug, Clone)]
+pub struct Mutability(pub Option<Span<()>>);
+#[derive(Debug, Clone)]
+pub struct Keyword(pub Span<()>);
+#[derive(Debug, Clone)]
+pub struct Alias(pub Option<Span<Span<SmolStr>>>);
+
+#[derive(Debug, Clone)]
+pub struct Clause {
+    pub ident: Span<SmolStr>,
+    pub docs: Vec<Span<SmolStr>>,
+    pub include: Vec<(Span<IdentifierPath>, Mutability, Alias)>,
+    pub exclude: Vec<(Span<IdentifierPath>, Alias)>,
+    pub optional: Vec<(Span<IdentifierPath>, Mutability, Alias)>,
+    pub action: Option<(Span<IdentifierPath>, Keyword, Alias)>,
+    pub restriction: Option<(Span<Expression>, Keyword)>,
 }
 
 #[derive(Debug, Clone)]
@@ -154,6 +192,7 @@ pub struct Else {
 pub struct Parameter {
     pub ident: Span<SmolStr>,
     pub ty: Span<Type>,
+    pub docs: Vec<Span<SmolStr>>,
 }
 
 /* ===================== EXPRESSIONS ===================== */
@@ -218,7 +257,13 @@ pub enum Postfix {
 
 #[derive(Debug, Clone)]
 pub struct Type {
-    pub path: Span<IdentifierPath>,
+    pub literal: Span<TypeLiteral>,
+}
+
+#[derive(Debug, Clone)]
+pub enum TypeLiteral {
+    Path(IdentifierPath),
+    Struct(Vec<Span<Parameter>>),
 }
 
 /* ===================== IDENTIFIERS ===================== */
@@ -401,13 +446,24 @@ pub enum ExprItem {
 
 impl std::fmt::Display for Type {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut n = 0;
-        for txt in self.path.inner.path.iter().map(|a| &a.inner) {
-            if n > 0 {
-                write!(f, "::")?;
+        match &self.literal.inner {
+            TypeLiteral::Path(identifier_path) => {
+                let mut n = 0;
+                for txt in identifier_path.path.iter().map(|a| &a.inner) {
+                    if n > 0 {
+                        write!(f, "::")?;
+                    }
+                    n += 1;
+                    write!(f, "{}", txt)?;
+                }
             }
-            n += 1;
-            write!(f, "{}", txt)?;
+            TypeLiteral::Struct(parameters) => {
+                write!(f, "struct {}", "{ ")?;
+                for Parameter { ident, ty, docs: _ } in parameters.iter().map(|p| &p.inner) {
+                    write!(f, "{}: {} ", ident.inner, ty.inner)?;
+                }
+                write!(f, "{}", "}")?;
+            }
         }
         Ok(())
     }

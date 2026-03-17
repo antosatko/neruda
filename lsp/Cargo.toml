@@ -1,5 +1,5 @@
 [package]
-name = "lsp"
+name = "neruda-lsp"
 version = "0.1.0"
 edition = "2024"
 

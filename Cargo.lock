@@ -492,20 +492,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "lsp"
-version = "0.1.0"
-dependencies = [
- "dashmap 6.1.0",
- "ir",
- "line-index",
- "parser",
- "ruparse",
- "strip-ansi-escapes",
- "tokio",
- "tower-lsp",
-]
-
-[[package]]
 name = "lsp-types"
 version = "0.94.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -541,6 +527,20 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "parser",
+]
+
+[[package]]
+name = "neruda-lsp"
+version = "0.1.0"
+dependencies = [
+ "dashmap 6.1.0",
+ "ir",
+ "line-index",
+ "parser",
+ "ruparse",
+ "strip-ansi-escapes",
+ "tokio",
+ "tower-lsp",
 ]
 
 [[package]]

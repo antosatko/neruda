@@ -502,9 +502,20 @@ fn ident_path(src: &str, node: &Nodes) -> Span<IdentifierPath> {
 fn literal(src: &str, node: &Nodes) -> Option<Span<Literal>> {
     match node {
         Nodes::Node(n) => match n.name {
-            "identifier path" => {
-                let path = ident_path(src, node);
-                Some(path.map(Literal::Identifier))
+            "identifier path literal" => {
+                let path = ident_path(src, node.expect_node("identifier"));
+                match node.try_get_node("struct literal").as_ref() {
+                    Some(s) => {
+                        let mut args = Vec::new();
+                        for arg in s.get_list("arguments") {
+                            let ident = expect_ident(src, arg);
+                            let expr = expression(src, arg.expect_node("expression"))?;
+                            args.push(span((ident, expr), arg));
+                        }
+                        return Some(span(Literal::Structure(path, args), s));
+                    }
+                    None => return Some(path.map(Literal::Identifier)),
+                }
             }
 
             "array literal" => {

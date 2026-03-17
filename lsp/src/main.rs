@@ -462,7 +462,16 @@ impl IndexedWalk for ir::Span<Literal> {
             Literal::Array(exprs) | Literal::Tuple(exprs) => {
                 exprs.iter().for_each(|e| e.index(line_index, spans));
             }
-            _ => (),
+            Literal::Structure(path, args) => {
+                for ident in &path.path {
+                    spans.push(ident.span(Types::Ident, line_index));
+                }
+                for arg in args {
+                    spans.push(arg.0.span(Types::Ident, line_index));
+                    arg.1.index(line_index, spans);
+                }
+            }
+            Literal::Number(_) | Literal::String(_) | Literal::Char(_) => (),
         }
     }
 }

@@ -446,7 +446,7 @@ pub fn gen_parser<'src>() -> Parser<'static> {
         .grammar
         .new_enum("delimiters")
         .options(") ] }".split_whitespace().map(|c| token(c)))
-        .options([eof(), newline()])
+        .options([eof(), newline(), token(",")])
         .build();
 
     let delimiters_peek = parser
@@ -551,28 +551,36 @@ pub fn gen_parser<'src>() -> Parser<'static> {
         .grammar
         .new_node("struct literal")
         .rules([
-            is(token(".")),
             is(token("{")).commit(),
             loop_().then([is_one_of([
-                option(named_argument).set("argument"),
+                option(named_argument).set("arguments"),
                 option(token("}")).return_node(),
             ])]),
         ])
         .variables([list_var("arguments")])
         .build();
 
+    let ident_path_literal = parser
+        .grammar
+        .new_node("identifier path literal")
+        .rules([
+            is(ident_path).commit().set(IDENTIFIER),
+            maybe(struct_literal).set("struct literal"),
+        ])
+        .variables([IDENTIFIER_VAR, node_var("struct literal")])
+        .build();
+
     let literals = parser
         .grammar
         .new_enum("literal")
         .options([
-            ident_path,
+            ident_path_literal,
             complex("string"),
             complex("char"),
             array_literal,
             tuple_literal,
             complex("numeric"),
             complex("float"),
-            //struct_literal,
         ])
         .build();
 
@@ -643,13 +651,24 @@ pub fn gen_parser<'src>() -> Parser<'static> {
         .options([token("-"), token("!")])
         .build();
 
+    let end_stmt = parser
+        .grammar
+        .new_node("end statement")
+        .rules([
+            is_one_of([option(delimiters_peek), option(delimiters_consume)])
+                .hint("Expected to end statement on a delimiter"),
+        ])
+        .build();
+
     let value = parser
         .grammar
         .new_node("value")
         .rules([
             while_(unary_operators).set("unary operators"),
             is(literals).commit().set("literal"),
-            while_(value_tails).set("tail"),
+            while_(value_tails)
+                .set("tail")
+                .then([maybe(end_stmt).return_node()]),
         ])
         .variables([
             node_var("literal"),
@@ -668,15 +687,6 @@ pub fn gen_parser<'src>() -> Parser<'static> {
                 .hint("Binary operator must contain right value")]),
         ])
         .variables([node_var("lvalue"), list_var("rest")])
-        .build();
-
-    let end_stmt = parser
-        .grammar
-        .new_node("end statement")
-        .rules([
-            is_one_of([option(delimiters_peek), option(delimiters_consume)])
-                .hint("Expected to end statement on a delimiter"),
-        ])
         .build();
 
     let struct_type_literal = parser

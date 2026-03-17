@@ -278,6 +278,11 @@ pub struct IdentifierPath {
 pub enum Literal {
     Identifier(IdentifierPath),
 
+    Structure(
+        Span<IdentifierPath>,
+        Vec<Span<(Span<SmolStr>, Span<Expression>)>>,
+    ),
+
     Number(Number),
 
     String(SmolStr),

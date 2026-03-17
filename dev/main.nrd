@@ -1,6 +1,6 @@
 scheduler game_world {
     resources {
-        UnitCount(0)
+        UnitCount { count: 0 }
     }
 
     systems {
@@ -12,7 +12,7 @@ scheduler game_world {
 }
 
 type StopAll
-type UnitCount = f32
+type UnitCount = struct { count: f32 }
 
 component Position = f32x2
 component Velocity = f32x2
@@ -20,14 +20,14 @@ component Velocity = f32x2
 // Select
 system apply_velocity(e: mut Position as P & Velocity as V) => e.P += e.V
 // Events
-system on_stop_all(e: mut Velocity on StopAll) => e.Velocity = 0
+system on_stop_all(e: mut Velocity as _ on StopAll) => e.Velocity = 0
 // Restrictions
 system cap_velocity(e: mut Velocity as V where e.V.dist() > 50) => e.V = e.V.normalize() * 50
 // Aggregation (manual)
 system count_units(_: Position, c: mut UnitCount)
     before { var count = 0 }
     => count += 1
-    after => c = count
+    after => c.count = count
 
 
 // when a component is not used in the body, it can be aliased as _

@@ -536,6 +536,31 @@ pub fn gen_parser<'src>() -> Parser<'static> {
         .variables([list_var("expressions")])
         .build();
 
+    let named_argument = parser
+        .grammar
+        .new_node("named parameter")
+        .rules([
+            is(ident).set(IDENTIFIER).commit(),
+            is(token(":")),
+            is(node("expression")).set("expression"),
+        ])
+        .variables([IDENTIFIER_VAR, node_var("expression")])
+        .build();
+
+    let struct_literal = parser
+        .grammar
+        .new_node("struct literal")
+        .rules([
+            is(token(".")),
+            is(token("{")).commit(),
+            loop_().then([is_one_of([
+                option(named_argument).set("argument"),
+                option(token("}")).return_node(),
+            ])]),
+        ])
+        .variables([list_var("arguments")])
+        .build();
+
     let literals = parser
         .grammar
         .new_enum("literal")
@@ -547,6 +572,7 @@ pub fn gen_parser<'src>() -> Parser<'static> {
             tuple_literal,
             complex("numeric"),
             complex("float"),
+            //struct_literal,
         ])
         .build();
 

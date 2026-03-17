@@ -7,7 +7,7 @@ scheduler game_world {
         count_units
         cap_velocity
         apply_velocity
-        apply_gravity_shift
+        on_stop_all
     }
 }
 
@@ -23,15 +23,13 @@ system apply_velocity(e: mut Position as P & Velocity as V) => e.P += e.V
 system on_stop_all(e: mut Velocity on StopAll) => e.Velocity = 0
 // Restrictions
 system cap_velocity(e: mut Velocity as V where e.V.dist() > 50) => e.V = e.V.normalize() * 50
-// Aggregation (kinda)
-system count_units(_: Position, c: UnitCount)
+// Aggregation (manual)
+system count_units(_: Position, c: mut UnitCount)
     before { var count = 0 }
     => count += 1
     after => c = count
 
 
-// querries must follow this pattern: select [Events] [Restrictions]
-//
 // when a component is not used in the body, it can be aliased as _
 // compiler uses this information for smarter optimizations
 

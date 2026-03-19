@@ -87,7 +87,7 @@ pub enum Object {
     System {
         ident: Span<SmolStr>,
         docs: Vec<Span<SmolStr>>,
-        query: Vec<Span<Clause>>,
+        query: Vec<Span<Clauses>>,
         before: Option<Span<Span<Body>>>,
         body: Span<Body>,
         after: Option<Span<Span<Body>>>,
@@ -101,14 +101,31 @@ pub struct Keyword(pub Span<()>);
 pub struct Alias(pub Option<Span<Span<SmolStr>>>);
 
 #[derive(Debug, Clone)]
-pub struct Clause {
+pub enum Clauses {
+    Select(SelectClause),
+    Action((ActionClause, Keyword)),
+    Restriction(RestrictionClause),
+}
+
+#[derive(Debug, Clone)]
+pub struct SelectClause {
     pub ident: Span<SmolStr>,
     pub docs: Vec<Span<SmolStr>>,
     pub include: Vec<(Span<IdentifierPath>, Mutability, Alias)>,
     pub exclude: Vec<(Span<IdentifierPath>, Alias)>,
     pub optional: Vec<(Span<IdentifierPath>, Mutability, Alias)>,
-    pub action: Option<(Span<IdentifierPath>, Keyword, Alias)>,
-    pub restriction: Option<(Span<Expression>, Keyword)>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ActionClause {
+    pub ident: Span<SmolStr>,
+    pub docs: Vec<Span<SmolStr>>,
+    pub event: Vec<(Span<IdentifierPath>, Alias)>,
+}
+
+#[derive(Debug, Clone)]
+pub struct RestrictionClause {
+    pub expression: Span<Expression>,
 }
 
 #[derive(Debug, Clone)]

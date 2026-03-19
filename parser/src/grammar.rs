@@ -992,55 +992,61 @@ pub fn gen_parser<'src>() -> Parser<'static> {
         ])
         .build();
 
-    let clause_select_action = parser
-        .grammar
-        .new_node("selection action")
-        .rules([
-            is(keyword("on")).commit(),
-            is(ident_path).set("action"),
-            maybe(alias).set("alias"),
-        ])
-        .variables([node_var("action"), node_var("alias")])
-        .build();
-
-    let clause_select_restriction = parser
-        .grammar
-        .new_node("selection restriction")
-        .rules([
-            is(keyword("where")).commit(),
-            is(expression).set("expression"),
-        ])
-        .variables([node_var("action"), node_var("expression")])
-        .build();
-
     let clause_select = parser
         .grammar
         .new_node("select")
-        .rules([
-            is(clause_select_component).set("components"),
-            while_(token("&")).then([is(clause_select_component)
-                .set("components")
-                .hint("Trailing separators not allowed")]),
-            maybe(clause_select_action).set("action"),
-            maybe(clause_select_restriction).set("restriction"),
-        ])
-        .variables([
-            list_var("components"),
-            node_var("action"),
-            node_var("restriction"),
-        ])
-        .build();
-
-    let clause = parser
-        .grammar
-        .new_node("clause")
         .has(docstr, "docs")
         .rules([
             is(ident).set(IDENTIFIER).commit(),
             is(token(":")),
-            is(clause_select).set("select"),
+            is(clause_select_component).set("components"),
+            while_(token("&")).then([is(clause_select_component)
+                .set("components")
+                .hint("Trailing separators not allowed")]),
         ])
-        .variables([node_var("modifier"), IDENTIFIER_VAR, node_var("select")])
+        .variables([IDENTIFIER_VAR, list_var("components")])
+        .build();
+
+    let event_component = parser
+        .grammar
+        .new_node("event component")
+        .rules([
+            is(ident_path).commit().set(IDENTIFIER),
+            maybe(alias).set("alias"),
+        ])
+        .variables([IDENTIFIER_VAR, node_var("alias")])
+        .build();
+
+    let clause_action = parser
+        .grammar
+        .new_node("action")
+        .has(docstr, "docs")
+        .rules([
+            is(keyword("on")).commit(),
+            is(ident).set(IDENTIFIER).commit(),
+            is(token(":")),
+            is(event_component).set("event"),
+            while_(token("&")).then([is(event_component)
+                .set("event")
+                .hint("Trailing separators not allowed")]),
+        ])
+        .variables([IDENTIFIER_VAR, list_var("event")])
+        .build();
+
+    let clause_restriction = parser
+        .grammar
+        .new_node("restriction")
+        .rules([
+            is(keyword("where")).commit(),
+            is(expression).set("expression"),
+        ])
+        .variables([node_var("expression")])
+        .build();
+
+    let clauses = parser
+        .grammar
+        .new_enum("clause")
+        .options([clause_action, clause_restriction, clause_select])
         .build();
 
     let query = parser
@@ -1049,7 +1055,7 @@ pub fn gen_parser<'src>() -> Parser<'static> {
         .rules([
             is(token("(")).commit(),
             loop_().then([
-                maybe(clause).set("clauses"),
+                maybe(clauses).set("clauses"),
                 is_one_of([
                     option(token(",")).then([maybe(token(",")).fail(&MULTIPLE_TRAILING_COMMAS)]),
                     option(token(")")).return_node(),

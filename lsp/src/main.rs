@@ -222,53 +222,68 @@ impl IndexedWalk for ir::Span<Object> {
                     after.inner.index(line_index, spans);
                 }
                 for clause in query {
-                    spans.push(clause.ident.span(Types::Ident, line_index));
-                    for (component, mutability, alias) in &clause.include {
-                        for ident in &component.inner.path {
-                            spans.push(ident.span(Types::Type, line_index));
+                    match &clause.inner {
+                        ir::Clauses::Select(select) => {
+                            spans.push(select.ident.span(Types::Ident, line_index));
+                            for (component, mutability, alias) in &select.include {
+                                for ident in &component.inner.path {
+                                    spans.push(ident.span(Types::Type, line_index));
+                                }
+                                if let Some(mutability) = &mutability.0 {
+                                    spans.push(mutability.span_word(
+                                        Types::Keyword,
+                                        line_index,
+                                        "mut",
+                                    ));
+                                }
+                                if let Alias(Some(alias)) = alias {
+                                    spans.push(alias.span_word(Types::Keyword, line_index, "as"));
+                                    spans.push(alias.inner.span(Types::Ident, line_index))
+                                }
+                            }
+                            for (component, mutability, alias) in &select.optional {
+                                for ident in &component.inner.path {
+                                    spans.push(ident.span(Types::Type, line_index));
+                                }
+                                if let Some(mutability) = &mutability.0 {
+                                    spans.push(mutability.span_word(
+                                        Types::Keyword,
+                                        line_index,
+                                        "mut",
+                                    ));
+                                }
+                                if let Alias(Some(alias)) = alias {
+                                    spans.push(alias.span_word(Types::Keyword, line_index, "as"));
+                                    spans.push(alias.inner.span(Types::Ident, line_index))
+                                }
+                            }
+                            for (component, alias) in &select.exclude {
+                                for ident in &component.inner.path {
+                                    spans.push(ident.span(Types::Type, line_index));
+                                }
+                                if let Alias(Some(alias)) = alias {
+                                    spans.push(alias.span_word(Types::Keyword, line_index, "as"));
+                                    spans.push(alias.inner.span(Types::Ident, line_index))
+                                }
+                            }
                         }
-                        if let Some(mutability) = &mutability.0 {
-                            spans.push(mutability.span_word(Types::Keyword, line_index, "mut"));
+                        ir::Clauses::Action((action, keyword)) => {
+                            spans.push(action.ident.span(Types::Ident, line_index));
+                            spans.push(keyword.0.span_word(Types::Keyword, line_index, "on"));
+                            for (event_component, alias) in &action.event {
+                                if let Alias(Some(alias)) = alias {
+                                    spans.push(alias.span_word(Types::Keyword, line_index, "as"));
+                                    spans.push(alias.inner.span(Types::Type, line_index))
+                                }
+                                for ident in &event_component.path {
+                                    spans.push(ident.span(Types::Type, line_index));
+                                }
+                            }
                         }
-                        if let Alias(Some(alias)) = alias {
-                            spans.push(alias.span_word(Types::Keyword, line_index, "as"));
-                            spans.push(alias.inner.span(Types::Ident, line_index))
+                        ir::Clauses::Restriction(restriction) => {
+                            spans.push(clause.span_word(Types::Keyword, line_index, "where"));
+                            restriction.expression.index(line_index, spans);
                         }
-                    }
-                    for (component, mutability, alias) in &clause.optional {
-                        for ident in &component.inner.path {
-                            spans.push(ident.span(Types::Type, line_index));
-                        }
-                        if let Some(mutability) = &mutability.0 {
-                            spans.push(mutability.span_word(Types::Keyword, line_index, "mut"));
-                        }
-                        if let Alias(Some(alias)) = alias {
-                            spans.push(alias.span_word(Types::Keyword, line_index, "as"));
-                            spans.push(alias.inner.span(Types::Ident, line_index))
-                        }
-                    }
-                    for (component, alias) in &clause.exclude {
-                        for ident in &component.inner.path {
-                            spans.push(ident.span(Types::Type, line_index));
-                        }
-                        if let Alias(Some(alias)) = alias {
-                            spans.push(alias.span_word(Types::Keyword, line_index, "as"));
-                            spans.push(alias.inner.span(Types::Ident, line_index))
-                        }
-                    }
-                    if let Some((action, kw, alias)) = &clause.action {
-                        spans.push(kw.0.span_word(Types::Keyword, line_index, "on"));
-                        for ident in &action.inner.path {
-                            spans.push(ident.span(Types::Type, line_index));
-                        }
-                        if let Alias(Some(alias)) = alias {
-                            spans.push(alias.span_word(Types::Keyword, line_index, "as"));
-                            spans.push(alias.inner.span(Types::Ident, line_index))
-                        }
-                    }
-                    if let Some((restriction, kw)) = &clause.restriction {
-                        spans.push(kw.0.span_word(Types::Keyword, line_index, "where"));
-                        restriction.index(line_index, spans);
                     }
                 }
             }

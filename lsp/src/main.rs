@@ -409,6 +409,7 @@ impl IndexedWalk for ir::Span<Type> {
             }
             ir::TypeLiteral::Array(ty, len) => {
                 ty.index(line_index, spans);
+                let _: &Option<usize> = len;
             }
         }
     }

@@ -1,8 +1,8 @@
 use core::panic;
 use dashmap::DashMap;
 use ir::{
-    Alias, Body, Expression, Function, IdentifierPath, Literal, Module, Object, Parameter, Postfix,
-    Statement, Type, Value,
+    Alias, Body, Expression, Function, IdentifierPath, Literal, LoweringError, Module, Object,
+    Parameter, Postfix, Statement, Type, Value,
 };
 use line_index::{LineCol, LineIndex, TextSize};
 use parser::{
@@ -54,7 +54,7 @@ pub enum Types {
 pub enum IndexErr<'a> {
     Lex(PreprocessorError),
     Parse(ParseError<'a>),
-    Idk,
+    Lowering(LoweringError),
 }
 
 pub fn index_file<'p, 'src>(
@@ -79,8 +79,8 @@ where
     };
 
     let ast = match module_named("", src, module.entry) {
-        Some(ast) => ast,
-        None => return Err(IndexErr::Idk),
+        Ok(ast) => ast,
+        Err(e) => return Err(IndexErr::Lowering(e)),
     };
 
     ast.index(&line_index, &mut spans);
@@ -158,6 +158,7 @@ impl IndexedWalk for ir::Span<Object> {
                 ident,
                 resources,
                 systems,
+                init,
                 docs: _,
             } => {
                 spans.push(self.span_word(Types::Keyword, line_index, "scheduler"));
@@ -170,6 +171,10 @@ impl IndexedWalk for ir::Span<Object> {
                 if let Some(systems) = systems {
                     spans.push(systems.span_word(Types::Keyword, line_index, "systems"));
                     systems.iter().for_each(|r| r.index(line_index, spans));
+                }
+                if let Some(init) = init {
+                    spans.push(init.1.0.span_word(Types::Keyword, line_index, "init"));
+                    init.0.index(line_index, spans);
                 }
             }
             Object::Function(Function {
@@ -402,6 +407,9 @@ impl IndexedWalk for ir::Span<Type> {
                     param.index(line_index, spans);
                 }
             }
+            ir::TypeLiteral::Array(ty, len) => {
+                ty.index(line_index, spans);
+            }
         }
     }
 }
@@ -478,8 +486,13 @@ impl IndexedWalk for ir::Span<Literal> {
                 exprs.iter().for_each(|e| e.index(line_index, spans));
             }
             Literal::Structure(path, args) => {
-                for ident in &path.path {
-                    spans.push(ident.span(Types::Ident, line_index));
+                match path {
+                    Ok(p) => {
+                        for ident in &p.path {
+                            spans.push(ident.span(Types::Ident, line_index));
+                        }
+                    }
+                    Err(kw) => spans.push(kw.0.span_word(Types::Keyword, line_index, "struct")),
                 }
                 for arg in args {
                     spans.push(arg.0.span(Types::Ident, line_index));

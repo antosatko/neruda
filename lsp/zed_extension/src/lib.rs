@@ -9,7 +9,7 @@ impl zed::Extension for NerudaExtension {
 
     fn language_server_command(
         &mut self,
-        config: &zed::LanguageServerId,
+        _: &zed::LanguageServerId,
         worktree: &zed::Worktree,
     ) -> Result<zed::Command> {
         let path = worktree

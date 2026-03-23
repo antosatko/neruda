@@ -38,8 +38,8 @@ impl Backend {
                     let location = err.location;
                     Diagnostic::new_simple(
                         Range::new(
-                            Position::new(location.line as _, location.column as _),
-                            Position::new(location.line as _, location.column as _),
+                            Position::new(1 - location.line as u32, location.column as _),
+                            Position::new(1 - location.line as u32, location.column as _),
                         ),
                         strip_ansi_escapes::strip_str(&buf),
                     )
@@ -50,13 +50,13 @@ impl Backend {
                     let location = err.location;
                     Diagnostic::new_simple(
                         Range::new(
-                            Position::new(location.line as _, location.column as _),
-                            Position::new(location.line as _, location.column as _),
+                            Position::new(1 - location.line as u32, location.column as _),
+                            Position::new(1 - location.line as u32, location.column as _),
                         ),
                         strip_ansi_escapes::strip_str(&buf),
                     )
                 }
-                IndexErr::Idk => {
+                IndexErr::Lowering(_) => {
                     Diagnostic::new_simple(Range::default(), "Internal compiler error".to_string())
                 }
             };

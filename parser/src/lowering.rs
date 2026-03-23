@@ -9,12 +9,16 @@ use smol_str::SmolStr;
 
 use ir::{
     ActionClause, Alias, Associativity, Body, Clauses, Else, ElseIf, ExprItem, Expression,
-    Function, IdentifierPath, Keyword, Literal, Module, Mutability, Object, Operator, Parameter,
-    RestrictionClause, SelectClause, Span, SpanIndex, Statement, Type, TypeLiteral, Value,
-    char_literal, numeric_literal, string_literal,
+    Function, IdentifierPath, Keyword, Literal, LoweringError, Module, Mutability, Object,
+    Operator, Parameter, RestrictionClause, SelectClause, Span, SpanIndex, Statement, Type,
+    TypeLiteral, Value, char_literal, numeric_literal, string_literal,
 };
 
-pub fn module_named(name: impl Into<SmolStr>, src: &str, node: Node) -> Option<Module> {
+pub fn module_named(
+    name: impl Into<SmolStr>,
+    src: &str,
+    node: Node,
+) -> Result<Module, LoweringError> {
     let node = &Nodes::Node(node);
     let mut module = Module {
         name: name.into(),
@@ -31,6 +35,7 @@ pub fn module_named(name: impl Into<SmolStr>, src: &str, node: Node) -> Option<M
 
                 let mut resources = None;
                 let mut systems = None;
+                let mut init = None;
 
                 if let Some(res) = s.try_get_node("resources").as_ref() {
                     let mut resources_vec = Vec::new();
@@ -48,10 +53,16 @@ pub fn module_named(name: impl Into<SmolStr>, src: &str, node: Node) -> Option<M
                     systems = Some(span(systems_vec, sys));
                 }
 
+                if let Some(init_node) = s.try_get_node("initialization").as_ref() {
+                    let body = body(src, init_node.expect_node("body"))?;
+                    init = Some((body, Keyword(span((), init_node))));
+                }
+
                 let obj = Object::Scheduler {
                     ident: ident.clone(),
                     resources,
                     systems,
+                    init,
                     docs,
                 };
 
@@ -142,10 +153,10 @@ pub fn module_named(name: impl Into<SmolStr>, src: &str, node: Node) -> Option<M
         }
     }
 
-    Some(module)
+    Ok(module)
 }
 
-fn clause_variant(src: &str, clause: &Nodes<'_>) -> Option<Span<Clauses>> {
+fn clause_variant(src: &str, clause: &Nodes<'_>) -> Result<Span<Clauses>, LoweringError> {
     match clause.get_name() {
         "select" => {
             let ident = expect_ident(src, clause);
@@ -172,13 +183,13 @@ fn clause_variant(src: &str, clause: &Nodes<'_>) -> Option<Span<Clauses>> {
                         if mutable.is_none() {
                             exclude.push((component_path, alias))
                         } else {
-                            return None;
+                            return Err(LoweringError::MutableExclusion);
                         }
                     }
                     _ => include.push((component_path, Mutability(mutable), alias)),
                 }
             }
-            Some(span(
+            Ok(span(
                 Clauses::Select(SelectClause {
                     ident,
                     docs,
@@ -203,14 +214,14 @@ fn clause_variant(src: &str, clause: &Nodes<'_>) -> Option<Span<Clauses>> {
                 })
                 .collect();
             let keyword = span((), clause);
-            Some(span(
+            Ok(span(
                 Clauses::Action((ActionClause { ident, docs, event }, Keyword(keyword))),
                 clause,
             ))
         }
         "restriction" => {
             let expression = expression(src, clause.expect_node("expression"))?;
-            Some(span(
+            Ok(span(
                 Clauses::Restriction(RestrictionClause { expression }),
                 clause,
             ))
@@ -223,8 +234,8 @@ fn alias(src: &str, node: Option<&Nodes>) -> Alias {
     Alias(node.map(|n| span(expect_ident(src, n), n)))
 }
 
-fn body(src: &str, node: &Nodes) -> Option<Span<Body>> {
-    Some(span(
+fn body(src: &str, node: &Nodes) -> Result<Span<Body>, LoweringError> {
+    Ok(span(
         match node.get_name() {
             "code block" => Body::Block(block(src, node)?),
             "code statement" => Body::Statement(expression(
@@ -237,7 +248,7 @@ fn body(src: &str, node: &Nodes) -> Option<Span<Body>> {
     ))
 }
 
-fn block(src: &str, node: &Nodes) -> Option<Vec<Span<Statement>>> {
+fn block(src: &str, node: &Nodes) -> Result<Vec<Span<Statement>>, LoweringError> {
     let mut statements = Vec::new();
 
     for stmt_node in node.get_list("statements") {
@@ -245,10 +256,10 @@ fn block(src: &str, node: &Nodes) -> Option<Vec<Span<Statement>>> {
             "variable" => {
                 let ident = expect_ident(src, stmt_node.expect_node("identifier"));
                 let ty = stmt_node.try_get_node("type").as_ref().map(|t| ty(src, t));
-                let expression = stmt_node
-                    .try_get_node("expression")
-                    .as_ref()
-                    .map(|e| expression(src, e))?;
+                let expression = match stmt_node.try_get_node("expression").as_ref() {
+                    Some(e) => Some(expression(src, e)?),
+                    None => None,
+                };
 
                 span(
                     Statement::Var {
@@ -343,7 +354,7 @@ fn block(src: &str, node: &Nodes) -> Option<Vec<Span<Statement>>> {
         statements.push(stmt);
     }
 
-    Some(statements)
+    Ok(statements)
 }
 
 #[track_caller]
@@ -353,10 +364,10 @@ fn try_label(src: &str, node: &Nodes) -> Option<Span<SmolStr>> {
         .map(|l| expect_ident(src, l))
 }
 
-fn expression(src: &str, node: &Nodes) -> Option<Span<Expression>> {
+fn expression(src: &str, node: &Nodes) -> Result<Span<Expression>, LoweringError> {
     let items = expression_items(src, node)?;
     let mut pos = 0;
-    Some(parse_expression_prec(&items, &mut pos, 0))
+    Ok(parse_expression_prec(&items, &mut pos, 0))
 }
 
 fn parse_expression_prec(
@@ -409,7 +420,7 @@ fn parse_expression_prec(
     lhs
 }
 
-fn expression_items(src: &str, node: &Nodes) -> Option<Vec<Span<ExprItem>>> {
+fn expression_items(src: &str, node: &Nodes) -> Result<Vec<Span<ExprItem>>, LoweringError> {
     let mut items = Vec::new();
 
     let lvalue_node = node.expect_node("lvalue");
@@ -429,7 +440,7 @@ fn expression_items(src: &str, node: &Nodes) -> Option<Vec<Span<ExprItem>>> {
         }
     }
 
-    Some(items)
+    Ok(items)
 }
 
 fn operator(node: &Nodes) -> Span<Operator> {
@@ -484,11 +495,14 @@ fn ident_path(src: &str, node: &Nodes) -> Span<IdentifierPath> {
     span(IdentifierPath { path }, node)
 }
 
-fn literal(src: &str, node: &Nodes) -> Option<Span<Literal>> {
+fn literal(src: &str, node: &Nodes) -> Result<Span<Literal>, LoweringError> {
     match node {
         Nodes::Node(n) => match n.name {
             "identifier path literal" => {
-                let path = ident_path(src, node.expect_node("identifier"));
+                let path = node
+                    .try_get_node("identifier")
+                    .as_ref()
+                    .map(|i| ident_path(src, i));
                 match node.try_get_node("struct literal").as_ref() {
                     Some(s) => {
                         let mut args = Vec::new();
@@ -497,9 +511,13 @@ fn literal(src: &str, node: &Nodes) -> Option<Span<Literal>> {
                             let expr = expression(src, arg.expect_node("expression"))?;
                             args.push(span((ident, expr), arg));
                         }
-                        return Some(span(Literal::Structure(path, args), s));
+                        let p = match path {
+                            Some(p) => Ok(p),
+                            None => Err(Keyword(span((), node))),
+                        };
+                        return Ok(span(Literal::Structure(p, args), s));
                     }
-                    None => return Some(path.map(Literal::Identifier)),
+                    None => return Ok(path.unwrap().map(Literal::Identifier)),
                 }
             }
 
@@ -509,16 +527,16 @@ fn literal(src: &str, node: &Nodes) -> Option<Span<Literal>> {
                     elements.push(expression(src, e)?)
                 }
 
-                Some(span(Literal::Array(elements), node))
+                Ok(span(Literal::Array(elements), node))
             }
 
-            "tuple" => {
+            "tuple literal" => {
                 let mut elements = Vec::new();
-                for e in n.get_list("elements") {
+                for e in n.get_list("expressions") {
                     elements.push(expression(src, e)?)
                 }
 
-                Some(span(Literal::Tuple(elements), node))
+                Ok(span(Literal::Tuple(elements), node))
             }
 
             other => node.ice(&format!("Unhandled literal node: {}", other)),
@@ -526,17 +544,17 @@ fn literal(src: &str, node: &Nodes) -> Option<Span<Literal>> {
 
         Nodes::Token(tok) => match &tok.kind {
             ruparse::lexer::TokenKinds::Complex(kind) => match kind.as_ref() {
-                "string" => Some(span_from_token(
+                "string" => Ok(span_from_token(
                     Literal::String(string_literal(&tok.stringify(src))),
                     tok,
                 )),
 
-                "char" => Some(span_from_token(
+                "char" => Ok(span_from_token(
                     Literal::Char(char_literal(&tok.stringify(src))?),
                     tok,
                 )),
 
-                "numeric" | "float" => Some(span_from_token(
+                "numeric" | "float" => Ok(span_from_token(
                     Literal::Number(numeric_literal(&tok.stringify(src))?),
                     tok,
                 )),
@@ -549,10 +567,10 @@ fn literal(src: &str, node: &Nodes) -> Option<Span<Literal>> {
     }
 }
 
-fn value(src: &str, node: &Nodes) -> Option<Span<Value>> {
+fn value(src: &str, node: &Nodes) -> Result<Span<Value>, LoweringError> {
     let literal = literal(src, node.expect_node("literal"))?;
 
-    Some(span(
+    Ok(span(
         Value {
             literal,
             postfix: Vec::new(),
@@ -576,6 +594,16 @@ fn ty(src: &str, node: &Nodes) -> Span<Type> {
             },
             node,
         ),
+        "array type literal" => {
+            let type_ = ty(src, literal.expect_node("type"));
+            assert!(literal.try_get_node("length").is_none(), "working on it :)");
+            span(
+                Type {
+                    literal: span(TypeLiteral::Array(Box::new(type_), None), literal),
+                },
+                node,
+            )
+        }
         name => panic!("{name}"),
     }
 }

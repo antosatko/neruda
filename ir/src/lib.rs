@@ -67,6 +67,7 @@ pub enum Object {
         ident: Span<SmolStr>,
         resources: Option<Span<Vec<Span<Value>>>>,
         systems: Option<Span<Vec<Span<IdentifierPath>>>>,
+        init: Option<(Span<Body>, Keyword)>,
         docs: Vec<Span<SmolStr>>,
     },
 
@@ -281,6 +282,7 @@ pub struct Type {
 pub enum TypeLiteral {
     Path(IdentifierPath),
     Struct(Vec<Span<Parameter>>),
+    Array(Box<Span<Type>>, Option<usize>),
 }
 
 /* ===================== IDENTIFIERS ===================== */
@@ -296,7 +298,7 @@ pub enum Literal {
     Identifier(IdentifierPath),
 
     Structure(
-        Span<IdentifierPath>,
+        Result<Span<IdentifierPath>, Keyword>,
         Vec<Span<(Span<SmolStr>, Span<Expression>)>>,
     ),
 
@@ -327,7 +329,19 @@ pub enum NumberValue {
 
 /* ====================== LOWERING =====================*/
 
-pub fn numeric_literal(s: &str) -> Option<Number> {
+#[derive(Debug, Clone)]
+pub enum LoweringError {
+    ParseIntError(std::num::ParseIntError),
+    ParseFloatError(std::num::ParseFloatError),
+    UnknownNumericSuffix(SmolStr),
+    InvalidUtf8Char(u128),
+    UnknownEscapeChar(char),
+    UnclosedEscapeChar,
+    EmptyCharLiteral,
+    MutableExclusion,
+}
+
+pub fn numeric_literal(s: &str) -> Result<Number, LoweringError> {
     let (s, radix) = if s.starts_with("0x") {
         (&s[2..], 16)
     } else if s.starts_with("0b") {
@@ -351,14 +365,14 @@ pub fn numeric_literal(s: &str) -> Option<Number> {
     };
 
     if is_float {
-        let value: f64 = num_str.parse().ok()?;
+        let value = num_str.parse().map_err(LoweringError::ParseFloatError)?;
         let size = suffix.and_then(|s| s.parse().ok());
-        Some(Number {
+        Ok(Number {
             value: NumberValue::Float(value),
             size,
         })
     } else {
-        let value = i128::from_str_radix(num_str, radix).ok()?;
+        let value = i128::from_str_radix(num_str, radix).map_err(LoweringError::ParseIntError)?;
 
         let (number_value, size) = match suffix.map(|s| s.to_lowercase()) {
             Some(ref s) if s.starts_with('u') => {
@@ -371,10 +385,10 @@ pub fn numeric_literal(s: &str) -> Option<Number> {
             }
             Some(ref s) if s.starts_with('c') => (NumberValue::Int(value), None),
             None => (NumberValue::Number(value as u128), None),
-            Some(_) => return None,
+            Some(suffix) => return Err(LoweringError::UnknownNumericSuffix(suffix.into())),
         };
 
-        Some(Number {
+        Ok(Number {
             value: number_value,
             size,
         })
@@ -386,28 +400,33 @@ pub fn float_literal(s: &str) -> Option<NumberValue> {
     Some(NumberValue::Float(s.parse().ok()?))
 }
 
-pub fn char_literal(s: &str) -> Option<char> {
+pub fn char_literal(s: &str) -> Result<char, LoweringError> {
     if s.starts_with(r"'\u{") {
         let unicode = s.trim_start_matches(r"'\u{").trim_end_matches("}'");
         match numeric_literal(unicode)?.value {
-            NumberValue::Uint(n) => char::from_u32(n as _),
-            NumberValue::Number(n) => char::from_u32(n as _),
+            NumberValue::Uint(n) => char::from_u32(n as _).ok_or(LoweringError::InvalidUtf8Char(n)),
+            NumberValue::Number(n) => {
+                char::from_u32(n as _).ok_or(LoweringError::InvalidUtf8Char(n))
+            }
             num => panic!("invalid digit: {num:?}"),
         }
     } else if s.starts_with(r"\'") {
-        Some(match &s[2..3] {
-            "0" => '\0',
-            "a" => '\x07',
-            "b" => '\x08',
-            "f" => '\x0C',
-            "n" => '\n',
-            "r" => '\r',
-            "t" => '\t',
-            "v" => '\x0B',
-            other => other.chars().next()?,
-        })
+        match &s[2..3] {
+            "0" => Ok('\0'),
+            "a" => Ok('\x07'),
+            "b" => Ok('\x08'),
+            "f" => Ok('\x0C'),
+            "n" => Ok('\n'),
+            "r" => Ok('\r'),
+            "t" => Ok('\t'),
+            "v" => Ok('\x0B'),
+            other => other
+                .chars()
+                .next()
+                .ok_or(LoweringError::UnclosedEscapeChar),
+        }
     } else {
-        s.chars().nth(1)
+        s.chars().nth(1).ok_or(LoweringError::EmptyCharLiteral)
     }
 }
 pub fn string_literal(s: &str) -> SmolStr {
@@ -485,6 +504,13 @@ impl std::fmt::Display for Type {
                     write!(f, "{}: {} ", ident.inner, ty.inner)?;
                 }
                 write!(f, "{}", "}")?;
+            }
+            TypeLiteral::Array(ty, len) => {
+                write!(f, "[{}", ty.inner)?;
+                if let Some(len) = len {
+                    write!(f, ", {len}")?;
+                }
+                write!(f, "]")?;
             }
         }
         Ok(())

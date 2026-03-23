@@ -13,6 +13,7 @@ const KEYWORDS: &[&'static str] = &[
     "resources",
     "scheduler",
     "system",
+    "init",
     "struct",
     "component",
     "var",
@@ -564,7 +565,11 @@ pub fn gen_parser<'src>() -> Parser<'static> {
         .grammar
         .new_node("identifier path literal")
         .rules([
-            is(ident_path).commit().set(IDENTIFIER),
+            is_one_of([
+                option(ident_path).set(IDENTIFIER),
+                option(keyword("struct")),
+            ])
+            .commit(),
             maybe(struct_literal).set("struct literal"),
         ])
         .variables([IDENTIFIER_VAR, node_var("struct literal")])
@@ -704,10 +709,22 @@ pub fn gen_parser<'src>() -> Parser<'static> {
         .variables([list_var("parameters")])
         .build();
 
+    let array_type_literal = parser
+        .grammar
+        .new_node("array type literal")
+        .rules([
+            is(token("[")).commit(),
+            is(node("type")).set("type"),
+            maybe(token(";")).then([is(complex("numeric")).set("length")]),
+            is(token("]")),
+        ])
+        .variables([node_var("type"), node_var("length")])
+        .build();
+
     let type_literal = parser
         .grammar
         .new_enum("type literal")
-        .options([ident_path, struct_type_literal])
+        .options([ident_path, struct_type_literal, array_type_literal])
         .build();
 
     let type_ = parser
@@ -954,6 +971,13 @@ pub fn gen_parser<'src>() -> Parser<'static> {
         .variables([list_var("resources")])
         .build();
 
+    let scheduler_init = parser
+        .grammar
+        .new_node("scheduler initialization")
+        .rules([is(keyword("init")).commit(), is(code_body).set("body")])
+        .variables([node_var("body")])
+        .build();
+
     let scheduler = parser
         .grammar
         .new_node("scheduler")
@@ -964,10 +988,16 @@ pub fn gen_parser<'src>() -> Parser<'static> {
             is(token("{")),
             maybe(resources).set("resources"),
             maybe(systems).set("systems"),
+            maybe(scheduler_init).set("initialization"),
             is(token("}"))
                 .hint("Scheduler must at most contain resources and systems in this order"),
         ])
-        .variables([IDENTIFIER_VAR, node_var("resources"), node_var("systems")])
+        .variables([
+            IDENTIFIER_VAR,
+            node_var("resources"),
+            node_var("systems"),
+            node_var("initialization"),
+        ])
         .build();
 
     let clause_select_component = parser

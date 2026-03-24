@@ -480,7 +480,9 @@ pub fn gen_parser<'src>() -> Parser<'static> {
         .grammar
         .new_node("identifier")
         .rules([
-            isnt(keywords).hint("Keywords are reserved and can not be used for identifiers"),
+            isnt(keywords)
+                .hint("Keywords are reserved and can not be used for identifiers")
+                .important(),
             is(text()).set(IDENTIFIER),
         ])
         .variables([node_var("identifier")])
@@ -782,10 +784,11 @@ pub fn gen_parser<'src>() -> Parser<'static> {
         .rules([
             is(keyword("var")).commit(),
             is(ident).set(IDENTIFIER),
-            maybe(token(":")).then([is(type_).set("type")]),
+            maybe(token(":")).then([is(type_).set("type").important()]),
             maybe(token("=")).then([is(expression)
                 .set("expression")
-                .hint("Variable must be initialized to a valid expression")]),
+                .hint("Variable must be initialized to a valid expression")
+                .important()]),
             is(end_stmt),
         ])
         .variables([IDENTIFIER_VAR, node_var("type"), node_var("expression")])
@@ -931,7 +934,7 @@ pub fn gen_parser<'src>() -> Parser<'static> {
             is(keyword("function")).commit().start(),
             is(ident).set(IDENTIFIER),
             is(parameter_list).set("parameters"),
-            maybe(token(":")).then([is(type_).set("return type")]),
+            maybe(token(":")).then([is(type_).set("return type").important()]),
             is(code_body)
                 .set("code body")
                 .hint("A function must contain a code body"),
@@ -1139,7 +1142,7 @@ pub fn gen_parser<'src>() -> Parser<'static> {
         .rules([
             is(keyword("component")).commit().start(),
             is(ident).set(IDENTIFIER),
-            maybe(token("=")).then([is(type_).set("type")]),
+            maybe(token("=")).then([is(type_).set("type").important()]),
             is(end_stmt),
         ])
         .variables([IDENTIFIER_VAR, node_var("type")])
@@ -1152,7 +1155,7 @@ pub fn gen_parser<'src>() -> Parser<'static> {
         .rules([
             is(keyword("type")).commit().start(),
             is(ident).set(IDENTIFIER),
-            maybe(token("=")).then([is(type_).set("type")]),
+            maybe(token("=")).then([is(type_).set("type").important()]),
             is(end_stmt),
         ])
         .variables([IDENTIFIER_VAR, node_var("type")])

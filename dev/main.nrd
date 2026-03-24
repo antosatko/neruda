@@ -10,7 +10,7 @@ scheduler main {
         on_stop_all
     }
 
-    init => print("starting")
+    init => print("hello");
 }
 
 type StopAll

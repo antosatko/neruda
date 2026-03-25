@@ -1,7 +1,7 @@
 use ruparse::Parser;
 use ruparse::api::ext::*;
 use ruparse::grammar::validator::Validator;
-use ruparse::grammar::{ErrorDefinition, MatchToken, VarKind, VariableKind};
+use ruparse::grammar::{MatchToken, VarKind, VariableKind};
 pub use ruparse::lexer::Token;
 use ruparse::lexer::{ControlTokenKind, PreprocessorError, TokenKinds};
 
@@ -9,8 +9,6 @@ const IDENTIFIER: VarKind<'static> = local("identifier");
 const IDENTIFIER_VAR: (&'static str, VariableKind) = ("identifier", VariableKind::Node);
 
 const KEYWORDS: &[&'static str] = &[
-    "systems",
-    "resources",
     "scheduler",
     "system",
     "init",
@@ -27,69 +25,20 @@ const KEYWORDS: &[&'static str] = &[
     "continue",
     "as",
     "mut",
-    "on",
-    "where",
+    "type",
     "before",
     "after",
-    "type",
 ];
 
-static _ERR: ErrorDefinition = ErrorDefinition {
-    header: "------",
-    code: "200",
-    msg: "-------------",
-};
+const KEYWORDS_NON_BLOCKING: &[&'static str] = &["where", "systems", "resources", "on"];
 
-static UNCLOSED_STRING_LIT: ErrorDefinition = ErrorDefinition {
-    header: "Unclosed string",
-    code: "200",
-    msg: "Expected string literal to end before the end of file",
-};
-
-static EMPTY_CHAR_LIT: ErrorDefinition = ErrorDefinition {
-    header: "Empty character",
-    code: "201",
-    msg: "Expected character literal to not be empty",
-};
-
-static MULTIPLE_TRAILING_COMMAS: ErrorDefinition = ErrorDefinition {
-    header: "Multiple trailing commas",
-    code: "202",
-    msg: "Only one trailing comma allowed",
-};
-
-static EMPTY_INDEXING: ErrorDefinition = ErrorDefinition {
-    header: "Empty indexing",
-    code: "203",
-    msg: "Expected an expression to index with",
-};
-
-static CHARACTER_OVERFLOW: ErrorDefinition = ErrorDefinition {
-    header: "Character overflow",
-    code: "204",
-    msg: "Expected character literal to contain a single character",
-};
-
-static UNCLOSED_CHAR_LIT: ErrorDefinition = ErrorDefinition {
-    header: "Unclosed character",
-    code: "205",
-    msg: "Unclosed character literal",
-};
-
-static UNKNOWN_CHARACTER: ErrorDefinition = ErrorDefinition {
-    header: "Unknown character",
-    code: "206",
-    msg: "Unknown character literal",
-};
-
-static EXPECTED_UNICODE: ErrorDefinition = ErrorDefinition {
-    header: "Expected Unicode",
-    code: "207",
-    msg: "Expected a unicode number in unicode escape sequence. Example: \u{0b0101}",
-};
+mod grammar_errs;
 
 fn keyword(kw: &'static str) -> MatchToken<'static> {
-    assert!(KEYWORDS.contains(&kw), "{kw} must be a keyword");
+    assert!(
+        KEYWORDS.contains(&kw) || KEYWORDS_NON_BLOCKING.contains(&kw),
+        "{kw} must be a keyword"
+    );
     word(kw)
 }
 
@@ -273,13 +222,13 @@ pub fn gen_parser<'src>() -> Parser<'static> {
                                         }
                                         (Some(TokenKinds::Token(op)), Some(_), _) if *op == "{" => {
                                             Err(PreprocessorError {
-                                                err: EXPECTED_UNICODE,
+                                                err: grammar_errs::EXPECTED_UNICODE,
                                                 location: tokens[i + 4].location,
                                                 len: tokens[i + 4].len,
                                             })?
                                         }
                                         _ => Err(PreprocessorError {
-                                            err: EXPECTED_UNICODE,
+                                            err: grammar_errs::EXPECTED_UNICODE,
                                             location: tokens[i + 2].location,
                                             len: tokens[i + 2].len,
                                         })?,
@@ -287,7 +236,7 @@ pub fn gen_parser<'src>() -> Parser<'static> {
                                 } else {
                                     // unknown
                                     Err(PreprocessorError {
-                                        err: UNKNOWN_CHARACTER,
+                                        err: grammar_errs::UNKNOWN_CHARACTER,
                                         location: tokens[i + 1].location,
                                         len: t.len + 1,
                                     })?
@@ -300,14 +249,14 @@ pub fn gen_parser<'src>() -> Parser<'static> {
                                         continue;
                                     }
                                     _ => Err(PreprocessorError {
-                                        err: UNCLOSED_CHAR_LIT,
+                                        err: grammar_errs::UNCLOSED_CHAR_LIT,
                                         location: tok.location,
                                         len: t.len + 2,
                                     })?,
                                 }
                             }
                             _ => Err(PreprocessorError {
-                                err: UNCLOSED_CHAR_LIT,
+                                err: grammar_errs::UNCLOSED_CHAR_LIT,
                                 location: tok.location,
                                 len: tok.len + tokens[i + 1].len,
                             })?,
@@ -317,7 +266,7 @@ pub fn gen_parser<'src>() -> Parser<'static> {
                         let chars = tokens[i + 1].stringify(src).chars();
                         if chars.count() > 1 {
                             Err(PreprocessorError {
-                                err: CHARACTER_OVERFLOW,
+                                err: grammar_errs::CHARACTER_OVERFLOW,
                                 location: tok.location,
                                 len: tok.len + tokens[i + 1].len,
                             })?
@@ -335,24 +284,24 @@ pub fn gen_parser<'src>() -> Parser<'static> {
                                 continue;
                             }
                             _ => Err(PreprocessorError {
-                                err: UNCLOSED_CHAR_LIT,
+                                err: grammar_errs::UNCLOSED_CHAR_LIT,
                                 location: tok.location,
                                 len: tok.len + tokens[i + 1].len,
                             })?,
                         }
                     }
                     Some(TokenKinds::Token(t)) if *t == "'" => Err(PreprocessorError {
-                        err: EMPTY_CHAR_LIT,
+                        err: grammar_errs::EMPTY_CHAR_LIT,
                         location: tok.location,
                         len: 1,
                     })?,
                     Some(_) => Err(PreprocessorError {
-                        err: UNKNOWN_CHARACTER,
+                        err: grammar_errs::UNKNOWN_CHARACTER,
                         location: tokens[i + 1].location,
                         len: tokens[i + 1].len,
                     })?,
                     None => Err(PreprocessorError {
-                        err: UNCLOSED_CHAR_LIT,
+                        err: grammar_errs::UNCLOSED_CHAR_LIT,
                         location: tok.location,
                         len: 1,
                     })?,
@@ -377,7 +326,7 @@ pub fn gen_parser<'src>() -> Parser<'static> {
                         }
                     }
                     Err(PreprocessorError {
-                        err: UNCLOSED_STRING_LIT,
+                        err: grammar_errs::UNCLOSED_STRING_LIT,
                         location: tok.location,
                         len: tok.len,
                     })?
@@ -411,7 +360,7 @@ pub fn gen_parser<'src>() -> Parser<'static> {
                             }
                         }
                         Err(PreprocessorError {
-                            err: UNCLOSED_STRING_LIT,
+                            err: grammar_errs::UNCLOSED_STRING_LIT,
                             location: tok.location,
                             len: tok.len,
                         })?
@@ -515,7 +464,8 @@ pub fn gen_parser<'src>() -> Parser<'static> {
             loop_().then([
                 maybe(node("expression")).set("elements"),
                 is_one_of([
-                    option(token(",")).then([maybe(token(",")).fail(&MULTIPLE_TRAILING_COMMAS)]),
+                    option(token(","))
+                        .then([maybe(token(",")).fail(&grammar_errs::MULTIPLE_TRAILING_COMMAS)]),
                     option(token("]")).return_node(),
                 ]),
             ]),
@@ -531,7 +481,8 @@ pub fn gen_parser<'src>() -> Parser<'static> {
             loop_().then([
                 maybe(node("expression")).set("expressions"),
                 is_one_of([
-                    option(token(",")).then([maybe(token(",")).fail(&MULTIPLE_TRAILING_COMMAS)]),
+                    option(token(","))
+                        .then([maybe(token(",")).fail(&grammar_errs::MULTIPLE_TRAILING_COMMAS)]),
                     option(token(")")).return_node(),
                 ]),
             ]),
@@ -606,7 +557,8 @@ pub fn gen_parser<'src>() -> Parser<'static> {
             loop_().then([
                 maybe(node("expression")).set("expressions"),
                 is_one_of([
-                    option(token(",")).then([maybe(token(",")).fail(&MULTIPLE_TRAILING_COMMAS)]),
+                    option(token(","))
+                        .then([maybe(token(",")).fail(&grammar_errs::MULTIPLE_TRAILING_COMMAS)]),
                     option(token(")")).return_node(),
                 ]),
             ]),
@@ -620,7 +572,7 @@ pub fn gen_parser<'src>() -> Parser<'static> {
         .rules([
             is(token("[")).commit(),
             is_one_of([
-                option(token("]")).fail(&EMPTY_INDEXING),
+                option(token("]")).fail(&grammar_errs::EMPTY_INDEXING),
                 option(node("expression")).set("index"),
             ])
             .hint("Must index with a valid expression"),
@@ -661,10 +613,12 @@ pub fn gen_parser<'src>() -> Parser<'static> {
     let end_stmt = parser
         .grammar
         .new_node("end statement")
-        .rules([
-            is_one_of([option(delimiters_peek), option(delimiters_consume)])
-                .hint("Expected to end statement on a delimiter"),
+        .rules([is_one_of([
+            option(delimiters_peek),
+            option(delimiters_consume).set("consumed"),
         ])
+        .hint("Expected to end statement on a delimiter")])
+        .variables([node_var("consumed")])
         .build();
 
     let value = parser
@@ -689,9 +643,11 @@ pub fn gen_parser<'src>() -> Parser<'static> {
         .new_node("expression")
         .rules([
             is(value).set("lvalue").commit(),
-            while_(operators).set("rest").then([is(value)
-                .set("rest")
-                .hint("Binary operator must contain right value")]),
+            while_(operators).set("rest").then([is_one_of([
+                option(value).set("rest"),
+                // If 'value' fails to match after an operator, trigger the custom error
+                option(any()).fail(&grammar_errs::MISSING_RHS_EXPRESSION),
+            ])]),
         ])
         .variables([node_var("lvalue"), list_var("rest")])
         .build();
@@ -702,7 +658,10 @@ pub fn gen_parser<'src>() -> Parser<'static> {
         .has(docstr, "docs")
         .rules([
             is(keyword("struct")).commit(),
-            is(token("{")),
+            is_one_of([
+                option(token("{")),
+                option(any()).fail(&grammar_errs::MISSING_STRUCT_BODY),
+            ]),
             loop_().then([is_one_of([
                 option(node("parameter")).set("parameters"),
                 option(token("}")).return_node(),
@@ -717,7 +676,10 @@ pub fn gen_parser<'src>() -> Parser<'static> {
         .rules([
             is(token("[")).commit(),
             is(node("type")).set("type"),
-            maybe(token(";")).then([is(complex("numeric")).set("length")]),
+            maybe(token(";")).then([is_one_of([
+                option(token("]")).fail(&grammar_errs::MISSING_ARRAY_LENGTH),
+                option(complex("numeric")).set("length"),
+            ])]),
             is(token("]")),
         ])
         .variables([node_var("type"), node_var("length")])
@@ -750,7 +712,11 @@ pub fn gen_parser<'src>() -> Parser<'static> {
         .rules([
             is(ident).set("identifier").commit(),
             is(token(":")),
-            is(type_).set("type"),
+            is_one_of([
+                option(token(",")).fail(&grammar_errs::EMPTY_TYPE_DECLARATION),
+                option(token(")")).fail(&grammar_errs::EMPTY_TYPE_DECLARATION),
+                option(type_).set("type"),
+            ]),
         ])
         .variables([node_var("identifier"), node_var("type")])
         .build();
@@ -763,7 +729,8 @@ pub fn gen_parser<'src>() -> Parser<'static> {
             loop_().then([
                 maybe(parameter).set("parameters"),
                 is_one_of([
-                    option(token(",")).then([maybe(token(",")).fail(&MULTIPLE_TRAILING_COMMAS)]),
+                    option(token(","))
+                        .then([maybe(token(",")).fail(&grammar_errs::MULTIPLE_TRAILING_COMMAS)]),
                     option(token(")")).return_node(),
                 ]),
             ]),
@@ -785,10 +752,13 @@ pub fn gen_parser<'src>() -> Parser<'static> {
             is(keyword("var")).commit(),
             is(ident).set(IDENTIFIER),
             maybe(token(":")).then([is(type_).set("type").important()]),
-            maybe(token("=")).then([is(expression)
-                .set("expression")
-                .hint("Variable must be initialized to a valid expression")
-                .important()]),
+            maybe_one_of([
+                option(token("==")).fail(&grammar_errs::UNEXPECTED_ASSIGNMENT),
+                option(token("=")).then([is(expression)
+                    .set("expression")
+                    .hint("Variable must be initialized to a valid expression")
+                    .important()]),
+            ]),
             is(end_stmt),
         ])
         .variables([IDENTIFIER_VAR, node_var("type"), node_var("expression")])
@@ -935,9 +905,10 @@ pub fn gen_parser<'src>() -> Parser<'static> {
             is(ident).set(IDENTIFIER),
             is(parameter_list).set("parameters"),
             maybe(token(":")).then([is(type_).set("return type").important()]),
-            is(code_body)
-                .set("code body")
-                .hint("A function must contain a code body"),
+            is_one_of([
+                option(code_body).set("code body"),
+                option(any()).fail(&grammar_errs::MISSING_FUNCTION_BODY),
+            ]),
         ])
         .variables([
             IDENTIFIER_VAR,
@@ -1090,7 +1061,8 @@ pub fn gen_parser<'src>() -> Parser<'static> {
             loop_().then([
                 maybe(clauses).set("clauses"),
                 is_one_of([
-                    option(token(",")).then([maybe(token(",")).fail(&MULTIPLE_TRAILING_COMMAS)]),
+                    option(token(","))
+                        .then([maybe(token(",")).fail(&grammar_errs::MULTIPLE_TRAILING_COMMAS)]),
                     option(token(")")).return_node(),
                 ]),
             ]),

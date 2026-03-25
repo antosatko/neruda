@@ -1,4 +1,5 @@
 use dashmap::DashMap;
+use line_index::{LineIndex, TextSize};
 use ruparse::Parser;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
@@ -33,25 +34,31 @@ impl Backend {
         if let Err(e) = index_file(&self.parser, src) {
             let diag = match e {
                 IndexErr::Lex(err) => {
-                    let mut buf = String::new();
-                    let _ = err.write(&mut buf, src, Some("main.nrd"));
+                    let buf = err.err.header;
                     let location = err.location;
+                    let line_index = LineIndex::new(&src);
+                    let start = line_index.line_col(TextSize::new(location.index as _));
+                    let end =
+                        line_index.line_col(TextSize::new((location.index + location.len) as _));
                     Diagnostic::new_simple(
                         Range::new(
-                            Position::new(1 - location.line as u32, location.column as _),
-                            Position::new(1 - location.line as u32, location.column as _),
+                            Position::new(start.line, start.col),
+                            Position::new(end.line, end.col),
                         ),
                         strip_ansi_escapes::strip_str(&buf),
                     )
                 }
                 IndexErr::Parse(err) => {
-                    let mut buf = String::new();
-                    let _ = err.write(&mut buf, src, Some("main.nrd"));
+                    let buf = err.hint.unwrap_or(err.kind.id_and_header().1);
                     let location = err.location;
+                    let line_index = LineIndex::new(&src);
+                    let start = line_index.line_col(TextSize::new(location.index as _));
+                    let end =
+                        line_index.line_col(TextSize::new((location.index + location.len) as _));
                     Diagnostic::new_simple(
                         Range::new(
-                            Position::new(1 - location.line as u32, location.column as _),
-                            Position::new(1 - location.line as u32, location.column as _),
+                            Position::new(start.line, start.col),
+                            Position::new(end.line, end.col),
                         ),
                         strip_ansi_escapes::strip_str(&buf),
                     )

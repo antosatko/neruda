@@ -675,7 +675,7 @@ dependencies = [
 [[package]]
 name = "ruparse"
 version = "0.1.0"
-source = "git+https://github.com/antosatko/ruparse#083dd5b0a13811d5fd5606440283ef56bee7fed8"
+source = "git+https://github.com/antosatko/ruparse#6f46f34fd84774c7f09489ac7c04d5e444072f87"
 dependencies = [
  "annotate-snippets",
  "cfg-if",

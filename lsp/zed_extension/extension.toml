@@ -3,7 +3,7 @@ name = "Neruda"
 version = "0.1.0"
 schema_version = 1
 authors = ["antosatko"]
-description = "LSP highlighting for ECS"
+description = "Neruda language extension"
 repository = "https://github.com/antosatko/neruda/lsp/zed_extension"
 
 languages = ["languages/neruda"]
@@ -14,3 +14,7 @@ languages = ["neruda"]
 
 [lib]
 kind = "Rust"
+
+[grammars.neruda]
+repository = "https://github.com/antosatko/tree-sitter-neruda"
+rev = "main"

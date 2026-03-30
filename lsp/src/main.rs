@@ -1,13 +1,13 @@
 use core::panic;
 use dashmap::DashMap;
 use ir::{
-    Alias, Body, Expression, Function, IdentifierPath, Literal, LoweringError, Module, Object,
-    Parameter, Postfix, Statement, Type, Value,
+    Alias, Body, Diagnostics, Expression, Function, IdentifierPath, Literal, LoweringError, Module,
+    Object, Parameter, Postfix, Statement, Type, Value,
 };
 use line_index::{LineCol, LineIndex, TextSize};
 use parser::{
     grammar::{Token, gen_parser},
-    lowering::module_named,
+    lowering::{ModuleOk, module_named},
 };
 use ruparse::{Parser, lexer::PreprocessorError, parser::ParseError};
 use tower_lsp::{LspService, Server};
@@ -54,13 +54,13 @@ pub enum Types {
 pub enum IndexErr<'a> {
     Lex(PreprocessorError),
     Parse(ParseError<'a>),
-    Lowering(LoweringError),
+    Lowering(ir::Span<LoweringError>),
 }
 
 pub fn index_file<'p, 'src>(
     parser: &'p Parser<'p>,
     src: &'src str,
-) -> Result<Vec<Span>, IndexErr<'p>>
+) -> Result<(Module, Vec<Span>, Diagnostics), IndexErr<'p>>
 where
     'p: 'src,
     'src: 'p,
@@ -73,19 +73,22 @@ where
         Err(e) => return Err(IndexErr::Lex(e)),
     };
     index_tokens(&tokens, &mut spans);
-    let module = match parser.parse(&tokens, src) {
+    let ast = match parser.parse(&tokens, src) {
         Ok(m) => m,
         Err(e) => return Err(IndexErr::Parse(e)),
     };
 
-    let ast = match module_named("", src, module.entry) {
+    let ModuleOk {
+        module,
+        diagnostics,
+    } = match module_named("", src, ast.entry) {
         Ok(ast) => ast,
         Err(e) => return Err(IndexErr::Lowering(e)),
     };
 
-    ast.index(&line_index, &mut spans);
+    module.index(&line_index, &mut spans);
 
-    Ok(spans)
+    Ok((module, spans, diagnostics))
 }
 
 impl IntoSpan for Token<'_> {

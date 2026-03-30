@@ -1,11 +1,54 @@
 use core::panic;
 use std::{
     collections::HashMap,
-    ops::{Deref, DerefMut},
+    fmt::Display,
+    ops::{Add, Deref, DerefMut},
 };
 
 use arena::{Arena, Key};
 use smol_str::SmolStr;
+
+mod const_expr;
+
+#[derive(Debug, Clone)]
+pub enum LoweringWarning {
+    IdentifierTooLong(String),
+    DivisionByZero,
+}
+
+#[derive(Debug, Clone)]
+pub enum LoweringDiagnostic {
+    ReducedConstExpr(Value),
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct Diagnostics {
+    pub warns: Vec<Span<LoweringWarning>>,
+    pub diagnostics: Vec<Span<LoweringDiagnostic>>,
+}
+
+impl Display for LoweringWarning {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LoweringWarning::IdentifierTooLong(ident) => {
+                write!(f, "Identifier '{:10}' is too long", ident)
+            }
+            LoweringWarning::DivisionByZero => {
+                write!(f, "Division by zero")
+            }
+        }
+    }
+}
+
+impl Display for LoweringDiagnostic {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LoweringDiagnostic::ReducedConstExpr(expr) => {
+                write!(f, "Expression reduced to {}", expr)
+            }
+        }
+    }
+}
 
 /* ===================== SOURCE ===================== */
 
@@ -44,6 +87,17 @@ impl<T> Deref for Span<T> {
 impl<T> DerefMut for Span<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.inner
+    }
+}
+
+impl Add for SpanIndex {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        Self {
+            index: self.index,
+            len: rhs.index - self.index + self.len,
+        }
     }
 }
 
@@ -522,6 +576,26 @@ impl Body {
         match self {
             Body::Block(spans) => spans.len(),
             Body::Statement(_) => 1,
+        }
+    }
+}
+
+impl Display for Value {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.literal.inner {
+            Literal::Number(n) => write!(f, "{n}"),
+            _ => write!(f, ":::not implemented:::"),
+        }
+    }
+}
+
+impl Display for Number {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.value {
+            NumberValue::Float(n) => write!(f, "{n}"),
+            NumberValue::Number(n) => write!(f, "{n}"),
+            NumberValue::Int(n) => write!(f, "{n}"),
+            NumberValue::Uint(n) => write!(f, "{n}"),
         }
     }
 }

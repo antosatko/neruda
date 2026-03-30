@@ -26,51 +26,94 @@ pub struct Backend {
 }
 
 impl Backend {
-    /// Helper to publish diagnostics (errors) to the client
     async fn validate_document(&self, uri: Url, src: &str) {
         let mut diagnostics = Vec::new();
 
-        // Run the indexer/parser to check for errors
-        if let Err(e) = index_file(&self.parser, src) {
-            let diag = match e {
-                IndexErr::Lex(err) => {
-                    let buf = err.err.header;
-                    let location = err.location;
+        match index_file(&self.parser, src) {
+            Err(e) => {
+                let diag = match e {
+                    IndexErr::Lex(err) => {
+                        let buf = err.err.header;
+                        let location = err.location;
+                        let line_index = LineIndex::new(&src);
+                        let start = line_index.line_col(TextSize::new(location.index as _));
+                        let end = line_index
+                            .line_col(TextSize::new((location.index + location.len) as _));
+                        Diagnostic::new_simple(
+                            Range::new(
+                                Position::new(start.line, start.col),
+                                Position::new(end.line, end.col),
+                            ),
+                            strip_ansi_escapes::strip_str(&buf),
+                        )
+                    }
+                    IndexErr::Parse(err) => {
+                        let buf = err.hint.unwrap_or(err.kind.id_and_header().1);
+                        let location = err.location;
+                        let line_index = LineIndex::new(&src);
+                        let start = line_index.line_col(TextSize::new(location.index as _));
+                        let end = line_index
+                            .line_col(TextSize::new((location.index + location.len) as _));
+                        Diagnostic::new_simple(
+                            Range::new(
+                                Position::new(start.line, start.col),
+                                Position::new(end.line, end.col),
+                            ),
+                            strip_ansi_escapes::strip_str(&buf),
+                        )
+                    }
+                    IndexErr::Lowering(err) => {
+                        let location = err.location;
+                        let line_index = LineIndex::new(&src);
+                        let start = line_index.line_col(TextSize::new(location.index as _));
+                        let end = line_index
+                            .line_col(TextSize::new((location.index + location.len) as _));
+                        Diagnostic::new_simple(
+                            Range::new(
+                                Position::new(start.line, start.col),
+                                Position::new(end.line, end.col),
+                            ),
+                            strip_ansi_escapes::strip_str(format!("{:?}", err.inner)),
+                        )
+                    }
+                };
+                diagnostics.push(diag);
+            }
+            Ok((_, _, module_diagnostics)) => {
+                for warn in module_diagnostics.warns {
+                    let location = warn.location;
                     let line_index = LineIndex::new(&src);
                     let start = line_index.line_col(TextSize::new(location.index as _));
                     let end =
                         line_index.line_col(TextSize::new((location.index + location.len) as _));
-                    Diagnostic::new_simple(
+                    let mut diag = Diagnostic::new_simple(
                         Range::new(
                             Position::new(start.line, start.col),
                             Position::new(end.line, end.col),
                         ),
-                        strip_ansi_escapes::strip_str(&buf),
-                    )
+                        strip_ansi_escapes::strip_str(format!("{}", warn.inner)),
+                    );
+                    diag.severity = Some(DiagnosticSeverity::WARNING);
+                    diagnostics.push(diag);
                 }
-                IndexErr::Parse(err) => {
-                    let buf = err.hint.unwrap_or(err.kind.id_and_header().1);
-                    let location = err.location;
+                for diagnost in module_diagnostics.diagnostics {
+                    let location = diagnost.location;
                     let line_index = LineIndex::new(&src);
                     let start = line_index.line_col(TextSize::new(location.index as _));
                     let end =
                         line_index.line_col(TextSize::new((location.index + location.len) as _));
-                    Diagnostic::new_simple(
+                    let mut diag = Diagnostic::new_simple(
                         Range::new(
                             Position::new(start.line, start.col),
                             Position::new(end.line, end.col),
                         ),
-                        strip_ansi_escapes::strip_str(&buf),
-                    )
+                        strip_ansi_escapes::strip_str(format!("{}", diagnost.inner)),
+                    );
+                    diag.severity = Some(DiagnosticSeverity::INFORMATION);
+                    diagnostics.push(diag);
                 }
-                IndexErr::Lowering(_) => {
-                    Diagnostic::new_simple(Range::default(), "Internal compiler error".to_string())
-                }
-            };
-            diagnostics.push(diag);
+            }
         }
-
-        // Send the list (empty list clears existing errors)
 
         self.client
             .publish_diagnostics(uri, diagnostics, None)
@@ -147,7 +190,7 @@ impl LanguageServer for Backend {
         };
 
         // If indexing fails, we return an empty token set so the UI doesn't flicker/error out
-        let mut spans = match index_file(&self.parser, &src) {
+        let (_, mut spans, _) = match index_file(&self.parser, &src) {
             Ok(s) => s,
             Err(_) => {
                 return Ok(Some(

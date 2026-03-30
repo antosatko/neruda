@@ -1,5 +1,8 @@
 use clap::{Parser, ValueEnum};
-use parser::{grammar::gen_parser, lowering};
+use parser::{
+    grammar::gen_parser,
+    lowering::{self, ModuleOk},
+};
 use std::{
     fs::File,
     io::{Read, Write},
@@ -55,8 +58,14 @@ fn main() {
                         .expect("Unable to print parsing err");
                 }
             };
-            let module =
-                lowering::module_named("main.nrd", &buf, ast.entry).expect("somting went wrong :)");
+            let ModuleOk {
+                module,
+                diagnostics,
+            } = lowering::module_named("main.nrd", &buf, ast.entry).expect("somting went wrong :)");
+
+            for warn in diagnostics.warns {
+                println!("Warning: {} - {:?}", warn.inner, warn.location)
+            }
 
             match &cli.output {
                 Some(out) => {

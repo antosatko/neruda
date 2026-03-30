@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{borrow::Cow, collections::HashMap};
 
 use arena::Arena;
 use ruparse::{
@@ -8,17 +8,24 @@ use ruparse::{
 use smol_str::SmolStr;
 
 use ir::{
-    ActionClause, Alias, Associativity, Body, Clauses, Else, ElseIf, ExprItem, Expression,
-    Function, IdentifierPath, Keyword, Literal, LoweringError, Module, Mutability, Object,
-    Operator, Parameter, RestrictionClause, SelectClause, Span, SpanIndex, Statement, Type,
-    TypeLiteral, Value, char_literal, numeric_literal, string_literal,
+    ActionClause, Alias, Associativity, Body, Clauses, Diagnostics, Else, ElseIf, ExprItem,
+    Expression, Function, IdentifierPath, Keyword, Literal, LoweringError, LoweringWarning, Module,
+    Mutability, Object, Operator, Parameter, RestrictionClause, SelectClause, Span, SpanIndex,
+    Statement, Type, TypeLiteral, Value, char_literal, numeric_literal, string_literal,
 };
+
+#[derive(Debug, Clone)]
+pub struct ModuleOk {
+    pub module: Module,
+    pub diagnostics: Diagnostics,
+}
 
 pub fn module_named(
     name: impl Into<SmolStr>,
     src: &str,
     node: Node,
-) -> Result<Module, LoweringError> {
+) -> Result<ModuleOk, Span<LoweringError>> {
+    let mut diagnostics = Diagnostics::default();
     let node = &Nodes::Node(node);
     let mut module = Module {
         name: name.into(),
@@ -30,7 +37,7 @@ pub fn module_named(
     for s in node.get_list("top level statements") {
         match s.get_name() {
             "scheduler" => {
-                let ident = expect_ident(src, s);
+                let ident = expect_ident(src, s, &mut diagnostics);
                 let docs = docstrings(src, s);
 
                 let mut resources = None;
@@ -40,7 +47,7 @@ pub fn module_named(
                 if let Some(res) = s.try_get_node("resources").as_ref() {
                     let mut resources_vec = Vec::new();
                     for r in res.get_list("resources") {
-                        resources_vec.push(value(src, r)?);
+                        resources_vec.push(value(src, r, &mut diagnostics)?);
                     }
                     resources = Some(span(resources_vec, res));
                 }
@@ -54,7 +61,7 @@ pub fn module_named(
                 }
 
                 if let Some(init_node) = s.try_get_node("initialization").as_ref() {
-                    let body = body(src, init_node.expect_node("body"))?;
+                    let body = body(src, init_node.expect_node("body"), &mut diagnostics)?;
                     init = Some((body, Keyword(span((), init_node))));
                 }
 
@@ -71,10 +78,13 @@ pub fn module_named(
             }
 
             "function" => {
-                let ident = expect_ident(src, s);
-                let params = parameters(src, s.expect_node("parameters"));
-                let return_type = s.try_get_node("return type").as_ref().map(|t| ty(src, t));
-                let body = body(src, s.expect_node("code body"))?;
+                let ident = expect_ident(src, s, &mut diagnostics);
+                let params = parameters(src, s.expect_node("parameters"), &mut diagnostics);
+                let return_type = s
+                    .try_get_node("return type")
+                    .as_ref()
+                    .map(|t| ty(src, t, &mut diagnostics));
+                let body = body(src, s.expect_node("code body"), &mut diagnostics)?;
                 let docs = docstrings(src, s);
 
                 let obj = Object::Function(Function {
@@ -90,19 +100,25 @@ pub fn module_named(
             }
 
             "system" => {
-                let ident = expect_ident(src, s);
-                let sys_body = body(src, s.expect_node("main body"))?;
+                let ident = expect_ident(src, s, &mut diagnostics);
+                let sys_body = body(src, s.expect_node("main body"), &mut diagnostics)?;
                 let docs = docstrings(src, s);
                 let mut query = Vec::new();
                 for clause in s.expect_node("query").get_list("clauses") {
-                    query.push(clause_variant(src, clause)?);
+                    query.push(clause_variant(src, clause, &mut diagnostics)?);
                 }
                 let before = match s.try_get_node("before body").as_ref() {
-                    Some(before) => Some(span(body(src, before.expect_node("body"))?, before)),
+                    Some(before) => Some(span(
+                        body(src, before.expect_node("body"), &mut diagnostics)?,
+                        before,
+                    )),
                     None => None,
                 };
                 let after = match s.try_get_node("after body").as_ref() {
-                    Some(after) => Some(span(body(src, after.expect_node("body"))?, after)),
+                    Some(after) => Some(span(
+                        body(src, after.expect_node("body"), &mut diagnostics)?,
+                        after,
+                    )),
                     None => None,
                 };
 
@@ -120,9 +136,12 @@ pub fn module_named(
             }
 
             "component" => {
-                let ident = expect_ident(src, s);
+                let ident = expect_ident(src, s, &mut diagnostics);
                 let docs = docstrings(src, s);
-                let ty = s.try_get_node("type").as_ref().map(|t| ty(src, t));
+                let ty = s
+                    .try_get_node("type")
+                    .as_ref()
+                    .map(|t| ty(src, t, &mut diagnostics));
 
                 let obj = Object::Component {
                     ident: ident.clone(),
@@ -135,9 +154,12 @@ pub fn module_named(
             }
 
             "type definition" => {
-                let ident = expect_ident(src, s);
+                let ident = expect_ident(src, s, &mut diagnostics);
                 let docs = docstrings(src, s);
-                let ty = s.try_get_node("type").as_ref().map(|t| ty(src, t));
+                let ty = s
+                    .try_get_node("type")
+                    .as_ref()
+                    .map(|t| ty(src, t, &mut diagnostics));
 
                 let obj = Object::Type {
                     ident: ident.clone(),
@@ -153,13 +175,20 @@ pub fn module_named(
         }
     }
 
-    Ok(module)
+    Ok(ModuleOk {
+        module,
+        diagnostics,
+    })
 }
 
-fn clause_variant(src: &str, clause: &Nodes<'_>) -> Result<Span<Clauses>, LoweringError> {
+fn clause_variant(
+    src: &str,
+    clause: &Nodes<'_>,
+    diagnostics: &mut Diagnostics,
+) -> Result<Span<Clauses>, Span<LoweringError>> {
     match clause.get_name() {
         "select" => {
-            let ident = expect_ident(src, clause);
+            let ident = expect_ident(src, clause, diagnostics);
             let docs = docstrings(src, clause);
             let mut include = Vec::new();
             let mut exclude = Vec::new();
@@ -170,7 +199,7 @@ fn clause_variant(src: &str, clause: &Nodes<'_>) -> Result<Span<Clauses>, Loweri
                     .as_ref()
                     .map(|m| span((), m));
                 let component_path = ident_path(src, component.expect_node("component"));
-                let alias = alias(src, component.try_get_node("alias").as_ref());
+                let alias = alias(src, component.try_get_node("alias").as_ref(), diagnostics);
                 match component.try_get_node("modifier") {
                     Some(Nodes::Token(Token {
                         kind: TokenKinds::Token("?"),
@@ -183,7 +212,7 @@ fn clause_variant(src: &str, clause: &Nodes<'_>) -> Result<Span<Clauses>, Loweri
                         if mutable.is_none() {
                             exclude.push((component_path, alias))
                         } else {
-                            return Err(LoweringError::MutableExclusion);
+                            return Err(span(LoweringError::MutableExclusion, component));
                         }
                     }
                     _ => include.push((component_path, Mutability(mutable), alias)),
@@ -201,7 +230,7 @@ fn clause_variant(src: &str, clause: &Nodes<'_>) -> Result<Span<Clauses>, Loweri
             ))
         }
         "action" => {
-            let ident = expect_ident(src, clause);
+            let ident = expect_ident(src, clause, diagnostics);
             let docs = docstrings(src, clause);
             let event = clause
                 .get_list("event")
@@ -209,7 +238,7 @@ fn clause_variant(src: &str, clause: &Nodes<'_>) -> Result<Span<Clauses>, Loweri
                 .map(|a| {
                     (
                         ident_path(src, a.expect_node("identifier")),
-                        alias(src, a.try_get_node("alias").as_ref()),
+                        alias(src, a.try_get_node("alias").as_ref(), diagnostics),
                     )
                 })
                 .collect();
@@ -220,7 +249,7 @@ fn clause_variant(src: &str, clause: &Nodes<'_>) -> Result<Span<Clauses>, Loweri
             ))
         }
         "restriction" => {
-            let expression = expression(src, clause.expect_node("expression"))?;
+            let expression = expression(src, clause.expect_node("expression"), diagnostics)?;
             Ok(span(
                 Clauses::Restriction(RestrictionClause { expression }),
                 clause,
@@ -230,17 +259,22 @@ fn clause_variant(src: &str, clause: &Nodes<'_>) -> Result<Span<Clauses>, Loweri
     }
 }
 
-fn alias(src: &str, node: Option<&Nodes>) -> Alias {
-    Alias(node.map(|n| span(expect_ident(src, n), n)))
+fn alias(src: &str, node: Option<&Nodes>, diagnostics: &mut Diagnostics) -> Alias {
+    Alias(node.map(|n| span(expect_ident(src, n, diagnostics), n)))
 }
 
-fn body(src: &str, node: &Nodes) -> Result<Span<Body>, LoweringError> {
+fn body(
+    src: &str,
+    node: &Nodes,
+    diagnostics: &mut Diagnostics,
+) -> Result<Span<Body>, Span<LoweringError>> {
     Ok(span(
         match node.get_name() {
-            "code block" => Body::Block(block(src, node)?),
+            "code block" => Body::Block(block(src, node, diagnostics)?),
             "code statement" => Body::Statement(expression(
                 src,
                 node.expect_node("expression").expect_node("expression"),
+                diagnostics,
             )?),
             other => unreachable!("expected code block or statement, got: {other}"),
         },
@@ -248,16 +282,23 @@ fn body(src: &str, node: &Nodes) -> Result<Span<Body>, LoweringError> {
     ))
 }
 
-fn block(src: &str, node: &Nodes) -> Result<Vec<Span<Statement>>, LoweringError> {
+fn block(
+    src: &str,
+    node: &Nodes,
+    diagnostics: &mut Diagnostics,
+) -> Result<Vec<Span<Statement>>, Span<LoweringError>> {
     let mut statements = Vec::new();
 
     for stmt_node in node.get_list("statements") {
         let stmt = match stmt_node.get_name() {
             "variable" => {
-                let ident = expect_ident(src, stmt_node.expect_node("identifier"));
-                let ty = stmt_node.try_get_node("type").as_ref().map(|t| ty(src, t));
+                let ident = expect_ident(src, stmt_node.expect_node("identifier"), diagnostics);
+                let ty = stmt_node
+                    .try_get_node("type")
+                    .as_ref()
+                    .map(|t| ty(src, t, diagnostics));
                 let expression = match stmt_node.try_get_node("expression").as_ref() {
-                    Some(e) => Some(expression(src, e)?),
+                    Some(e) => Some(expression(src, e, diagnostics)?),
                     None => None,
                 };
 
@@ -272,50 +313,50 @@ fn block(src: &str, node: &Nodes) -> Result<Vec<Span<Statement>>, LoweringError>
             }
 
             "return" => {
-                let expr = expression(src, stmt_node.expect_node("expression"));
+                let expr = expression(src, stmt_node.expect_node("expression"), diagnostics);
                 span(Statement::Return { expression: expr? }, stmt_node)
             }
 
             "loop" => {
-                let label = try_label(src, stmt_node);
-                let body = body(src, stmt_node.expect_node("code body"))?;
+                let label = try_label(src, stmt_node, diagnostics);
+                let body = body(src, stmt_node.expect_node("code body"), diagnostics)?;
                 span(Statement::Loop { label, body }, stmt_node)
             }
 
             "expression statement" => {
-                let expr = expression(src, stmt_node.expect_node("expression"));
+                let expr = expression(src, stmt_node.expect_node("expression"), diagnostics);
                 span(Statement::Expr { expression: expr? }, stmt_node)
             }
 
             "break" => span(
                 Statement::Break {
-                    label: try_label(src, stmt_node),
+                    label: try_label(src, stmt_node, diagnostics),
                 },
                 stmt_node,
             ),
 
             "continue" => span(
                 Statement::Continue {
-                    label: try_label(src, stmt_node),
+                    label: try_label(src, stmt_node, diagnostics),
                 },
                 stmt_node,
             ),
 
             "if" => {
-                let condition = expression(src, stmt_node.expect_node("expression"))?;
-                let then_block = body(src, stmt_node.expect_node("code body"))?;
+                let condition = expression(src, stmt_node.expect_node("expression"), diagnostics)?;
+                let then_block = body(src, stmt_node.expect_node("code body"), diagnostics)?;
 
                 let mut else_if = Vec::new();
                 for elif in stmt_node.get_list("else if") {
-                    let condition = expression(src, elif.expect_node("expression"))?;
-                    let block = body(src, elif.expect_node("code body"))?;
+                    let condition = expression(src, elif.expect_node("expression"), diagnostics)?;
+                    let block = body(src, elif.expect_node("code body"), diagnostics)?;
                     else_if.push(span(ElseIf { condition, block }, elif));
                 }
 
                 let else_block = match stmt_node.try_get_node("else").as_ref() {
                     Some(e) => Some(span(
                         Else {
-                            block: body(src, e.expect_node("code body"))?,
+                            block: body(src, e.expect_node("code body"), diagnostics)?,
                         },
                         e,
                     )),
@@ -334,9 +375,9 @@ fn block(src: &str, node: &Nodes) -> Result<Vec<Span<Statement>>, LoweringError>
             }
 
             "while" => {
-                let label = try_label(src, stmt_node);
-                let condition = expression(src, stmt_node.expect_node("expression"))?;
-                let body = body(src, stmt_node.expect_node("code body"))?;
+                let label = try_label(src, stmt_node, diagnostics);
+                let condition = expression(src, stmt_node.expect_node("expression"), diagnostics)?;
+                let body = body(src, stmt_node.expect_node("code body"), diagnostics)?;
 
                 span(
                     Statement::While {
@@ -358,16 +399,24 @@ fn block(src: &str, node: &Nodes) -> Result<Vec<Span<Statement>>, LoweringError>
 }
 
 #[track_caller]
-fn try_label(src: &str, node: &Nodes) -> Option<Span<SmolStr>> {
+fn try_label(src: &str, node: &Nodes, diagnostics: &mut Diagnostics) -> Option<Span<SmolStr>> {
     node.try_get_node("label")
         .as_ref()
-        .map(|l| expect_ident(src, l))
+        .map(|l| expect_ident(src, l, diagnostics))
 }
 
-fn expression(src: &str, node: &Nodes) -> Result<Span<Expression>, LoweringError> {
-    let items = expression_items(src, node)?;
+fn expression(
+    src: &str,
+    node: &Nodes,
+    diagnostics: &mut Diagnostics,
+) -> Result<Span<Expression>, Span<LoweringError>> {
+    let items = expression_items(src, node, diagnostics)?;
     let mut pos = 0;
-    Ok(parse_expression_prec(&items, &mut pos, 0))
+    let expr = parse_expression_prec(&items, &mut pos, 0);
+    match expr.const_reduce(diagnostics) {
+        Cow::Owned(reduced_expr) => Ok(Span::new(reduced_expr, expr.location)),
+        Cow::Borrowed(_) => Ok(expr),
+    }
 }
 
 fn parse_expression_prec(
@@ -420,11 +469,15 @@ fn parse_expression_prec(
     lhs
 }
 
-fn expression_items(src: &str, node: &Nodes) -> Result<Vec<Span<ExprItem>>, LoweringError> {
+fn expression_items(
+    src: &str,
+    node: &Nodes,
+    diagnostics: &mut Diagnostics,
+) -> Result<Vec<Span<ExprItem>>, Span<LoweringError>> {
     let mut items = Vec::new();
 
     let lvalue_node = node.expect_node("lvalue");
-    let lvalue = value(src, &lvalue_node)?;
+    let lvalue = value(src, &lvalue_node, diagnostics)?;
     items.push(lvalue.map(|v| ExprItem::Value(Expression::Value(v))));
 
     for entry in node.get_list("rest") {
@@ -434,7 +487,7 @@ fn expression_items(src: &str, node: &Nodes) -> Result<Vec<Span<ExprItem>>, Lowe
                 items.push(op.map(ExprItem::Operator));
             }
             Nodes::Node(_) => {
-                let v = value(src, entry)?;
+                let v = value(src, entry, diagnostics)?;
                 items.push(v.map(|v| ExprItem::Value(Expression::Value(v))));
             }
         }
@@ -477,12 +530,19 @@ fn operator(node: &Nodes) -> Span<Operator> {
 }
 
 #[track_caller]
-pub fn expect_ident(src: &str, node: &Nodes) -> Span<SmolStr> {
+pub fn expect_ident(src: &str, node: &Nodes, diagnostics: &mut Diagnostics) -> Span<SmolStr> {
     let t = node.expect_node("identifier");
-    match t {
+    let ident: Span<SmolStr> = match t {
         Nodes::Node(n) => span_from_node(t.stringify(src).into(), n),
         Nodes::Token(tok) => span_from_token(tok.stringify(src).into(), tok),
+    };
+    if ident.len() > 30 {
+        diagnostics.warns.push(span(
+            LoweringWarning::IdentifierTooLong(ident.to_string()),
+            node,
+        ));
     }
+    ident
 }
 
 fn ident_path(src: &str, node: &Nodes) -> Span<IdentifierPath> {
@@ -495,7 +555,11 @@ fn ident_path(src: &str, node: &Nodes) -> Span<IdentifierPath> {
     span(IdentifierPath { path }, node)
 }
 
-fn literal(src: &str, node: &Nodes) -> Result<Span<Literal>, LoweringError> {
+fn literal(
+    src: &str,
+    node: &Nodes,
+    diagnostics: &mut Diagnostics,
+) -> Result<Span<Literal>, Span<LoweringError>> {
     match node {
         Nodes::Node(n) => match n.name {
             "identifier path literal" => {
@@ -507,8 +571,8 @@ fn literal(src: &str, node: &Nodes) -> Result<Span<Literal>, LoweringError> {
                     Some(s) => {
                         let mut args = Vec::new();
                         for arg in s.get_list("arguments") {
-                            let ident = expect_ident(src, arg);
-                            let expr = expression(src, arg.expect_node("expression"))?;
+                            let ident = expect_ident(src, arg, diagnostics);
+                            let expr = expression(src, arg.expect_node("expression"), diagnostics)?;
                             args.push(span((ident, expr), arg));
                         }
                         let p = match path {
@@ -524,7 +588,7 @@ fn literal(src: &str, node: &Nodes) -> Result<Span<Literal>, LoweringError> {
             "array literal" => {
                 let mut elements = Vec::new();
                 for e in n.get_list("elements") {
-                    elements.push(expression(src, e)?)
+                    elements.push(expression(src, e, diagnostics)?)
                 }
 
                 Ok(span(Literal::Array(elements), node))
@@ -533,7 +597,7 @@ fn literal(src: &str, node: &Nodes) -> Result<Span<Literal>, LoweringError> {
             "tuple literal" => {
                 let mut elements = Vec::new();
                 for e in n.get_list("expressions") {
-                    elements.push(expression(src, e)?)
+                    elements.push(expression(src, e, diagnostics)?)
                 }
 
                 Ok(span(Literal::Tuple(elements), node))
@@ -550,12 +614,14 @@ fn literal(src: &str, node: &Nodes) -> Result<Span<Literal>, LoweringError> {
                 )),
 
                 "char" => Ok(span_from_token(
-                    Literal::Char(char_literal(&tok.stringify(src))?),
+                    Literal::Char(char_literal(&tok.stringify(src)).map_err(|e| span(e, node))?),
                     tok,
                 )),
 
                 "numeric" | "float" => Ok(span_from_token(
-                    Literal::Number(numeric_literal(&tok.stringify(src))?),
+                    Literal::Number(
+                        numeric_literal(&tok.stringify(src)).map_err(|e| span(e, node))?,
+                    ),
                     tok,
                 )),
 
@@ -567,8 +633,12 @@ fn literal(src: &str, node: &Nodes) -> Result<Span<Literal>, LoweringError> {
     }
 }
 
-fn value(src: &str, node: &Nodes) -> Result<Span<Value>, LoweringError> {
-    let literal = literal(src, node.expect_node("literal"))?;
+fn value(
+    src: &str,
+    node: &Nodes,
+    diagnostics: &mut Diagnostics,
+) -> Result<Span<Value>, Span<LoweringError>> {
+    let literal = literal(src, node.expect_node("literal"), diagnostics)?;
 
     Ok(span(
         Value {
@@ -579,7 +649,7 @@ fn value(src: &str, node: &Nodes) -> Result<Span<Value>, LoweringError> {
     ))
 }
 
-fn ty(src: &str, node: &Nodes) -> Span<Type> {
+fn ty(src: &str, node: &Nodes, diagnostics: &mut Diagnostics) -> Span<Type> {
     let literal = node.expect_node("literal");
     match literal.get_name() {
         "identifier path" => span(
@@ -590,12 +660,15 @@ fn ty(src: &str, node: &Nodes) -> Span<Type> {
         ),
         "struct type literal" => span(
             Type {
-                literal: span(TypeLiteral::Struct(parameters(src, literal)), literal),
+                literal: span(
+                    TypeLiteral::Struct(parameters(src, literal, diagnostics)),
+                    literal,
+                ),
             },
             node,
         ),
         "array type literal" => {
-            let type_ = ty(src, literal.expect_node("type"));
+            let type_ = ty(src, literal.expect_node("type"), diagnostics);
             assert!(literal.try_get_node("length").is_none(), "working on it :)");
             span(
                 Type {
@@ -608,17 +681,17 @@ fn ty(src: &str, node: &Nodes) -> Span<Type> {
     }
 }
 
-fn parameter(src: &str, node: &Nodes) -> Span<Parameter> {
-    let ident = expect_ident(src, node.expect_node("identifier"));
-    let ty = ty(src, node.expect_node("type"));
+fn parameter(src: &str, node: &Nodes, diagnostics: &mut Diagnostics) -> Span<Parameter> {
+    let ident = expect_ident(src, node.expect_node("identifier"), diagnostics);
+    let ty = ty(src, node.expect_node("type"), diagnostics);
     let docs = docstrings(src, node);
     span(Parameter { ident, ty, docs }, node)
 }
 
-fn parameters(src: &str, node: &Nodes) -> Vec<Span<Parameter>> {
+fn parameters(src: &str, node: &Nodes, diagnostics: &mut Diagnostics) -> Vec<Span<Parameter>> {
     node.get_list("parameters")
         .iter()
-        .map(|p| parameter(src, p))
+        .map(|p| parameter(src, p, diagnostics))
         .collect()
 }
 

@@ -60,7 +60,7 @@ pub fn gen_parser<'src>() -> Parser<'static> {
     let mut parser = Parser::new();
 
     parser.lexer.add_tokens(
-        "+ - * / \\ ; \" ' : :: ( { [ < > ] } ) | & ! ? = . , # == != += -= *= /= %= && || >= <= =>"
+        "+ - * / % \\ ; \" ' : :: ( { [ < > ] } ) | & ! ? = . , # == != += -= *= /= %= && || >= <= =>"
             .split_whitespace(),
     );
     parser.grammar.ignored.push(TokenKinds::Complex("comment"));
@@ -386,7 +386,7 @@ pub fn gen_parser<'src>() -> Parser<'static> {
         .grammar
         .new_enum("operator")
         .options(
-            "+ - * / == != < > <= >= || && += -= *= /= %= ="
+            "+ - * / = % == != < > <= >= || && += -= *= /= %="
                 .split_whitespace()
                 .map(|t| token(t)),
         )

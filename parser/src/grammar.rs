@@ -691,11 +691,48 @@ pub fn gen_parser<'src>() -> Parser<'static> {
         .options([ident_path, struct_type_literal, array_type_literal])
         .build();
 
+    let generic_params = parser
+        .grammar
+        .new_node("geneic parameters")
+        .rules([
+            is(token("<")).commit(),
+            loop_().then([
+                maybe(ident).set("parameters"),
+                is_one_of([
+                    option(token(","))
+                        .then([maybe(token(",")).fail(&grammar_errs::MULTIPLE_TRAILING_COMMAS)]),
+                    option(token(">")).return_node(),
+                ]),
+            ]),
+        ])
+        .variables([list_var("parameters")])
+        .build();
+
+    let generic_impl = parser
+        .grammar
+        .new_node("generics")
+        .rules([
+            is(token("<")).commit(),
+            loop_().then([
+                maybe(node("type")).set("parameters"),
+                is_one_of([
+                    option(token(","))
+                        .then([maybe(token(",")).fail(&grammar_errs::MULTIPLE_TRAILING_COMMAS)]),
+                    option(token(">")).return_node(),
+                ]),
+            ]),
+        ])
+        .variables([list_var("parameters")])
+        .build();
+
     let type_ = parser
         .grammar
         .new_node("type")
-        .rules([is(type_literal).commit().set("literal")])
-        .variables([node_var("literal")])
+        .rules([
+            is(type_literal).commit().set("literal"),
+            maybe(generic_impl).set("generics"),
+        ])
+        .variables([node_var("literal"), node_var("generics")])
         .build();
 
     let label = parser
@@ -903,6 +940,7 @@ pub fn gen_parser<'src>() -> Parser<'static> {
         .rules([
             is(keyword("function")).commit().start(),
             is(ident).set(IDENTIFIER),
+            maybe(generic_params).set("generic parameters"),
             is(parameter_list).set("parameters"),
             maybe(token(":")).then([is(type_).set("return type").important()]),
             is_one_of([
@@ -912,6 +950,7 @@ pub fn gen_parser<'src>() -> Parser<'static> {
         ])
         .variables([
             IDENTIFIER_VAR,
+            node_var("generic parameters"),
             node_var("parameters"),
             node_var("return type"),
             node_var("code body"),
@@ -1091,6 +1130,7 @@ pub fn gen_parser<'src>() -> Parser<'static> {
         .rules([
             is(keyword("system")).commit().start(),
             is(ident).set(IDENTIFIER),
+            maybe(generic_params).set("generic parameters"),
             is(query).set("query"),
             maybe(before_body).set("before body"),
             is(code_body)
@@ -1100,6 +1140,7 @@ pub fn gen_parser<'src>() -> Parser<'static> {
         ])
         .variables([
             IDENTIFIER_VAR,
+            node_var("generic parameters"),
             node_var("query"),
             node_var("main body"),
             node_var("before body"),
@@ -1127,10 +1168,15 @@ pub fn gen_parser<'src>() -> Parser<'static> {
         .rules([
             is(keyword("type")).commit().start(),
             is(ident).set(IDENTIFIER),
+            maybe(generic_params).set("generic parameters"),
             maybe(token("=")).then([is(type_).set("type").important()]),
             is(end_stmt),
         ])
-        .variables([IDENTIFIER_VAR, node_var("type")])
+        .variables([
+            IDENTIFIER_VAR,
+            node_var("type"),
+            node_var("generic parameters"),
+        ])
         .build();
 
     let tls = parser

@@ -86,6 +86,8 @@ pub fn module_named(
                     .map(|t| ty(src, t, &mut diagnostics));
                 let body = body(src, s.expect_node("code body"), &mut diagnostics)?;
                 let docs = docstrings(src, s);
+                let generics =
+                    generic_params(src, s.try_get_node("generic parameters"), &mut diagnostics);
 
                 let obj = Object::Function(Function {
                     ident: ident.clone(),
@@ -93,6 +95,7 @@ pub fn module_named(
                     return_type,
                     body,
                     docs,
+                    generics,
                 });
 
                 let key = module.objects.push(span(obj, s));
@@ -121,6 +124,8 @@ pub fn module_named(
                     )),
                     None => None,
                 };
+                let generics =
+                    generic_params(src, s.try_get_node("generic parameters"), &mut diagnostics);
 
                 let obj = Object::System {
                     ident: ident.clone(),
@@ -129,6 +134,7 @@ pub fn module_named(
                     body: sys_body,
                     before,
                     after,
+                    generics,
                 };
 
                 let key = module.objects.push(span(obj, s));
@@ -160,11 +166,14 @@ pub fn module_named(
                     .try_get_node("type")
                     .as_ref()
                     .map(|t| ty(src, t, &mut diagnostics));
+                let generics =
+                    generic_params(src, s.try_get_node("generic parameters"), &mut diagnostics);
 
                 let obj = Object::Type {
                     ident: ident.clone(),
                     ty,
                     docs,
+                    generics,
                 };
 
                 let key = module.objects.push(span(obj, s));
@@ -179,6 +188,23 @@ pub fn module_named(
         module,
         diagnostics,
     })
+}
+
+fn generic_params(
+    src: &str,
+    node: &Option<Nodes<'_>>,
+    diagnostics: &mut Diagnostics,
+) -> Option<Span<Vec<Span<SmolStr>>>> {
+    let node = match node {
+        Some(node) => node,
+        None => return None,
+    };
+    let mut params = Vec::new();
+    for param in node.get_list("parameters") {
+        let i = expect_ident(src, param, diagnostics);
+        params.push(i);
+    }
+    Some(span(params, node))
 }
 
 fn clause_variant(
@@ -651,10 +677,22 @@ fn value(
 
 fn ty(src: &str, node: &Nodes, diagnostics: &mut Diagnostics) -> Span<Type> {
     let literal = node.expect_node("literal");
+    let generics = match node.try_get_node("generics") {
+        Some(generics) => {
+            let mut parameters = Vec::new();
+            for param in generics.get_list("parameters") {
+                parameters.push(ty(src, param, diagnostics));
+            }
+            Some(span(parameters, generics))
+        }
+        None => None,
+    };
+
     match literal.get_name() {
         "identifier path" => span(
             Type {
                 literal: span(TypeLiteral::Path(ident_path(src, literal).inner), literal),
+                generics,
             },
             node,
         ),
@@ -664,6 +702,7 @@ fn ty(src: &str, node: &Nodes, diagnostics: &mut Diagnostics) -> Span<Type> {
                     TypeLiteral::Struct(parameters(src, literal, diagnostics)),
                     literal,
                 ),
+                generics,
             },
             node,
         ),
@@ -673,6 +712,7 @@ fn ty(src: &str, node: &Nodes, diagnostics: &mut Diagnostics) -> Span<Type> {
             span(
                 Type {
                     literal: span(TypeLiteral::Array(Box::new(type_), None), literal),
+                    generics,
                 },
                 node,
             )

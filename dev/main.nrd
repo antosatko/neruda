@@ -24,9 +24,11 @@ system apply_velocity(e: mut Position as P & Velocity as V) => e.P += e.V
 // Events
 system on_stop_all(e: mut Velocity, on e: StopAll) => e.Velocity = 0
 // Restrictions
-system cap_velocity(e: mut Velocity as V, where e.V.dist() > 50 % 1 + 1 * 50) => e.V = e.V.normalize() * 50
+system cap_velocity(e: mut Velocity as V, where e.V.dist() > 50) => e.V = e.V.normalize() * 50
 // Aggregation (manual)
 system count_units(_: Position, count: mut UnitCount)
     before { var tmp = 0 }
     => tmp += 1
     after => count = tmp
+
+system add<T, U>(e: mut T & U) => e.T += e.U

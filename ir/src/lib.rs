@@ -9,6 +9,7 @@ use arena::{Arena, Key};
 use smol_str::SmolStr;
 
 mod const_expr;
+mod types;
 
 #[derive(Debug, Clone)]
 pub enum LoweringWarning {
@@ -135,12 +136,14 @@ pub enum Object {
 
     Type {
         ident: Span<SmolStr>,
+        generics: Option<Span<Vec<Span<SmolStr>>>>,
         ty: Option<Span<Type>>,
         docs: Vec<Span<SmolStr>>,
     },
 
     System {
         ident: Span<SmolStr>,
+        generics: Option<Span<Vec<Span<SmolStr>>>>,
         docs: Vec<Span<SmolStr>>,
         query: Vec<Span<Clauses>>,
         before: Option<Span<Span<Body>>>,
@@ -186,6 +189,7 @@ pub struct RestrictionClause {
 #[derive(Debug, Clone)]
 pub struct Function {
     pub ident: Span<SmolStr>,
+    pub generics: Option<Span<Vec<Span<SmolStr>>>>,
     pub parameters: Vec<Span<Parameter>>,
     pub return_type: Option<Span<Type>>,
     pub body: Span<Body>,
@@ -330,6 +334,7 @@ pub enum Postfix {
 #[derive(Debug, Clone)]
 pub struct Type {
     pub literal: Span<TypeLiteral>,
+    pub generics: Option<Span<Vec<Span<Type>>>>,
 }
 
 #[derive(Debug, Clone)]

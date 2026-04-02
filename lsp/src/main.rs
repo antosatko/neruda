@@ -186,6 +186,7 @@ impl IndexedWalk for ir::Span<Object> {
                 return_type,
                 body,
                 docs: _,
+                generics,
             }) => {
                 spans.push(self.span_word(Types::Keyword, line_index, "function"));
                 spans.push(ident.span(Types::Ident, line_index));
@@ -195,6 +196,9 @@ impl IndexedWalk for ir::Span<Object> {
                     ret.index(line_index, spans);
                 }
                 body.index(line_index, spans);
+                if let Some(generics) = generics {
+                    spans.extend(generics.iter().map(|g| g.span(Types::Type, line_index)));
+                }
             }
             Object::Component { ident, ty, docs: _ } => {
                 spans.push(self.span_word(Types::Keyword, line_index, "component"));
@@ -203,11 +207,19 @@ impl IndexedWalk for ir::Span<Object> {
                     ty.index(line_index, spans);
                 }
             }
-            Object::Type { ident, ty, docs: _ } => {
+            Object::Type {
+                ident,
+                ty,
+                docs: _,
+                generics,
+            } => {
                 spans.push(self.span_word(Types::Keyword, line_index, "type"));
                 spans.push(ident.span(Types::Ident, line_index));
                 if let Some(ty) = &ty {
                     ty.index(line_index, spans);
+                }
+                if let Some(generics) = generics {
+                    spans.extend(generics.iter().map(|g| g.span(Types::Type, line_index)));
                 }
             }
             Object::System {
@@ -217,6 +229,7 @@ impl IndexedWalk for ir::Span<Object> {
                 body,
                 after,
                 before,
+                generics,
             } => {
                 spans.push(self.span_word(Types::Keyword, line_index, "system"));
                 spans.push(ident.span(Types::Ident, line_index));
@@ -228,6 +241,9 @@ impl IndexedWalk for ir::Span<Object> {
                 if let Some(after) = after {
                     spans.push(after.span_word(Types::Keyword, line_index, "after"));
                     after.inner.index(line_index, spans);
+                }
+                if let Some(generics) = generics {
+                    spans.extend(generics.iter().map(|g| g.span(Types::Type, line_index)));
                 }
                 for clause in query {
                     match &clause.inner {
@@ -398,7 +414,8 @@ impl IndexedWalk for ir::Span<Parameter> {
 
 impl IndexedWalk for ir::Span<Type> {
     fn index(&self, line_index: &LineIndex, spans: &mut Vec<Span>) {
-        match &self.literal.inner {
+        let Type { literal, generics } = &self.inner;
+        match &literal.inner {
             ir::TypeLiteral::Path(identifier_path) => {
                 for ident in &identifier_path.path {
                     spans.push(ident.span(Types::Type, line_index));
@@ -412,7 +429,12 @@ impl IndexedWalk for ir::Span<Type> {
             }
             ir::TypeLiteral::Array(ty, len) => {
                 ty.index(line_index, spans);
-                let _: &Option<usize> = len;
+                let _: Option<usize> = *len;
+            }
+        }
+        if let Some(generics) = generics {
+            for generic in &generics.inner {
+                generic.index(line_index, spans);
             }
         }
     }

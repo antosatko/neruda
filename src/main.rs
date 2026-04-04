@@ -67,15 +67,12 @@ fn main() {
                 println!("Warning: {} - {:?}", warn.inner, warn.location)
             }
 
-            match &cli.output {
-                Some(out) => {
-                    let mut buf = Vec::new();
-                    write!(buf, "{module:?}").expect("Insufficent space");
-                    let mut file = File::create(out).expect("Unable to open output file");
-                    file.write_all(&mut buf)
-                        .expect("Unable to write all to output file");
-                }
-                None => {}
+            if let Some(out) = &cli.output {
+                let mut buf = Vec::new();
+                write!(buf, "{module:?}").expect("Insufficent space");
+                let mut file = File::create(out).expect("Unable to open output file");
+                file.write_all(&buf)
+                    .expect("Unable to write all to output file");
             }
         }
         EmitTarget::Ir => println!("Running front-end... generating IR."),

@@ -1,4 +1,4 @@
-use std::{borrow::Cow, collections::HashMap};
+use std::borrow::Cow;
 
 use arena::Arena;
 use ruparse::{
@@ -9,7 +9,7 @@ use smol_str::SmolStr;
 
 use ir::ast::{
     ActionClause, Alias, Associativity, Body, Clauses, Diagnostics, Else, ElseIf, ExprItem,
-    Expression, Function, IdentifierPath, Keyword, Literal, LoweringError, LoweringWarning, Module,
+    Expression, IdentifierPath, Keyword, Literal, LoweringError, LoweringWarning, Module,
     Mutability, Object, Operator, Parameter, RestrictionClause, SelectClause, Span, SpanIndex,
     Statement, SystemInclusion, Type, TypeLiteral, Value, char_literal, numeric_literal,
     string_literal,
@@ -32,7 +32,6 @@ pub fn module_named(
         name: name.into(),
         docs: docstrings(src, node),
         objects: Arena::new(),
-        symbols: HashMap::new(),
     };
 
     for s in node.get_list("top level statements") {
@@ -77,8 +76,7 @@ pub fn module_named(
                     docs,
                 };
 
-                let key = module.objects.push(span(obj, s));
-                module.symbols.insert(ident.inner, key);
+                module.objects.push(span(obj, s));
             }
 
             "function" => {
@@ -93,17 +91,16 @@ pub fn module_named(
                 let generics =
                     generic_params(src, s.try_get_node("generic parameters"), &mut diagnostics);
 
-                let obj = Object::Function(Function {
+                let obj = Object::Function {
                     ident: ident.clone(),
                     parameters: params,
                     return_type,
                     body,
                     docs,
                     generics,
-                });
+                };
 
-                let key = module.objects.push(span(obj, s));
-                module.symbols.insert(ident.inner, key);
+                module.objects.push(span(obj, s));
             }
 
             "system" => {
@@ -141,8 +138,7 @@ pub fn module_named(
                     generics,
                 };
 
-                let key = module.objects.push(span(obj, s));
-                module.symbols.insert(ident.inner, key);
+                module.objects.push(span(obj, s));
             }
 
             "component" => {
@@ -159,8 +155,7 @@ pub fn module_named(
                     docs,
                 };
 
-                let key = module.objects.push(span(obj, s));
-                module.symbols.insert(ident.inner, key);
+                module.objects.push(span(obj, s));
             }
 
             "type definition" => {
@@ -180,8 +175,7 @@ pub fn module_named(
                     generics,
                 };
 
-                let key = module.objects.push(span(obj, s));
-                module.symbols.insert(ident.inner, key);
+                module.objects.push(span(obj, s));
             }
 
             other => s.ice(&format!("Unhandled top-level item: {}", other)),
@@ -712,7 +706,14 @@ fn ty(src: &str, node: &Nodes, diagnostics: &mut Diagnostics) -> Span<Type> {
         "struct type literal" => span(
             Type {
                 literal: span(
-                    TypeLiteral::Struct(parameters(src, literal, diagnostics)),
+                    TypeLiteral::Struct((
+                        parameters(src, literal, diagnostics),
+                        generic_params(
+                            src,
+                            literal.try_get_node("generic parameters"),
+                            diagnostics,
+                        ),
+                    )),
                     literal,
                 ),
                 generics,

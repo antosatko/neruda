@@ -184,14 +184,14 @@ impl IndexedWalk for ir::ast::Span<Object> {
                     init.0.index(line_index, spans);
                 }
             }
-            Object::Function(Function {
+            Object::Function {
                 ident,
                 parameters,
                 return_type,
                 body,
                 docs: _,
                 generics,
-            }) => {
+            } => {
                 spans.push(self.span_word(Types::Keyword, line_index, "function"));
                 spans.push(ident.span(Types::Ident, line_index));
 
@@ -427,8 +427,13 @@ impl IndexedWalk for ir::ast::Span<Type> {
             }
             ir::ast::TypeLiteral::Struct(paramers) => {
                 spans.push(self.literal.span_word(Types::Keyword, line_index, "struct"));
-                for param in paramers {
+                for param in &paramers.0 {
                     param.index(line_index, spans);
+                }
+                if let Some(generics) = &paramers.1 {
+                    for generic in &generics.inner {
+                        spans.push(generic.span(Types::Type, line_index));
+                    }
                 }
             }
             ir::ast::TypeLiteral::Array(ty, len) => {

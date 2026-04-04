@@ -1,11 +1,13 @@
+pub mod const_expr;
+pub mod format;
+
 use core::panic;
 use std::{
-    collections::HashMap,
     fmt::Display,
     ops::{Add, Deref, DerefMut},
 };
 
-use arena::{Arena, Key};
+use arena::Arena;
 use smol_str::SmolStr;
 
 #[derive(Debug, Clone)]
@@ -108,7 +110,6 @@ pub struct Module {
     pub name: SmolStr,
     pub docs: Vec<Span<SmolStr>>,
     pub objects: Arena<Span<Object>, ObjectTag>,
-    pub symbols: HashMap<SmolStr, Key<ObjectTag>>,
 }
 
 /* ===================== OBJECTS ===================== */
@@ -123,7 +124,14 @@ pub enum Object {
         docs: Vec<Span<SmolStr>>,
     },
 
-    Function(Function),
+    Function {
+        ident: Span<SmolStr>,
+        generics: Option<Span<Vec<Span<SmolStr>>>>,
+        parameters: Vec<Span<Parameter>>,
+        return_type: Option<Span<Type>>,
+        body: Span<Body>,
+        docs: Vec<Span<SmolStr>>,
+    },
 
     Component {
         ident: Span<SmolStr>,
@@ -190,14 +198,7 @@ pub struct RestrictionClause {
 }
 
 #[derive(Debug, Clone)]
-pub struct Function {
-    pub ident: Span<SmolStr>,
-    pub generics: Option<Span<Vec<Span<SmolStr>>>>,
-    pub parameters: Vec<Span<Parameter>>,
-    pub return_type: Option<Span<Type>>,
-    pub body: Span<Body>,
-    pub docs: Vec<Span<SmolStr>>,
-}
+pub struct Function {}
 
 /* ===================== BLOCK / STATEMENTS ===================== */
 
@@ -343,7 +344,7 @@ pub struct Type {
 #[derive(Debug, Clone)]
 pub enum TypeLiteral {
     Path(IdentifierPath),
-    Struct(Vec<Span<Parameter>>),
+    Struct((Vec<Span<Parameter>>, Option<Span<Vec<Span<SmolStr>>>>)),
     Array(Box<Span<Type>>, Option<usize>),
     Tuple(Vec<Span<Type>>),
 }
@@ -563,7 +564,18 @@ impl std::fmt::Display for Type {
             }
             TypeLiteral::Struct(parameters) => {
                 write!(f, "struct {}", "{ ")?;
-                for Parameter { ident, ty, docs: _ } in parameters.iter().map(|p| &p.inner) {
+                if let Some(generic_params) = parameters.1.as_ref().map(|p| &p.inner) {
+                    write!(f, "<")?;
+                    let mut iter = generic_params.iter().map(|p| &p.inner);
+                    if let Some(first) = iter.next() {
+                        write!(f, "{}", first)?;
+                    }
+                    for str in iter {
+                        write!(f, ", {}", str)?;
+                    }
+                    write!(f, ">")?;
+                }
+                for Parameter { ident, ty, docs: _ } in parameters.0.iter().map(|p| &p.inner) {
                     write!(f, "{}: {} ", ident.inner, ty.inner)?;
                 }
                 write!(f, "{}", "}")?;

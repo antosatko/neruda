@@ -652,12 +652,30 @@ pub fn gen_parser<'src>() -> Parser<'static> {
         .variables([node_var("lvalue"), list_var("rest")])
         .build();
 
+    let generic_params = parser
+        .grammar
+        .new_node("geneic parameters")
+        .rules([
+            is(token("<")).commit(),
+            loop_().then([
+                maybe(ident).set("parameters"),
+                is_one_of([
+                    option(token(","))
+                        .then([maybe(token(",")).fail(&grammar_errs::MULTIPLE_TRAILING_COMMAS)]),
+                    option(token(">")).return_node(),
+                ]),
+            ]),
+        ])
+        .variables([list_var("parameters")])
+        .build();
+
     let struct_type_literal = parser
         .grammar
         .new_node("struct type literal")
         .has(docstr, "docs")
         .rules([
             is(keyword("struct")).commit(),
+            maybe(generic_params).set("generic parameters"),
             is_one_of([
                 option(token("{")),
                 option(any()).fail(&grammar_errs::MISSING_STRUCT_BODY),
@@ -667,7 +685,7 @@ pub fn gen_parser<'src>() -> Parser<'static> {
                 option(token("}")).return_node(),
             ])]),
         ])
-        .variables([list_var("parameters")])
+        .variables([list_var("parameters"), node_var("generic parameters")])
         .build();
 
     let array_type_literal = parser
@@ -711,23 +729,6 @@ pub fn gen_parser<'src>() -> Parser<'static> {
             array_type_literal,
             tuple_type_literal,
         ])
-        .build();
-
-    let generic_params = parser
-        .grammar
-        .new_node("geneic parameters")
-        .rules([
-            is(token("<")).commit(),
-            loop_().then([
-                maybe(ident).set("parameters"),
-                is_one_of([
-                    option(token(","))
-                        .then([maybe(token(",")).fail(&grammar_errs::MULTIPLE_TRAILING_COMMAS)]),
-                    option(token(">")).return_node(),
-                ]),
-            ]),
-        ])
-        .variables([list_var("parameters")])
         .build();
 
     let generic_impl = parser

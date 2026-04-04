@@ -685,10 +685,32 @@ pub fn gen_parser<'src>() -> Parser<'static> {
         .variables([node_var("type"), node_var("length")])
         .build();
 
+    let tuple_type_literal = parser
+        .grammar
+        .new_node("tuple type literal")
+        .rules([
+            is(token("(")).commit(),
+            loop_().then([
+                maybe(node("type")).set("parameters"),
+                is_one_of([
+                    option(token(","))
+                        .then([maybe(token(",")).fail(&grammar_errs::MULTIPLE_TRAILING_COMMAS)]),
+                    option(token(")")).return_node(),
+                ]),
+            ]),
+        ])
+        .variables([list_var("parameters")])
+        .build();
+
     let type_literal = parser
         .grammar
         .new_enum("type literal")
-        .options([ident_path, struct_type_literal, array_type_literal])
+        .options([
+            ident_path,
+            struct_type_literal,
+            array_type_literal,
+            tuple_type_literal,
+        ])
         .build();
 
     let generic_params = parser
@@ -957,13 +979,23 @@ pub fn gen_parser<'src>() -> Parser<'static> {
         ])
         .build();
 
+    let system_include = parser
+        .grammar
+        .new_node("system inclusion")
+        .rules([
+            is(ident_path).set(IDENTIFIER).commit(),
+            maybe(generic_impl).set("generics"),
+        ])
+        .variables([IDENTIFIER_VAR, node_var("generics")])
+        .build();
+
     let systems = parser
         .grammar
         .new_node("systems")
         .rules([
             is(keyword("systems")).commit(),
             is(token("{")),
-            while_(ident_path).set("systems"),
+            while_(system_include).set("systems"),
             is(token("}")),
         ])
         .variables([list_var("systems")])

@@ -7,11 +7,12 @@ use ruparse::{
 };
 use smol_str::SmolStr;
 
-use ir::{
+use ir::ast::{
     ActionClause, Alias, Associativity, Body, Clauses, Diagnostics, Else, ElseIf, ExprItem,
     Expression, Function, IdentifierPath, Keyword, Literal, LoweringError, LoweringWarning, Module,
     Mutability, Object, Operator, Parameter, RestrictionClause, SelectClause, Span, SpanIndex,
-    Statement, Type, TypeLiteral, Value, char_literal, numeric_literal, string_literal,
+    Statement, SystemInclusion, Type, TypeLiteral, Value, char_literal, numeric_literal,
+    string_literal,
 };
 
 #[derive(Debug, Clone)]
@@ -54,8 +55,11 @@ pub fn module_named(
 
                 if let Some(sys) = s.try_get_node("systems").as_ref() {
                     let mut systems_vec = Vec::new();
-                    for p in sys.get_list("systems") {
-                        systems_vec.push(ident_path(src, p));
+                    for s in sys.get_list("systems") {
+                        let path = ident_path(src, s.expect_node("identifier"));
+                        let generics =
+                            generic_arguments(src, s.try_get_node("generics"), &mut diagnostics);
+                        systems_vec.push(span(SystemInclusion { path, generics }, s));
                     }
                     systems = Some(span(systems_vec, sys));
                 }
@@ -571,6 +575,7 @@ pub fn expect_ident(src: &str, node: &Nodes, diagnostics: &mut Diagnostics) -> S
     ident
 }
 
+#[track_caller]
 fn ident_path(src: &str, node: &Nodes) -> Span<IdentifierPath> {
     let path = node
         .get_list("path")
@@ -675,9 +680,12 @@ fn value(
     ))
 }
 
-fn ty(src: &str, node: &Nodes, diagnostics: &mut Diagnostics) -> Span<Type> {
-    let literal = node.expect_node("literal");
-    let generics = match node.try_get_node("generics") {
+fn generic_arguments(
+    src: &str,
+    node: &Option<Nodes>,
+    diagnostics: &mut Diagnostics,
+) -> Option<Span<Vec<Span<Type>>>> {
+    match node {
         Some(generics) => {
             let mut parameters = Vec::new();
             for param in generics.get_list("parameters") {
@@ -686,7 +694,12 @@ fn ty(src: &str, node: &Nodes, diagnostics: &mut Diagnostics) -> Span<Type> {
             Some(span(parameters, generics))
         }
         None => None,
-    };
+    }
+}
+
+fn ty(src: &str, node: &Nodes, diagnostics: &mut Diagnostics) -> Span<Type> {
+    let literal = node.expect_node("literal");
+    let generics = generic_arguments(src, node.try_get_node("generics"), diagnostics);
 
     match literal.get_name() {
         "identifier path" => span(
@@ -712,6 +725,19 @@ fn ty(src: &str, node: &Nodes, diagnostics: &mut Diagnostics) -> Span<Type> {
             span(
                 Type {
                     literal: span(TypeLiteral::Array(Box::new(type_), None), literal),
+                    generics,
+                },
+                node,
+            )
+        }
+        "tuple type literal" => {
+            let mut params = Vec::new();
+            for param in literal.get_list("parameters") {
+                params.push(ty(src, param, diagnostics));
+            }
+            span(
+                Type {
+                    literal: span(TypeLiteral::Tuple(params), literal),
                     generics,
                 },
                 node,

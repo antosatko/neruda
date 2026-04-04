@@ -1,6 +1,6 @@
 use core::panic;
 use dashmap::DashMap;
-use ir::{
+use ir::ast::{
     Alias, Body, Diagnostics, Expression, Function, IdentifierPath, Literal, LoweringError, Module,
     Object, Parameter, Postfix, Statement, Type, Value,
 };
@@ -54,7 +54,7 @@ pub enum Types {
 pub enum IndexErr<'a> {
     Lex(PreprocessorError),
     Parse(ParseError<'a>),
-    Lowering(ir::Span<LoweringError>),
+    Lowering(ir::ast::Span<LoweringError>),
 }
 
 pub fn index_file<'p, 'src>(
@@ -134,7 +134,7 @@ trait IntoSpan {
     }
 }
 
-impl<T> IntoSpan for ir::Span<T> {
+impl<T> IntoSpan for ir::ast::Span<T> {
     fn span(&self, ty: Types, line_index: &LineIndex) -> Span {
         let LineCol { line, col } = line_index.line_col(TextSize::new(self.location.index as _));
         Span {
@@ -154,7 +154,7 @@ impl IndexedWalk for Module {
     }
 }
 
-impl IndexedWalk for ir::Span<Object> {
+impl IndexedWalk for ir::ast::Span<Object> {
     fn index(&self, line_index: &LineIndex, spans: &mut Vec<Span>) {
         match &self.inner {
             Object::Scheduler {
@@ -173,7 +173,11 @@ impl IndexedWalk for ir::Span<Object> {
                 }
                 if let Some(systems) = systems {
                     spans.push(systems.span_word(Types::Keyword, line_index, "systems"));
-                    systems.iter().for_each(|r| r.index(line_index, spans));
+                    for generic in systems.iter().filter_map(|g| g.generics.as_ref()) {
+                        for ty in &generic.inner {
+                            ty.index(line_index, spans);
+                        }
+                    }
                 }
                 if let Some(init) = init {
                     spans.push(init.1.0.span_word(Types::Keyword, line_index, "init"));
@@ -247,7 +251,7 @@ impl IndexedWalk for ir::Span<Object> {
                 }
                 for clause in query {
                     match &clause.inner {
-                        ir::Clauses::Select(select) => {
+                        ir::ast::Clauses::Select(select) => {
                             spans.push(select.ident.span(Types::Ident, line_index));
                             for (component, mutability, alias) in &select.include {
                                 for ident in &component.inner.path {
@@ -291,7 +295,7 @@ impl IndexedWalk for ir::Span<Object> {
                                 }
                             }
                         }
-                        ir::Clauses::Action((action, keyword)) => {
+                        ir::ast::Clauses::Action((action, keyword)) => {
                             spans.push(action.ident.span(Types::Ident, line_index));
                             spans.push(keyword.0.span_word(Types::Keyword, line_index, "on"));
                             for (event_component, alias) in &action.event {
@@ -304,7 +308,7 @@ impl IndexedWalk for ir::Span<Object> {
                                 }
                             }
                         }
-                        ir::Clauses::Restriction(restriction) => {
+                        ir::ast::Clauses::Restriction(restriction) => {
                             spans.push(clause.span_word(Types::Keyword, line_index, "where"));
                             restriction.expression.index(line_index, spans);
                         }
@@ -315,7 +319,7 @@ impl IndexedWalk for ir::Span<Object> {
     }
 }
 
-impl IndexedWalk for ir::Span<Body> {
+impl IndexedWalk for ir::ast::Span<Body> {
     fn index(&self, line_index: &LineIndex, spans: &mut Vec<Span>) {
         match &self.inner {
             Body::Block(stmts) => stmts.iter().for_each(|s| s.index(line_index, spans)),
@@ -327,7 +331,7 @@ impl IndexedWalk for ir::Span<Body> {
     }
 }
 
-impl IndexedWalk for ir::Span<Statement> {
+impl IndexedWalk for ir::ast::Span<Statement> {
     fn index(&self, line_index: &LineIndex, spans: &mut Vec<Span>) {
         match &self.inner {
             Statement::Var {
@@ -404,7 +408,7 @@ impl IndexedWalk for ir::Span<Statement> {
     }
 }
 
-impl IndexedWalk for ir::Span<Parameter> {
+impl IndexedWalk for ir::ast::Span<Parameter> {
     fn index(&self, line_index: &LineIndex, spans: &mut Vec<Span>) {
         spans.push(self.inner.ident.span(Types::Ident, line_index));
         self.inner.ty.index(line_index, spans);
@@ -412,24 +416,29 @@ impl IndexedWalk for ir::Span<Parameter> {
     }
 }
 
-impl IndexedWalk for ir::Span<Type> {
+impl IndexedWalk for ir::ast::Span<Type> {
     fn index(&self, line_index: &LineIndex, spans: &mut Vec<Span>) {
         let Type { literal, generics } = &self.inner;
         match &literal.inner {
-            ir::TypeLiteral::Path(identifier_path) => {
+            ir::ast::TypeLiteral::Path(identifier_path) => {
                 for ident in &identifier_path.path {
                     spans.push(ident.span(Types::Type, line_index));
                 }
             }
-            ir::TypeLiteral::Struct(paramers) => {
+            ir::ast::TypeLiteral::Struct(paramers) => {
                 spans.push(self.literal.span_word(Types::Keyword, line_index, "struct"));
                 for param in paramers {
                     param.index(line_index, spans);
                 }
             }
-            ir::TypeLiteral::Array(ty, len) => {
+            ir::ast::TypeLiteral::Array(ty, len) => {
                 ty.index(line_index, spans);
                 let _: Option<usize> = *len;
+            }
+            ir::ast::TypeLiteral::Tuple(params) => {
+                for ty in params {
+                    ty.index(line_index, spans);
+                }
             }
         }
         if let Some(generics) = generics {
@@ -440,7 +449,7 @@ impl IndexedWalk for ir::Span<Type> {
     }
 }
 
-impl IndexedWalk for ir::Span<IdentifierPath> {
+impl IndexedWalk for ir::ast::Span<IdentifierPath> {
     fn index(&self, line_index: &LineIndex, spans: &mut Vec<Span>) {
         for ident in &self.inner.path {
             spans.push(ident.span(Types::Ident, line_index));
@@ -448,7 +457,7 @@ impl IndexedWalk for ir::Span<IdentifierPath> {
     }
 }
 
-impl IndexedWalk for ir::Span<Expression> {
+impl IndexedWalk for ir::ast::Span<Expression> {
     fn index(&self, line_index: &LineIndex, spans: &mut Vec<Span>) {
         match &self.inner {
             Expression::Value(v) => v.index(line_index, spans),
@@ -461,9 +470,9 @@ impl IndexedWalk for ir::Span<Expression> {
     }
 }
 
-impl IndexedWalk for ir::Span<Box<Expression>> {
+impl IndexedWalk for ir::ast::Span<Box<Expression>> {
     fn index(&self, line_index: &LineIndex, spans: &mut Vec<Span>) {
-        let inner_span = ir::Span {
+        let inner_span = ir::ast::Span {
             location: self.location,
             inner: *self.inner.clone(),
         };
@@ -481,13 +490,13 @@ impl IndexedWalk for Value {
     }
 }
 
-impl IndexedWalk for ir::Span<Value> {
+impl IndexedWalk for ir::ast::Span<Value> {
     fn index(&self, line_index: &LineIndex, spans: &mut Vec<Span>) {
         self.inner.index(line_index, spans);
     }
 }
 
-impl IndexedWalk for ir::Span<Postfix> {
+impl IndexedWalk for ir::ast::Span<Postfix> {
     fn index(&self, line_index: &LineIndex, spans: &mut Vec<Span>) {
         match &self.inner {
             Postfix::Field(ident) => spans.push(ident.span(Types::Ident, line_index)),
@@ -500,7 +509,7 @@ impl IndexedWalk for ir::Span<Postfix> {
     }
 }
 
-impl IndexedWalk for ir::Span<Literal> {
+impl IndexedWalk for ir::ast::Span<Literal> {
     fn index(&self, line_index: &LineIndex, spans: &mut Vec<Span>) {
         match &self.inner {
             Literal::Identifier(path) => {

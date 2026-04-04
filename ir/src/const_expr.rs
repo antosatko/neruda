@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use crate::{
+use crate::ast::{
     Diagnostics, Expression, Literal, LoweringDiagnostic, LoweringWarning, Number, NumberValue,
     Operator, Span, Value,
 };

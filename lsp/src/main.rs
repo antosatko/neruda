@@ -315,6 +315,13 @@ impl IndexedWalk for ir::ast::Span<Object> {
                     }
                 }
             }
+            Object::Import { ident, alias } => {
+                spans.push(self.span_word(Types::Keyword, line_index, "import"));
+                ident.index(line_index, spans);
+                if let Some(alias) = &alias.0 {
+                    spans.push(alias.span_word(Types::Keyword, line_index, "as"));
+                }
+            }
         }
     }
 }

@@ -155,6 +155,11 @@ pub enum Object {
         body: Span<Body>,
         after: Option<Span<Span<Body>>>,
     },
+
+    Import {
+        ident: Span<IdentifierPath>,
+        alias: Alias,
+    },
 }
 
 #[derive(Debug, Clone)]

@@ -83,6 +83,7 @@ impl Context {
                     let key = self.types.functions.push_unique(fn_type);
                     let key = AnyTypeKey::Function(key);
                 }
+                ast::Object::Import { ident, alias } => {}
             }
         }
     }

@@ -30,7 +30,7 @@ const KEYWORDS: &[&'static str] = &[
     "after",
 ];
 
-const KEYWORDS_NON_BLOCKING: &[&'static str] = &["where", "systems", "resources", "on"];
+const KEYWORDS_NON_BLOCKING: &[&'static str] = &["where", "systems", "resources", "on", "import"];
 
 mod grammar_errs;
 
@@ -442,9 +442,7 @@ pub fn gen_parser<'src>() -> Parser<'static> {
         .new_node("identifier path")
         .rules([
             is(ident).set("path").commit(),
-            while_(token("::")).then([is(ident)
-                .set("path")
-                .hint("Static path must end on an identifier")]),
+            while_(token("::")).then([is(ident).set("path")]),
         ])
         .variables([list_var("path")])
         .build();
@@ -619,6 +617,18 @@ pub fn gen_parser<'src>() -> Parser<'static> {
         ])
         .hint("Expected to end statement on a delimiter")])
         .variables([node_var("consumed")])
+        .build();
+
+    let import = parser
+        .grammar
+        .new_node("import")
+        .rules([
+            is(keyword("import")).commit(),
+            is(ident_path).set(IDENTIFIER),
+            maybe(alias).set("alias"),
+            is(end_stmt),
+        ])
+        .variables([IDENTIFIER_VAR, node_var("alias")])
         .build();
 
     let value = parser
@@ -1229,7 +1239,7 @@ pub fn gen_parser<'src>() -> Parser<'static> {
     let tls = parser
         .grammar
         .new_enum("top level statement")
-        .options([scheduler, function, system, component, type_kw])
+        .options([scheduler, function, system, component, type_kw, import])
         .build();
 
     parser

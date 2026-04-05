@@ -1,3 +1,5 @@
+import core::math as m
+
 scheduler main {
     resources {
         UnitCount(0)

@@ -178,6 +178,13 @@ pub fn module_named(
                 module.objects.push(span(obj, s));
             }
 
+            "import" => {
+                let ident = ident_path(src, s.expect_node("identifier"));
+                let alias = alias(src, s.try_get_node("alias"), &mut diagnostics);
+                let obj = Object::Import { ident, alias };
+                module.objects.push(span(obj, s));
+            }
+
             other => s.ice(&format!("Unhandled top-level item: {}", other)),
         }
     }
@@ -234,7 +241,7 @@ fn clause_variant(
                     .as_ref()
                     .map(|m| span((), m));
                 let component_path = ident_path(src, component.expect_node("component"));
-                let alias = alias(src, component.try_get_node("alias").as_ref(), diagnostics);
+                let alias = alias(src, component.try_get_node("alias"), diagnostics);
                 match component.try_get_node("modifier") {
                     Some(Nodes::Token(Token {
                         kind: TokenKinds::Token("?"),
@@ -273,7 +280,7 @@ fn clause_variant(
                 .map(|a| {
                     (
                         ident_path(src, a.expect_node("identifier")),
-                        alias(src, a.try_get_node("alias").as_ref(), diagnostics),
+                        alias(src, a.try_get_node("alias"), diagnostics),
                     )
                 })
                 .collect();
@@ -294,8 +301,11 @@ fn clause_variant(
     }
 }
 
-fn alias(src: &str, node: Option<&Nodes>, diagnostics: &mut Diagnostics) -> Alias {
-    Alias(node.map(|n| span(expect_ident(src, n, diagnostics), n)))
+fn alias(src: &str, node: &Option<Nodes>, diagnostics: &mut Diagnostics) -> Alias {
+    Alias(
+        node.as_ref()
+            .map(|n| span(expect_ident(src, n, diagnostics), n)),
+    )
 }
 
 fn body(

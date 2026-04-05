@@ -1,4 +1,5 @@
 use clap::{Parser, ValueEnum};
+use ir::ir::{Context, types::Types};
 use parser::{
     grammar::gen_parser,
     lowering::{self, ModuleOk},
@@ -19,13 +20,14 @@ struct Cli {
     #[arg(short, long, value_name = "OUTPUT")]
     output: Option<PathBuf>,
 
-    #[arg(short, long, value_enum, default_value_t = EmitTarget::Ast)]
+    #[arg(short, long, value_enum, default_value_t = EmitTarget::Bin)]
     emit: EmitTarget,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]
 enum EmitTarget {
     Ast,
+    AstPretty,
     Ir,
     Asm,
     Bin,
@@ -35,7 +37,7 @@ fn main() {
     let cli = Cli::parse();
 
     match cli.emit {
-        EmitTarget::Ast => {
+        EmitTarget::Ast | EmitTarget::AstPretty => {
             let mut buf = String::new();
             File::open(&cli.input)
                 .expect("Unable to open input file")
@@ -69,13 +71,88 @@ fn main() {
 
             if let Some(out) = &cli.output {
                 let mut buf = Vec::new();
-                write!(buf, "{module:?}").expect("Insufficent space");
+                match cli.emit {
+                    EmitTarget::Ast => writeln!(buf, "{module:?}").expect("Insufficent space"),
+                    EmitTarget::AstPretty => {
+                        writeln!(buf, "{module:#?}").expect("Insufficent space")
+                    }
+                    _ => unreachable!(),
+                };
                 let mut file = File::create(out).expect("Unable to open output file");
                 file.write_all(&buf)
                     .expect("Unable to write all to output file");
             }
         }
-        EmitTarget::Ir => println!("Running front-end... generating IR."),
+        EmitTarget::Ir => {
+            let mut buf = String::new();
+            File::open(&cli.input)
+                .expect("Unable to open input file")
+                .read_to_string(&mut buf)
+                .expect("Unable to read input file");
+            let parser = gen_parser();
+            let tokens = match parser.lexer.lex_utf8(&buf) {
+                Ok(tokens) => tokens,
+                Err(e) => {
+                    return e
+                        .print(&buf, cli.input.to_str())
+                        .expect("Unable to print lexing err");
+                }
+            };
+            let ast = match parser.parse(&tokens, &buf) {
+                Ok(tokens) => tokens,
+                Err(e) => {
+                    return e
+                        .print(&buf, cli.input.to_str())
+                        .expect("Unable to print parsing err");
+                }
+            };
+            let ModuleOk {
+                module,
+                diagnostics,
+            } = lowering::module_named("main.nrd", &buf, ast.entry).expect("somting went wrong :)");
+
+            for warn in diagnostics.warns {
+                println!("Warning: {} - {:?}", warn.inner, warn.location)
+            }
+
+            let mut ir_ctx = Context::new();
+            ir_ctx.lower_module(&module);
+
+            {
+                let Types {
+                    functions,
+                    constraints,
+                    generics,
+                    structures,
+                    arrays,
+                    tuples,
+                } = &ir_ctx.types;
+                println!("function types:");
+                for t in functions.iter() {
+                    println!("\t{}", t.stringify(&ir_ctx.types));
+                }
+                println!("constraint types:");
+                for t in constraints.iter() {
+                    println!("\t{}", t.stringify(&ir_ctx.types));
+                }
+                println!("generic types:");
+                for t in generics.iter() {
+                    println!("\t{}", t.stringify(&ir_ctx.types));
+                }
+                println!("structure types:");
+                for t in structures.iter() {
+                    println!("\t{}", t.stringify(&ir_ctx.types));
+                }
+                println!("array types:");
+                for t in arrays.iter() {
+                    println!("\t{}", t.stringify(&ir_ctx.types));
+                }
+                println!("tuple types:");
+                for t in tuples.iter() {
+                    println!("\t{}", t.stringify(&ir_ctx.types));
+                }
+            }
+        }
         EmitTarget::Asm => println!("Running back-end... generating Assembly."),
         EmitTarget::Bin => println!("Full pipeline... generating Binary."),
     }

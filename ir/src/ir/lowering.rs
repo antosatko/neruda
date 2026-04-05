@@ -7,8 +7,14 @@ use crate::ir::types::{
     StructType, TupleType,
 };
 
+#[derive(Default)]
+pub struct GenericContext {
+    scopes: Vec<Vec<(SmolStr, ConstraintKey)>>,
+}
+
 impl Context {
     pub fn lower_module(&mut self, module: &ast::Module) {
+        let mut generic_ctx = GenericContext::default();
         for object in module.objects.iter() {
             match &object.inner {
                 ast::Object::Scheduler {
@@ -17,14 +23,26 @@ impl Context {
                     systems,
                     init,
                     docs,
-                } => todo!(),
-                ast::Object::Component { ident, ty, docs } => todo!(),
+                } => (),
+                ast::Object::Component { ident, ty, docs } => {
+                    let key = ty
+                        .as_ref()
+                        .map(|t| t.lower(self, module, &mut generic_ctx))
+                        .unwrap_or(AnyTypeKey::Primitive(PrimitiveType::Void));
+                }
                 ast::Object::Type {
                     ident,
                     generics,
                     ty,
                     docs,
-                } => todo!(),
+                } => {
+                    generic_ctx.push_scope(generics, self);
+                    let key = ty
+                        .as_ref()
+                        .map(|t| t.lower(self, module, &mut generic_ctx))
+                        .unwrap_or(AnyTypeKey::Primitive(PrimitiveType::Void));
+                    generic_ctx.pop_scope();
+                }
                 ast::Object::System {
                     ident,
                     generics,
@@ -33,7 +51,10 @@ impl Context {
                     before,
                     body,
                     after,
-                } => todo!(),
+                } => {
+                    generic_ctx.push_scope(generics, self);
+                    generic_ctx.pop_scope();
+                }
                 ast::Object::Function {
                     ident,
                     generics,
@@ -42,13 +63,66 @@ impl Context {
                     body,
                     docs,
                 } => {
+                    generic_ctx.push_scope(generics, self);
                     let fn_type = FunctionType {
-                        returns: todo!(),
-                        parameters: todo!(),
+                        returns: return_type
+                            .as_ref()
+                            .map(|t| t.lower(self, module, &mut generic_ctx))
+                            .unwrap_or(AnyTypeKey::Primitive(PrimitiveType::Void)),
+                        parameters: parameters
+                            .iter()
+                            .map(|p| {
+                                (
+                                    p.ident.inner.clone(),
+                                    p.ty.lower(self, module, &mut generic_ctx),
+                                )
+                            })
+                            .collect(),
                     };
+                    generic_ctx.pop_scope();
+                    let key = self.types.functions.push_unique(fn_type);
+                    let key = AnyTypeKey::Function(key);
                 }
             }
         }
+    }
+}
+
+impl GenericContext {
+    fn push_scope(
+        &mut self,
+        generics: &Option<ast::Span<Vec<ast::Span<ast::GenericParameter>>>>,
+        ctx: &mut Context,
+    ) {
+        if let Some(generics) = generics {
+            let mut scope = Vec::new();
+            let constraint = ConstraintType { constraints: () };
+            let key = ctx.types.constraints.push_unique(constraint);
+            for generic in &generics.inner {
+                scope.push((generic.identifier.inner.clone(), key));
+            }
+            self.scopes.push(scope);
+        } else {
+            self.scopes.push(Vec::new());
+        }
+    }
+
+    #[track_caller]
+    fn pop_scope(&mut self) {
+        assert!(self.scopes.pop().is_some());
+    }
+
+    fn find_generic(&self, ident: &SmolStr) -> Option<&ConstraintKey> {
+        for scope in self.scopes.iter().rev() {
+            if let Some(generic) = scope
+                .iter()
+                .find(|(g_ident, _)| ident == g_ident)
+                .map(|(_, g)| g)
+            {
+                return Some(generic);
+            }
+        }
+        None
     }
 }
 
@@ -57,73 +131,34 @@ impl ast::Type {
         &self,
         ctx: &mut Context,
         module: &ast::Module,
-        generic_context: &mut Vec<Vec<(SmolStr, ConstraintKey)>>,
+        generic_context: &mut GenericContext,
     ) -> AnyTypeKey {
         let Self { literal, generics } = &self;
-        match &literal.inner {
+        let unresolved = match &literal.inner {
             ast::TypeLiteral::Path(identifier_path) => {
                 if identifier_path.path.len() == 1
                     && let Some(ident) = identifier_path.path.first()
                 {
-                    match PrimitiveType::from_str(&ident.inner) {
-                        Some(ty) => return AnyTypeKey::Primitive(ty),
-                        _ => (),
+                    if let Some(ty) = PrimitiveType::from_str(&ident.inner) {
+                        return AnyTypeKey::Primitive(ty);
+                    }
+                    if let Some(ty) = generic_context.find_generic(ident) {
+                        return AnyTypeKey::Constraint(*ty);
                     }
                 }
-                todo!()
+                todo!("resolve actual path")
             }
-            ast::TypeLiteral::Struct((spans, generics_opt)) => {
+            ast::TypeLiteral::Struct(spans) => {
                 let mut parameters = Vec::new();
-                let generic_parameters = match generics_opt {
-                    Some(generics) => {
-                        let mut generic_params = Vec::new();
-                        for generic in generics.inner.iter().map(|g| &g.inner) {
-                            let constraint_type = ConstraintType { constraints: () };
-                            let key = ctx.types.constraints.push_unique(constraint_type);
-                            if parameters.iter().any(|(g_ident, _)| g_ident == generic) {
-                                panic!("duplicate generic identifiers")
-                            }
-                            generic_params.push((generic.clone(), key));
-                        }
-                        generic_context.push(generic_params);
-                        for param in spans {
-                            let ident = &param.ident.inner;
-                            if parameters.iter().any(|(p_ident, _)| p_ident == ident) {
-                                panic!("duplicate parameter identifiers")
-                            }
-                            parameters.push((
-                                ident.clone(),
-                                param.ty.lower(ctx, module, generic_context),
-                            ));
-                        }
-                        Some(generic_context.pop().unwrap())
+                for param in spans {
+                    let ident = &param.ident.inner;
+                    if parameters.iter().any(|(p_ident, _)| p_ident == ident) {
+                        panic!("duplicate parameter identifiers")
                     }
-                    None => {
-                        for param in spans {
-                            let ident = &param.ident.inner;
-                            if parameters.iter().any(|(p_ident, _)| p_ident == ident) {
-                                panic!("duplicate parameter identifiers")
-                            }
-                            parameters.push((
-                                ident.clone(),
-                                param.ty.lower(ctx, module, generic_context),
-                            ));
-                        }
-                        None
-                    }
-                };
-                let key = ctx.types.structures.push_unique(StructType { parameters });
-                let type_key = AnyTypeKey::Struct(key);
-                match generic_parameters {
-                    Some(generic_parameters) => {
-                        let generic_key = ctx.types.generics.push_unique(GenericType {
-                            inner: type_key,
-                            generic_parameters,
-                        });
-                        AnyTypeKey::Generic(generic_key)
-                    }
-                    None => type_key,
+                    parameters.push((ident.clone(), param.ty.lower(ctx, module, generic_context)));
                 }
+                let key = ctx.types.structures.push_unique(StructType { parameters });
+                AnyTypeKey::Struct(key)
             }
             ast::TypeLiteral::Array(span, size) => {
                 let ty = span.lower(ctx, module, generic_context);
@@ -145,6 +180,12 @@ impl ast::Type {
                         AnyTypeKey::Tuple(key)
                     }
                 }
+            }
+        };
+        match generics {
+            None => unresolved,
+            Some(generics) => {
+                todo!("need to resolve generics")
             }
         }
     }

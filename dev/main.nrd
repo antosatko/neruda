@@ -16,10 +16,11 @@ scheduler main {
 }
 
 type StopAll
-type UnitCount = f32
+type UnitCount = u32
 
 component Position = f32x2
 component Velocity = f32x2
+
 
 // Select
 system apply_velocity(e: mut Position as P & Velocity as V) => e.P += e.V

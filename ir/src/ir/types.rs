@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{borrow::Cow, collections::HashMap};
 
 use arena::{Arena, Key};
 use smol_str::SmolStr;
@@ -7,22 +7,15 @@ use crate::ir::objects::AnyObjectKey;
 
 pub type FunctionArena = Arena<FunctionType>;
 pub type FunctionKey = Key<FunctionType>;
-#[derive(PartialEq, Eq)]
+#[derive(PartialEq, Debug)]
 pub struct FunctionType {
     pub returns: AnyTypeKey,
     pub parameters: Vec<(SmolStr, AnyTypeKey)>,
 }
 
-pub type TypeAliasArena = Arena<TypeAliasType>;
-pub type TypeAliasKey = Key<TypeAliasType>;
-#[derive(PartialEq, Eq)]
-pub struct TypeAliasType {
-    pub aliases: AnyTypeKey,
-}
-
 pub type ArrayArena = Arena<ArrayType>;
 pub type ArrayKey = Key<ArrayType>;
-#[derive(PartialEq, Eq)]
+#[derive(PartialEq, Debug)]
 pub struct ArrayType {
     pub element_type: AnyTypeKey,
     pub size: Option<usize>,
@@ -30,33 +23,35 @@ pub struct ArrayType {
 
 pub type TupleArena = Arena<TupleType>;
 pub type TupleKey = Key<TupleType>;
-#[derive(PartialEq, Eq)]
+#[derive(PartialEq, Debug)]
 pub struct TupleType {
     pub parameters: Vec<AnyTypeKey>,
 }
 pub type StructArena = Arena<StructType>;
 pub type StructKey = Key<StructType>;
-#[derive(PartialEq, Eq)]
+#[derive(PartialEq, Debug)]
 pub struct StructType {
     pub parameters: Vec<(SmolStr, AnyTypeKey)>,
 }
 
-pub type ConstraintArena = Arena<ConstraintType>;
-pub type ConstraintKey = Key<ConstraintType>;
-#[derive(PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ConstraintTag;
+pub type ConstraintArena = Arena<ConstraintType, ConstraintTag>;
+pub type ConstraintKey = Key<ConstraintTag>;
+#[derive(PartialEq, Debug)]
 pub struct ConstraintType {
     pub constraints: (),
 }
 
 pub type GenericArena = Arena<GenericType>;
 pub type GenericKey = Key<GenericType>;
-#[derive(PartialEq, Eq)]
+#[derive(PartialEq, Debug)]
 pub struct GenericType {
     pub generic_parameters: Vec<(SmolStr, ConstraintKey)>,
     pub inner: AnyTypeKey,
 }
 
-#[derive(PartialEq, Eq)]
+#[derive(PartialEq, Debug)]
 #[repr(u8)]
 pub enum PrimitiveType {
     I8,
@@ -79,13 +74,12 @@ pub enum PrimitiveType {
     Void,
 }
 
-#[derive(PartialEq, Eq)]
+#[derive(PartialEq, Debug)]
 pub enum AnyTypeKey {
     Primitive(PrimitiveType),
     Constraint(ConstraintKey),
     Generic(GenericKey),
     Function(FunctionKey),
-    TypeAlias(TypeAliasKey),
     Array(ArrayKey),
     Tuple(TupleKey),
     Struct(StructKey),
@@ -100,7 +94,6 @@ pub struct Types {
     pub functions: FunctionArena,
     pub constraints: ConstraintArena,
     pub generics: GenericArena,
-    pub type_aliases: TypeAliasArena,
     pub structures: StructArena,
     pub arrays: ArrayArena,
     pub tuples: TupleArena,
@@ -127,6 +120,138 @@ impl PrimitiveType {
             "f64x4" => Some(Self::F64x4),
             "char" => Some(Self::Char),
             _ => None,
+        }
+    }
+
+    pub fn stringify(&self) -> &'static str {
+        match self {
+            PrimitiveType::I8 => "i8",
+            PrimitiveType::I16 => "i16",
+            PrimitiveType::I32 => "i32",
+            PrimitiveType::I64 => "i64",
+            PrimitiveType::I128 => "i128",
+            PrimitiveType::U8 => "u8",
+            PrimitiveType::U16 => "u16",
+            PrimitiveType::U32 => "u32",
+            PrimitiveType::U64 => "u64",
+            PrimitiveType::U128 => "u128",
+            PrimitiveType::F32 => "f32",
+            PrimitiveType::F64 => "f64",
+            PrimitiveType::F32x2 => "f32x2",
+            PrimitiveType::F64x2 => "f64x2",
+            PrimitiveType::F32x4 => "f32x4",
+            PrimitiveType::F64x4 => "f64x4",
+            PrimitiveType::Char => "char",
+            PrimitiveType::Void => "()",
+        }
+    }
+}
+
+impl FunctionType {
+    pub fn stringify(&self, types: &Types) -> String {
+        let mut out = String::from("function(");
+        let mut iter = self.parameters.iter();
+        if let Some((ident, ty)) = iter.next() {
+            out.push_str(&format!("{ident}: {}", ty.stringify(types)));
+        }
+        for (ident, ty) in iter {
+            out.push_str(&format!(", {ident}: {}", ty.stringify(types)));
+        }
+        out.push(')');
+        out.push_str(&format!(": {}", self.returns.stringify(types)));
+        out
+    }
+}
+
+impl StructType {
+    pub fn stringify(&self, types: &Types) -> String {
+        let mut out = String::from("struct { ");
+        for (ident, ty) in &self.parameters {
+            out.push_str(&format!("{ident}: {} ", ty.stringify(types)));
+        }
+        out.push('}');
+        out
+    }
+}
+
+impl ArrayType {
+    pub fn stringify(&self, types: &Types) -> String {
+        let mut out = format!("[{}", self.element_type.stringify(types));
+        match self.size {
+            Some(size) => out.push_str(&format!("; {size}]")),
+            None => out.push(']'),
+        }
+        out
+    }
+}
+
+impl TupleType {
+    pub fn stringify(&self, types: &Types) -> String {
+        let mut out = String::from("(");
+        let mut iter = self.parameters.iter();
+        if let Some(ty) = iter.next() {
+            out.push_str(&ty.stringify(types));
+        }
+        for ty in iter {
+            out.push_str(&format!(", {}", ty.stringify(types)));
+        }
+        out.push(')');
+        out
+    }
+}
+
+impl GenericType {
+    pub fn stringify(&self, types: &Types) -> String {
+        let mut out = String::from("<");
+        let mut iter = self.generic_parameters.iter();
+        if let Some((ident, constraints)) = iter.next() {
+            out.push_str(&format!(
+                "{ident}{}",
+                types
+                    .constraints
+                    .get_unchecked(constraints)
+                    .stringify(types)
+            ));
+        }
+        for (ident, constraints) in iter {
+            out.push_str(&format!(
+                ", {ident}{}",
+                types
+                    .constraints
+                    .get_unchecked(constraints)
+                    .stringify(types)
+            ));
+        }
+        out.push('>');
+        out.push_str(&self.inner.stringify(types));
+        out
+    }
+}
+
+impl ConstraintType {
+    pub fn stringify(&self, _: &Types) -> String {
+        "".to_string()
+    }
+}
+
+impl AnyTypeKey {
+    pub fn stringify(&self, types: &Types) -> Cow<'static, str> {
+        match self {
+            AnyTypeKey::Primitive(primitive_type) => Cow::Borrowed(primitive_type.stringify()),
+            AnyTypeKey::Constraint(key) => {
+                Cow::Owned(types.constraints.get_unchecked(key).stringify(types))
+            }
+            AnyTypeKey::Generic(key) => {
+                Cow::Owned(types.generics.get_unchecked(key).stringify(types))
+            }
+            AnyTypeKey::Function(key) => {
+                Cow::Owned(types.functions.get_unchecked(key).stringify(types))
+            }
+            AnyTypeKey::Array(key) => Cow::Owned(types.arrays.get_unchecked(key).stringify(types)),
+            AnyTypeKey::Tuple(key) => Cow::Owned(types.tuples.get_unchecked(key).stringify(types)),
+            AnyTypeKey::Struct(key) => {
+                Cow::Owned(types.structures.get_unchecked(key).stringify(types))
+            }
         }
     }
 }

@@ -89,3 +89,9 @@ pub(crate) static MISSING_RHS_EXPRESSION: ErrorDefinition = ErrorDefinition {
     code: "213",
     msg: "Expected a value or expression after binary operator",
 };
+
+pub(crate) static MISSING_GENERIC_PARAMS: ErrorDefinition = ErrorDefinition {
+    header: "Missing generic parameters",
+    code: "214",
+    msg: "Expected at least one generic parameter",
+};

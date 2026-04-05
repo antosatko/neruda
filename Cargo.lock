@@ -72,7 +72,7 @@ checksum = "5d38a7a952d7eda94a2a9fa86603be7da3ecb2b5cc0b8341b8131edbf6e32201"
 [[package]]
 name = "arena"
 version = "0.1.0"
-source = "git+https://github.com/antosatko/arena#206951cbf3a408c3f12cc42fc2420ace3955465c"
+source = "git+https://github.com/antosatko/arena#ccecd5756dcd0a0afb5d8a0c67b93c6e5ad5da8a"
 
 [[package]]
 name = "async-trait"
@@ -528,6 +528,7 @@ name = "neruda"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "ir",
  "parser",
 ]
 

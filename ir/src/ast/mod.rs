@@ -126,7 +126,7 @@ pub enum Object {
 
     Function {
         ident: Span<SmolStr>,
-        generics: Option<Span<Vec<Span<SmolStr>>>>,
+        generics: Option<Span<Vec<Span<GenericParameter>>>>,
         parameters: Vec<Span<Parameter>>,
         return_type: Option<Span<Type>>,
         body: Span<Body>,
@@ -141,14 +141,14 @@ pub enum Object {
 
     Type {
         ident: Span<SmolStr>,
-        generics: Option<Span<Vec<Span<SmolStr>>>>,
+        generics: Option<Span<Vec<Span<GenericParameter>>>>,
         ty: Option<Span<Type>>,
         docs: Vec<Span<SmolStr>>,
     },
 
     System {
         ident: Span<SmolStr>,
-        generics: Option<Span<Vec<Span<SmolStr>>>>,
+        generics: Option<Span<Vec<Span<GenericParameter>>>>,
         docs: Vec<Span<SmolStr>>,
         query: Vec<Span<Clauses>>,
         before: Option<Span<Span<Body>>>,
@@ -156,6 +156,13 @@ pub enum Object {
         after: Option<Span<Span<Body>>>,
     },
 }
+
+#[derive(Debug, Clone)]
+pub struct GenericParameter {
+    pub identifier: Span<SmolStr>,
+    pub constraints: Vec<Span<IdentifierPath>>,
+}
+
 #[derive(Debug, Clone)]
 pub struct Mutability(pub Option<Span<()>>);
 #[derive(Debug, Clone)]
@@ -344,7 +351,7 @@ pub struct Type {
 #[derive(Debug, Clone)]
 pub enum TypeLiteral {
     Path(IdentifierPath),
-    Struct((Vec<Span<Parameter>>, Option<Span<Vec<Span<SmolStr>>>>)),
+    Struct(Vec<Span<Parameter>>),
     Array(Box<Span<Type>>, Option<usize>),
     Tuple(Vec<Span<Type>>),
 }
@@ -564,18 +571,7 @@ impl std::fmt::Display for Type {
             }
             TypeLiteral::Struct(parameters) => {
                 write!(f, "struct {}", "{ ")?;
-                if let Some(generic_params) = parameters.1.as_ref().map(|p| &p.inner) {
-                    write!(f, "<")?;
-                    let mut iter = generic_params.iter().map(|p| &p.inner);
-                    if let Some(first) = iter.next() {
-                        write!(f, "{}", first)?;
-                    }
-                    for str in iter {
-                        write!(f, ", {}", str)?;
-                    }
-                    write!(f, ">")?;
-                }
-                for Parameter { ident, ty, docs: _ } in parameters.0.iter().map(|p| &p.inner) {
+                for Parameter { ident, ty, docs: _ } in parameters.iter().map(|p| &p.inner) {
                     write!(f, "{}: {} ", ident.inner, ty.inner)?;
                 }
                 write!(f, "{}", "}")?;

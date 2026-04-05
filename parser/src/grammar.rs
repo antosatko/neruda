@@ -652,13 +652,27 @@ pub fn gen_parser<'src>() -> Parser<'static> {
         .variables([node_var("lvalue"), list_var("rest")])
         .build();
 
+    let generic_parameter = parser
+        .grammar
+        .new_node("generic parameter")
+        .rules([
+            is(ident).set(IDENTIFIER).commit(),
+            maybe(token(":")).then([
+                is(ident_path).set("constraints"),
+                while_(token("+")).then([is(ident_path).set("constraints")]),
+            ]),
+        ])
+        .variables([IDENTIFIER_VAR, list_var("constraints")])
+        .build();
+
     let generic_params = parser
         .grammar
         .new_node("geneic parameters")
         .rules([
             is(token("<")).commit(),
             loop_().then([
-                maybe(ident).set("parameters"),
+                maybe(token(">")).fail(&grammar_errs::MISSING_GENERIC_PARAMS),
+                is(generic_parameter).set("parameters"),
                 is_one_of([
                     option(token(","))
                         .then([maybe(token(",")).fail(&grammar_errs::MULTIPLE_TRAILING_COMMAS)]),

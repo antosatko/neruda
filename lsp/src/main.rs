@@ -1,8 +1,8 @@
 use core::panic;
 use dashmap::DashMap;
 use ir::ast::{
-    Alias, Body, Diagnostics, Expression, Function, IdentifierPath, Literal, LoweringError, Module,
-    Object, Parameter, Postfix, Statement, Type, Value,
+    Alias, Body, Diagnostics, Expression, IdentifierPath, Literal, LoweringError, Module, Object,
+    Parameter, Postfix, Statement, Type, Value,
 };
 use line_index::{LineCol, LineIndex, TextSize};
 use parser::{
@@ -427,13 +427,8 @@ impl IndexedWalk for ir::ast::Span<Type> {
             }
             ir::ast::TypeLiteral::Struct(paramers) => {
                 spans.push(self.literal.span_word(Types::Keyword, line_index, "struct"));
-                for param in &paramers.0 {
+                for param in paramers {
                     param.index(line_index, spans);
-                }
-                if let Some(generics) = &paramers.1 {
-                    for generic in &generics.inner {
-                        spans.push(generic.span(Types::Type, line_index));
-                    }
                 }
             }
             ir::ast::TypeLiteral::Array(ty, len) => {

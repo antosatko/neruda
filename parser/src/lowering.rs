@@ -9,9 +9,9 @@ use smol_str::SmolStr;
 
 use ir::ast::{
     ActionClause, Alias, Associativity, Body, Clauses, Diagnostics, Else, ElseIf, ExprItem,
-    Expression, IdentifierPath, Keyword, Literal, LoweringError, LoweringWarning, Module,
-    Mutability, Object, Operator, Parameter, RestrictionClause, SelectClause, Span, SpanIndex,
-    Statement, SystemInclusion, Type, TypeLiteral, Value, char_literal, numeric_literal,
+    Expression, GenericParameter, IdentifierPath, Keyword, Literal, LoweringError, LoweringWarning,
+    Module, Mutability, Object, Operator, Parameter, RestrictionClause, SelectClause, Span,
+    SpanIndex, Statement, SystemInclusion, Type, TypeLiteral, Value, char_literal, numeric_literal,
     string_literal,
 };
 
@@ -192,15 +192,26 @@ fn generic_params(
     src: &str,
     node: &Option<Nodes<'_>>,
     diagnostics: &mut Diagnostics,
-) -> Option<Span<Vec<Span<SmolStr>>>> {
+) -> Option<Span<Vec<Span<GenericParameter>>>> {
     let node = match node {
         Some(node) => node,
         None => return None,
     };
     let mut params = Vec::new();
     for param in node.get_list("parameters") {
-        let i = expect_ident(src, param, diagnostics);
-        params.push(i);
+        let identifier = expect_ident(src, param, diagnostics);
+        let constraints = param
+            .get_list("constraints")
+            .iter()
+            .map(|c| ident_path(src, c))
+            .collect();
+        params.push(span(
+            GenericParameter {
+                identifier,
+                constraints,
+            },
+            param,
+        ));
     }
     Some(span(params, node))
 }
@@ -706,14 +717,7 @@ fn ty(src: &str, node: &Nodes, diagnostics: &mut Diagnostics) -> Span<Type> {
         "struct type literal" => span(
             Type {
                 literal: span(
-                    TypeLiteral::Struct((
-                        parameters(src, literal, diagnostics),
-                        generic_params(
-                            src,
-                            literal.try_get_node("generic parameters"),
-                            diagnostics,
-                        ),
-                    )),
+                    TypeLiteral::Struct(parameters(src, literal, diagnostics)),
                     literal,
                 ),
                 generics,

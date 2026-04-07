@@ -226,6 +226,17 @@ impl IndexedWalk for ir::ast::Span<Object> {
                     spans.extend(generics.iter().map(|g| g.span(Types::Type, line_index)));
                 }
             }
+            Object::Const {
+                docs: _,
+                ident,
+                ty,
+                expression,
+            } => {
+                spans.push(self.span_word(Types::Keyword, line_index, "const"));
+                spans.push(ident.span(Types::Ident, line_index));
+                ty.index(line_index, spans);
+                expression.index(line_index, spans);
+            }
             Object::System {
                 ident,
                 docs: _,
@@ -432,11 +443,16 @@ impl IndexedWalk for ir::ast::Span<Parameter> {
 
 impl IndexedWalk for ir::ast::Span<Type> {
     fn index(&self, line_index: &LineIndex, spans: &mut Vec<Span>) {
-        let Type { literal, generics } = &self.inner;
+        let Type { literal } = &self.inner;
         match &literal.inner {
-            ir::ast::TypeLiteral::Path(identifier_path) => {
+            ir::ast::TypeLiteral::Path(identifier_path, generics) => {
                 for ident in &identifier_path.path {
                     spans.push(ident.span(Types::Type, line_index));
+                }
+                if let Some(generics) = generics {
+                    for generic in &generics.inner {
+                        generic.index(line_index, spans);
+                    }
                 }
             }
             ir::ast::TypeLiteral::Struct(paramers) => {
@@ -454,10 +470,14 @@ impl IndexedWalk for ir::ast::Span<Type> {
                     ty.index(line_index, spans);
                 }
             }
-        }
-        if let Some(generics) = generics {
-            for generic in &generics.inner {
-                generic.index(line_index, spans);
+            ir::ast::TypeLiteral::Enum(variants) => {
+                spans.push(self.literal.span_word(Types::Keyword, line_index, "enum"));
+                for (ident, expr) in variants {
+                    spans.push(ident.span(Types::Type, line_index));
+                    if let Some(expr) = expr {
+                        expr.index(line_index, spans);
+                    }
+                }
             }
         }
     }

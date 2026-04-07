@@ -160,6 +160,13 @@ pub enum Object {
         ident: Span<IdentifierPath>,
         alias: Alias,
     },
+
+    Const {
+        docs: Vec<Span<SmolStr>>,
+        ident: Span<SmolStr>,
+        ty: Span<Type>,
+        expression: Span<Expression>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -351,15 +358,15 @@ pub enum Postfix {
 #[derive(Debug, Clone)]
 pub struct Type {
     pub literal: Span<TypeLiteral>,
-    pub generics: Option<Span<Vec<Span<Type>>>>,
 }
 
 #[derive(Debug, Clone)]
 pub enum TypeLiteral {
-    Path(IdentifierPath),
+    Path(IdentifierPath, Option<Span<Vec<Span<Type>>>>),
     Struct(Vec<Span<Parameter>>),
     Array(Box<Span<Type>>, Option<usize>),
     Tuple(Vec<Span<Type>>),
+    Enum(Vec<(Span<SmolStr>, Option<Span<Expression>>)>),
 }
 
 /* ===================== IDENTIFIERS ===================== */
@@ -388,6 +395,21 @@ pub enum Literal {
     Tuple(Vec<Span<Expression>>),
 }
 
+#[derive(Debug, Clone)]
+pub enum ConstValue {
+    Structure(Vec<Span<(Span<SmolStr>, Span<ConstValue>)>>),
+
+    Number(Number),
+
+    String(SmolStr),
+    Char(char),
+
+    Bool(bool),
+
+    Array(Vec<Span<ConstValue>>),
+    Tuple(Vec<Span<ConstValue>>),
+}
+
 /* ===================== NUMBERS ===================== */
 
 #[derive(Debug, Clone)]
@@ -401,7 +423,7 @@ pub enum NumberValue {
     Float(f64),
     Uint(u128),
     Int(i128),
-    Number(u128),
+    Any(u128),
 }
 
 /* ====================== LOWERING =====================*/
@@ -461,7 +483,7 @@ pub fn numeric_literal(s: &str) -> Result<Number, LoweringError> {
                 (NumberValue::Int(value), size)
             }
             Some(ref s) if s.starts_with('c') => (NumberValue::Int(value), None),
-            None => (NumberValue::Number(value as u128), None),
+            None => (NumberValue::Any(value as u128), None),
             Some(suffix) => return Err(LoweringError::UnknownNumericSuffix(suffix.into())),
         };
 
@@ -482,9 +504,7 @@ pub fn char_literal(s: &str) -> Result<char, LoweringError> {
         let unicode = s.trim_start_matches(r"'\u{").trim_end_matches("}'");
         match numeric_literal(unicode)?.value {
             NumberValue::Uint(n) => char::from_u32(n as _).ok_or(LoweringError::InvalidUtf8Char(n)),
-            NumberValue::Number(n) => {
-                char::from_u32(n as _).ok_or(LoweringError::InvalidUtf8Char(n))
-            }
+            NumberValue::Any(n) => char::from_u32(n as _).ok_or(LoweringError::InvalidUtf8Char(n)),
             num => panic!("invalid digit: {num:?}"),
         }
     } else if s.starts_with(r"\'") {
@@ -565,7 +585,7 @@ pub enum ExprItem {
 impl std::fmt::Display for Type {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match &self.literal.inner {
-            TypeLiteral::Path(identifier_path) => {
+            TypeLiteral::Path(identifier_path, generics) => {
                 let mut n = 0;
                 for txt in identifier_path.path.iter().map(|a| &a.inner) {
                     if n > 0 {
@@ -573,6 +593,17 @@ impl std::fmt::Display for Type {
                     }
                     n += 1;
                     write!(f, "{}", txt)?;
+                }
+                if let Some(generics) = generics {
+                    write!(f, "<")?;
+                    let mut iter = generics.inner.iter();
+                    if let Some(first) = iter.next() {
+                        write!(f, "{}", first.inner)?;
+                    }
+                    for generic in iter {
+                        write!(f, ", {}", generic.inner)?;
+                    }
+                    write!(f, ">")?;
                 }
             }
             TypeLiteral::Struct(parameters) => {
@@ -595,6 +626,16 @@ impl std::fmt::Display for Type {
                     write!(f, " {}", ty.inner)?;
                 }
                 write!(f, " )")?;
+            }
+            TypeLiteral::Enum(variants) => {
+                write!(f, "enum {}", "{")?;
+                for (ident, expr) in variants {
+                    write!(f, " {}", ident.inner)?;
+                    if expr.is_some() {
+                        write!(f, " = [...]")?;
+                    }
+                }
+                write!(f, " {}", '}')?;
             }
         }
         Ok(())
@@ -623,7 +664,7 @@ impl Display for Number {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.value {
             NumberValue::Float(n) => write!(f, "{n}"),
-            NumberValue::Number(n) => write!(f, "{n}"),
+            NumberValue::Any(n) => write!(f, "{n}"),
             NumberValue::Int(n) => write!(f, "{n}"),
             NumberValue::Uint(n) => write!(f, "{n}"),
         }

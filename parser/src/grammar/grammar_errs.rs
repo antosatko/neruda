@@ -101,3 +101,15 @@ pub(crate) static MUTABLE_EXLUSION: ErrorDefinition = ErrorDefinition {
     code: "215",
     msg: "A mutable component can not be excluded",
 };
+
+pub(crate) static MISSING_ENUM_BODY: ErrorDefinition = ErrorDefinition {
+    header: "Missing enum body",
+    code: "216",
+    msg: "Expected a block '{ ... }' defining enum variants",
+};
+
+pub(crate) static MISSING_EXPRESSION: ErrorDefinition = ErrorDefinition {
+    header: "Missing expression",
+    code: "217",
+    msg: "Expected a value or expression after '=' operator",
+};

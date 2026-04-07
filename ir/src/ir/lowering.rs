@@ -3,12 +3,12 @@ use std::collections::HashMap;
 use arena::Key;
 use smol_str::SmolStr;
 
-use crate::ast;
+use crate::ast::{self, ConstValue};
 use crate::ir::Context;
 use crate::ir::objects::{AnyObject, Module};
 use crate::ir::types::{
-    AnyTypeKey, ArrayType, ConstraintKey, ConstraintType, FunctionType, ModuleTag, PrimitiveType,
-    StructType, TupleType,
+    AnyTypeKey, ArrayType, ConstraintKey, ConstraintType, FunctionType, ModuleKey, ModuleTag,
+    PrimitiveType, StructType, TupleType,
 };
 
 #[derive(Default)]
@@ -48,6 +48,41 @@ impl Context {
                 }
             }
         }
+    }
+
+    pub fn resolve_const_path(
+        &mut self,
+        path: &[SmolStr],
+        mut module: ModuleKey,
+        generic_context: &mut GenericContext,
+    ) -> Option<&AnyObject> {
+        for next_stop in path {
+            let current = self.types.modules.get_mut_unchecked(&module);
+            let next = match current.symbols.get(next_stop) {
+                Some(next) => next,
+                None => match current.hoisted_symbols.remove(next_stop) {
+                    Some(hoisted) => match hoisted {
+                        ast::Object::Const {
+                            docs,
+                            ident,
+                            ty,
+                            expression,
+                        } => {
+                            let ty = ty.lower(self, module, generic_context);
+                            let value = expression.const_eval(self, generic_context)?;
+                            let obj = AnyObject::Const { value, ty };
+                            let current = self.types.modules.get_mut_unchecked(&module);
+                            current.symbols.insert(ident.inner.clone(), obj);
+                            return current.symbols.get(&ident.inner);
+                        }
+                        _ => todo!(),
+                    },
+                    None => return None,
+                },
+            };
+        }
+
+        todo!()
     }
 
     pub fn lower_module(&mut self, path: Vec<SmolStr>) {
@@ -177,16 +212,42 @@ impl GenericContext {
     }
 }
 
+impl ast::Expression {
+    pub fn const_eval(
+        &self,
+        ctx: &mut Context,
+        generic_context: &mut GenericContext,
+    ) -> Option<ConstValue> {
+        match self {
+            ast::Expression::Value(value) => {
+                if !value.postfix.is_empty() {
+                    return None;
+                }
+                Some(match &value.literal.inner {
+                    ast::Literal::Identifier(identifier_path) => todo!(),
+                    ast::Literal::Structure(span, spans) => todo!(),
+                    ast::Literal::Number(number) => ConstValue::Number(number.clone()),
+                    ast::Literal::String(smol_str) => ConstValue::String(smol_str.clone()),
+                    ast::Literal::Char(c) => ConstValue::Char(*c),
+                    ast::Literal::Array(spans) => todo!(),
+                    ast::Literal::Tuple(spans) => todo!(),
+                })
+            }
+            ast::Expression::Binary { l, r, op } => todo!(),
+        }
+    }
+}
+
 impl ast::Type {
     pub fn lower(
         &self,
         ctx: &mut Context,
-        module: &ast::Module,
+        module: ModuleKey,
         generic_context: &mut GenericContext,
     ) -> AnyTypeKey {
-        let Self { literal, generics } = &self;
-        let unresolved = match &literal.inner {
-            ast::TypeLiteral::Path(identifier_path) => {
+        let Self { literal } = &self;
+        match &literal.inner {
+            ast::TypeLiteral::Path(identifier_path, generics) => {
                 if identifier_path.path.len() == 1
                     && let Some(ident) = identifier_path.path.first()
                 {
@@ -197,7 +258,23 @@ impl ast::Type {
                         return AnyTypeKey::Constraint(*ty);
                     }
                 }
-                todo!("resolve actual path")
+                let path: Vec<SmolStr> = identifier_path
+                    .path
+                    .iter()
+                    .map(|p| p.inner.clone())
+                    .collect();
+                let resolved = ctx.resolve_const_path(&path, todo!(), generic_context);
+                match generics {
+                    Some(generics) => {
+                        for generic in &generics.inner {
+                            let _ = generic.lower(ctx, module, generic_context);
+                        }
+                        todo!()
+                    }
+                    None => {
+                        todo!("resolve actual path the usual way")
+                    }
+                }
             }
             ast::TypeLiteral::Struct(spans) => {
                 let mut parameters = Vec::new();
@@ -210,6 +287,9 @@ impl ast::Type {
                 }
                 let key = ctx.types.structures.push_unique(StructType { parameters });
                 AnyTypeKey::Struct(key)
+            }
+            ast::TypeLiteral::Enum(variants) => {
+                todo!()
             }
             ast::TypeLiteral::Array(span, size) => {
                 let ty = span.lower(ctx, module, generic_context);
@@ -231,12 +311,6 @@ impl ast::Type {
                         AnyTypeKey::Tuple(key)
                     }
                 }
-            }
-        };
-        match generics {
-            None => unresolved,
-            Some(generics) => {
-                todo!("need to resolve generics")
             }
         }
     }

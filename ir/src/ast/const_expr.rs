@@ -1,8 +1,8 @@
 use std::borrow::Cow;
 
 use crate::ast::{
-    Diagnostics, Expression, Literal, LoweringDiagnostic, LoweringWarning, Number, NumberValue,
-    Operator, Span, Value,
+    ConstValue, Diagnostics, Expression, Literal, LoweringDiagnostic, LoweringWarning, Number,
+    NumberValue, Operator, Span, Value,
 };
 
 impl Expression {
@@ -23,7 +23,7 @@ impl Expression {
                             l.postfix.len() + r.postfix.len() == 0,
                         ) {
                             (Literal::Number(l), Literal::Number(r), true) => {
-                                match op.apply(&l.value, &r.value, diagnostics) {
+                                match op.const_apply_numeric(&l.value, &r.value, diagnostics) {
                                     Some(value) => {
                                         let v = Value {
                                             literal: Span::new(
@@ -53,7 +53,79 @@ impl Expression {
 }
 
 impl Span<Operator> {
-    pub fn apply(
+    pub fn const_apply(
+        &self,
+        l: &ConstValue,
+        r: &ConstValue,
+        diagnostics: &mut Diagnostics,
+    ) -> Option<ConstValue> {
+        use Operator::*;
+
+        match self.inner {
+            Add | Sub | Mul | Div | Mod => match (l, r) {
+                (ConstValue::Number(l), ConstValue::Number(r)) => self
+                    .const_apply_numeric(&l.value, &r.value, diagnostics)
+                    .map(|value| ConstValue::Number(Number { value, size: None })),
+                _ => None,
+            },
+            Eq | NEq | Gr | Le | GrEq | LeEq => match (l, r) {
+                (ConstValue::Number(l), ConstValue::Number(r)) => self
+                    .const_apply_numeric_to_bool(&l.value, &r.value, diagnostics)
+                    .map(|value| ConstValue::Bool(value)),
+                _ => None,
+            },
+            And | Or => todo!(),
+            Assign | AddAssign | SubAssign | MulAssign | DivAssign | ModAssign => None,
+        }
+    }
+
+    fn const_apply_bool(&self, l: bool, r: bool, diagnostics: &mut Diagnostics) -> Option<bool> {
+        todo!()
+    }
+
+    fn const_apply_numeric_to_bool(
+        &self,
+        l: &NumberValue,
+        r: &NumberValue,
+        diagnostics: &mut Diagnostics,
+    ) -> Option<bool> {
+        use NumberValue::*;
+        use Operator::*;
+        Some(match (self.inner, l, r) {
+            (Eq, Float(l), Float(r)) => l == r,
+            (Eq, Any(l), Any(r)) => l == r,
+            (Eq, Int(l), Int(r)) => l == r,
+            (Eq, Uint(l), Uint(r)) => l == r,
+
+            (NEq, Float(l), Float(r)) => l != r,
+            (NEq, Any(l), Any(r)) => l != r,
+            (NEq, Int(l), Int(r)) => l != r,
+            (NEq, Uint(l), Uint(r)) => l != r,
+
+            (Le, Float(l), Float(r)) => l < r,
+            (Le, Any(l), Any(r)) => l < r,
+            (Le, Int(l), Int(r)) => l < r,
+            (Le, Uint(l), Uint(r)) => l < r,
+
+            (LeEq, Float(l), Float(r)) => l <= r,
+            (LeEq, Any(l), Any(r)) => l <= r,
+            (LeEq, Int(l), Int(r)) => l <= r,
+            (LeEq, Uint(l), Uint(r)) => l <= r,
+
+            (Gr, Float(l), Float(r)) => l > r,
+            (Gr, Any(l), Any(r)) => l > r,
+            (Gr, Int(l), Int(r)) => l > r,
+            (Gr, Uint(l), Uint(r)) => l > r,
+
+            (GrEq, Float(l), Float(r)) => l >= r,
+            (GrEq, Any(l), Any(r)) => l >= r,
+            (GrEq, Int(l), Int(r)) => l >= r,
+            (GrEq, Uint(l), Uint(r)) => l >= r,
+            _ => return None,
+        })
+    }
+
+    fn const_apply_numeric(
         &self,
         l: &NumberValue,
         r: &NumberValue,
@@ -61,26 +133,25 @@ impl Span<Operator> {
     ) -> Option<NumberValue> {
         use NumberValue::*;
         use Operator::*;
-
         Some(match (self.inner, l, r) {
             (Add, Float(l), Float(r)) => Float(l + r),
-            (Add, Number(l), Number(r)) => Number(l + r),
+            (Add, Any(l), Any(r)) => Any(l + r),
             (Add, Int(l), Int(r)) => Int(l + r),
             (Add, Uint(l), Uint(r)) => Uint(l + r),
 
             (Sub, Float(l), Float(r)) => Float(l - r),
-            (Sub, Number(l), Number(r)) => Number(l - r),
+            (Sub, Any(l), Any(r)) => Any(l - r),
             (Sub, Int(l), Int(r)) => Int(l - r),
             (Sub, Uint(l), Uint(r)) => Uint(l - r),
 
             (Mul, Float(l), Float(r)) => Float(l * r),
-            (Mul, Number(l), Number(r)) => Number(l * r),
+            (Mul, Any(l), Any(r)) => Any(l * r),
             (Mul, Int(l), Int(r)) => Int(l * r),
             (Mul, Uint(l), Uint(r)) => Uint(l * r),
 
             (Div, Float(l), Float(r)) => Float(l / r),
-            (Div, Number(l), Number(r)) => match (*l).checked_div(*r) {
-                Some(v) => Number(v),
+            (Div, Any(l), Any(r)) => match (*l).checked_div(*r) {
+                Some(v) => Any(v),
                 None => {
                     diagnostics
                         .warns
@@ -108,8 +179,8 @@ impl Span<Operator> {
             },
 
             (Mod, Float(l), Float(r)) => Float(l % r),
-            (Mod, Number(l), Number(r)) => match (*l).checked_rem_euclid(*r) {
-                Some(v) => Number(v),
+            (Mod, Any(l), Any(r)) => match (*l).checked_rem_euclid(*r) {
+                Some(v) => Any(v),
                 None => {
                     diagnostics
                         .warns

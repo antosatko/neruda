@@ -29,6 +29,8 @@ const KEYWORDS: &[&'static str] = &[
     "before",
     "after",
     "foreign",
+    "enum",
+    "const",
 ];
 
 const KEYWORDS_NON_BLOCKING: &[&'static str] = &["where", "systems", "resources", "on", "import"];
@@ -697,10 +699,8 @@ pub fn gen_parser<'src>() -> Parser<'static> {
     let struct_type_literal = parser
         .grammar
         .new_node("struct type literal")
-        .has(docstr, "docs")
         .rules([
             is(keyword("struct")).commit(),
-            maybe(generic_params).set("generic parameters"),
             is_one_of([
                 option(token("{")),
                 option(any()).fail(&grammar_errs::MISSING_STRUCT_BODY),
@@ -710,7 +710,39 @@ pub fn gen_parser<'src>() -> Parser<'static> {
                 option(token("}")).return_node(),
             ])]),
         ])
-        .variables([list_var("parameters"), node_var("generic parameters")])
+        .variables([list_var("parameters")])
+        .build();
+
+    let enum_type_literal_variant = parser
+        .grammar
+        .new_node("enum type varaint")
+        .has(docstr, "docs")
+        .rules([
+            is(ident).set(IDENTIFIER).commit(),
+            maybe(token("=")).then([is_one_of([
+                option(expression).set("expression"),
+                option(any()).fail(&grammar_errs::MISSING_EXPRESSION),
+            ])]),
+            is(end_stmt),
+        ])
+        .variables([IDENTIFIER_VAR, node_var("expression")])
+        .build();
+
+    let enum_type_literal = parser
+        .grammar
+        .new_node("enum type literal")
+        .rules([
+            is(keyword("enum")).commit(),
+            is_one_of([
+                option(token("{")),
+                option(any()).fail(&grammar_errs::MISSING_ENUM_BODY),
+            ]),
+            loop_().then([is_one_of([
+                option(enum_type_literal_variant).set("variants"),
+                option(token("}")).return_node(),
+            ])]),
+        ])
+        .variables([list_var("variants")])
         .build();
 
     let array_type_literal = parser
@@ -745,17 +777,6 @@ pub fn gen_parser<'src>() -> Parser<'static> {
         .variables([list_var("parameters")])
         .build();
 
-    let type_literal = parser
-        .grammar
-        .new_enum("type literal")
-        .options([
-            ident_path,
-            struct_type_literal,
-            array_type_literal,
-            tuple_type_literal,
-        ])
-        .build();
-
     let generic_impl = parser
         .grammar
         .new_node("generics")
@@ -773,14 +794,33 @@ pub fn gen_parser<'src>() -> Parser<'static> {
         .variables([list_var("parameters")])
         .build();
 
+    let type_path = parser
+        .grammar
+        .new_node("type path")
+        .rules([
+            is(ident_path).commit().set(IDENTIFIER),
+            maybe(generic_impl).set("generics"),
+        ])
+        .variables([IDENTIFIER_VAR, node_var("generics")])
+        .build();
+
+    let type_literal = parser
+        .grammar
+        .new_enum("type literal")
+        .options([
+            type_path,
+            struct_type_literal,
+            array_type_literal,
+            tuple_type_literal,
+            enum_type_literal,
+        ])
+        .build();
+
     let type_ = parser
         .grammar
         .new_node("type")
-        .rules([
-            is(type_literal).commit().set("literal"),
-            maybe(generic_impl).set("generics"),
-        ])
-        .variables([node_var("literal"), node_var("generics")])
+        .rules([is(type_literal).commit().set("literal")])
+        .variables([node_var("literal")])
         .build();
 
     let label = parser
@@ -821,6 +861,22 @@ pub fn gen_parser<'src>() -> Parser<'static> {
             ]),
         ])
         .variables([list_var("parameters")])
+        .build();
+
+    let const_kw = parser
+        .grammar
+        .new_node("const")
+        .has(docstr, "docs")
+        .rules([
+            is(keyword("const")).commit(),
+            is(ident).set(IDENTIFIER),
+            is(token(":")).hint("Constants must specify the type"),
+            is(type_).set("type"),
+            is(token("=")).hint("Constants must be initialized on declaration"),
+            is(expression).set("expression"),
+            is(end_stmt),
+        ])
+        .variables([IDENTIFIER_VAR, node_var("type"), node_var("expression")])
         .build();
 
     let expression_st = parser
@@ -1244,7 +1300,9 @@ pub fn gen_parser<'src>() -> Parser<'static> {
     let tls = parser
         .grammar
         .new_enum("top level statement")
-        .options([scheduler, function, system, component, type_kw, import])
+        .options([
+            scheduler, function, system, component, type_kw, import, const_kw,
+        ])
         .build();
 
     parser

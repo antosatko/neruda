@@ -57,7 +57,7 @@ pub fn module_named(
                     for s in sys.get_list("systems") {
                         let path = ident_path(src, s.expect_node("identifier"));
                         let generics =
-                            generic_arguments(src, s.try_get_node("generics"), &mut diagnostics);
+                            generic_arguments(src, s.try_get_node("generics"), &mut diagnostics)?;
                         systems_vec.push(span(SystemInclusion { path, generics }, s));
                     }
                     systems = Some(span(systems_vec, sys));
@@ -81,11 +81,11 @@ pub fn module_named(
 
             "function" => {
                 let ident = expect_ident(src, s, &mut diagnostics);
-                let params = parameters(src, s.expect_node("parameters"), &mut diagnostics);
-                let return_type = s
-                    .try_get_node("return type")
-                    .as_ref()
-                    .map(|t| ty(src, t, &mut diagnostics));
+                let params = parameters(src, s.expect_node("parameters"), &mut diagnostics)?;
+                let return_type = match s.try_get_node("return type") {
+                    Some(t) => Some(ty(src, t, &mut diagnostics)?),
+                    None => None,
+                };
                 let body = body(src, s.expect_node("code body"), &mut diagnostics)?;
                 let docs = docstrings(src, s);
                 let generics =
@@ -144,10 +144,10 @@ pub fn module_named(
             "component" => {
                 let ident = expect_ident(src, s, &mut diagnostics);
                 let docs = docstrings(src, s);
-                let ty = s
-                    .try_get_node("type")
-                    .as_ref()
-                    .map(|t| ty(src, t, &mut diagnostics));
+                let ty = match s.try_get_node("type") {
+                    Some(t) => Some(ty(src, t, &mut diagnostics)?),
+                    None => None,
+                };
 
                 let obj = Object::Component {
                     ident: ident.clone(),
@@ -161,10 +161,10 @@ pub fn module_named(
             "type definition" => {
                 let ident = expect_ident(src, s, &mut diagnostics);
                 let docs = docstrings(src, s);
-                let ty = s
-                    .try_get_node("type")
-                    .as_ref()
-                    .map(|t| ty(src, t, &mut diagnostics));
+                let ty = match s.try_get_node("type") {
+                    Some(t) => Some(ty(src, t, &mut diagnostics)?),
+                    None => None,
+                };
                 let generics =
                     generic_params(src, s.try_get_node("generic parameters"), &mut diagnostics);
 
@@ -183,6 +183,20 @@ pub fn module_named(
                 let alias = alias(src, s.try_get_node("alias"), &mut diagnostics);
                 let obj = Object::Import { ident, alias };
                 module.objects.push(span(obj, s));
+            }
+
+            "const" => {
+                let ident = expect_ident(src, s.expect_node("identifier"), &mut diagnostics);
+                let ty = ty(src, s.expect_node("type"), &mut diagnostics)?;
+                let docs = docstrings(src, s);
+                let expression = expression(src, s.expect_node("expression"), &mut diagnostics)?;
+                let obj = Object::Const {
+                    docs,
+                    ident,
+                    ty,
+                    expression,
+                };
+                module.objects.push(span(obj, node));
             }
 
             other => s.ice(&format!("Unhandled top-level item: {}", other)),
@@ -343,10 +357,10 @@ fn block(
         let stmt = match stmt_node.get_name() {
             "variable" => {
                 let ident = expect_ident(src, stmt_node.expect_node("identifier"), diagnostics);
-                let ty = stmt_node
-                    .try_get_node("type")
-                    .as_ref()
-                    .map(|t| ty(src, t, diagnostics));
+                let ty = match stmt_node.try_get_node("type") {
+                    Some(t) => Some(ty(src, t, diagnostics)?),
+                    None => None,
+                };
                 let expression = match stmt_node.try_get_node("expression").as_ref() {
                     Some(e) => Some(expression(src, e, diagnostics)?),
                     None => None,
@@ -704,77 +718,106 @@ fn generic_arguments(
     src: &str,
     node: &Option<Nodes>,
     diagnostics: &mut Diagnostics,
-) -> Option<Span<Vec<Span<Type>>>> {
+) -> Result<Option<Span<Vec<Span<Type>>>>, Span<LoweringError>> {
     match node {
         Some(generics) => {
             let mut parameters = Vec::new();
             for param in generics.get_list("parameters") {
-                parameters.push(ty(src, param, diagnostics));
+                parameters.push(ty(src, param, diagnostics)?);
             }
-            Some(span(parameters, generics))
+            Ok(Some(span(parameters, generics)))
         }
-        None => None,
+        None => Ok(None),
     }
 }
 
-fn ty(src: &str, node: &Nodes, diagnostics: &mut Diagnostics) -> Span<Type> {
+fn ty(
+    src: &str,
+    node: &Nodes,
+    diagnostics: &mut Diagnostics,
+) -> Result<Span<Type>, Span<LoweringError>> {
     let literal = node.expect_node("literal");
-    let generics = generic_arguments(src, node.try_get_node("generics"), diagnostics);
 
     match literal.get_name() {
-        "identifier path" => span(
-            Type {
-                literal: span(TypeLiteral::Path(ident_path(src, literal).inner), literal),
-                generics,
-            },
-            node,
-        ),
-        "struct type literal" => span(
+        "type path" => Ok(span(
             Type {
                 literal: span(
-                    TypeLiteral::Struct(parameters(src, literal, diagnostics)),
+                    TypeLiteral::Path(
+                        ident_path(src, literal.expect_node("identifier")).inner,
+                        generic_arguments(src, literal.try_get_node("generics"), diagnostics)?,
+                    ),
                     literal,
                 ),
-                generics,
             },
             node,
-        ),
+        )),
+        "struct type literal" => Ok(span(
+            Type {
+                literal: span(
+                    TypeLiteral::Struct(parameters(src, literal, diagnostics)?),
+                    literal,
+                ),
+            },
+            node,
+        )),
         "array type literal" => {
-            let type_ = ty(src, literal.expect_node("type"), diagnostics);
+            let type_ = ty(src, literal.expect_node("type"), diagnostics)?;
             assert!(literal.try_get_node("length").is_none(), "working on it :)");
-            span(
+            Ok(span(
                 Type {
                     literal: span(TypeLiteral::Array(Box::new(type_), None), literal),
-                    generics,
                 },
                 node,
-            )
+            ))
         }
         "tuple type literal" => {
             let mut params = Vec::new();
             for param in literal.get_list("parameters") {
-                params.push(ty(src, param, diagnostics));
+                params.push(ty(src, param, diagnostics)?);
             }
-            span(
+            Ok(span(
                 Type {
                     literal: span(TypeLiteral::Tuple(params), literal),
-                    generics,
                 },
                 node,
-            )
+            ))
+        }
+        "enum type literal" => {
+            let mut variants = Vec::new();
+            for variant in literal.get_list("variants") {
+                let ident = expect_ident(src, variant, diagnostics);
+                let expr = match variant.try_get_node("expression") {
+                    Some(expr) => Some(expression(src, expr, diagnostics)?),
+                    None => None,
+                };
+            }
+            Ok(span(
+                Type {
+                    literal: span(TypeLiteral::Enum(variants), literal),
+                },
+                node,
+            ))
         }
         name => panic!("{name}"),
     }
 }
 
-fn parameter(src: &str, node: &Nodes, diagnostics: &mut Diagnostics) -> Span<Parameter> {
+fn parameter(
+    src: &str,
+    node: &Nodes,
+    diagnostics: &mut Diagnostics,
+) -> Result<Span<Parameter>, Span<LoweringError>> {
     let ident = expect_ident(src, node.expect_node("identifier"), diagnostics);
-    let ty = ty(src, node.expect_node("type"), diagnostics);
+    let ty = ty(src, node.expect_node("type"), diagnostics)?;
     let docs = docstrings(src, node);
-    span(Parameter { ident, ty, docs }, node)
+    Ok(span(Parameter { ident, ty, docs }, node))
 }
 
-fn parameters(src: &str, node: &Nodes, diagnostics: &mut Diagnostics) -> Vec<Span<Parameter>> {
+fn parameters(
+    src: &str,
+    node: &Nodes,
+    diagnostics: &mut Diagnostics,
+) -> Result<Vec<Span<Parameter>>, Span<LoweringError>> {
     node.get_list("parameters")
         .iter()
         .map(|p| parameter(src, p, diagnostics))

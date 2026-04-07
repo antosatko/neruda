@@ -1,4 +1,4 @@
-import core::math as m
+import math as m
 
 scheduler main {
     resources {
@@ -22,6 +22,7 @@ type UnitCount = u32
 
 component Position = f32x2
 component Velocity = f32x2
+component Orbiting = entity
 
 
 // Select
@@ -35,6 +36,11 @@ system count_units(_: Position, count: mut UnitCount)
     before { var tmp = 0 }
     => tmp += 1
     after => count = tmp
-
+// foreign entities
+system orbit(
+    satellite: mut Velocity as V & Position as P & Orbiting as C,
+    foreign primary: Position as P
+)
+=> satellite.V += 1000 / (primary.get(satellite.C).P - satellite.P).pow(2)
 // generic components
-system add<T, U>(e: mut T & U) => e.T += e.U
+system add<T: AddEq, U>(e: mut T & U) => e.T += e.U

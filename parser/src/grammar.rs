@@ -28,6 +28,7 @@ const KEYWORDS: &[&'static str] = &[
     "type",
     "before",
     "after",
+    "foreign",
 ];
 
 const KEYWORDS_NON_BLOCKING: &[&'static str] = &["where", "systems", "resources", "on", "import"];
@@ -624,7 +625,7 @@ pub fn gen_parser<'src>() -> Parser<'static> {
         .new_node("import")
         .rules([
             is(keyword("import")).commit(),
-            is(ident_path).set(IDENTIFIER),
+            is(ident_path).set(IDENTIFIER).set(global("imports")),
             maybe(alias).set("alias"),
             is(end_stmt),
         ])
@@ -1076,12 +1077,15 @@ pub fn gen_parser<'src>() -> Parser<'static> {
         .rules([
             maybe(keyword("mut"))
                 .set("mutable")
-                .then([maybe(token("?")).set("modifier")])
+                .then([maybe_one_of([
+                    option(token("?")).set("modifier"),
+                    option(token("!")).fail(&grammar_errs::MUTABLE_EXLUSION),
+                ])])
                 .otherwise([maybe_one_of([
                     option(token("?")).set("modifier"),
                     option(token("!")).set("modifier"),
                 ])]),
-            is(ident_path).set("component"),
+            is(ident_path).set("component").commit(),
             maybe(alias).set("alias"),
         ])
         .variables([
@@ -1097,6 +1101,7 @@ pub fn gen_parser<'src>() -> Parser<'static> {
         .new_node("select")
         .has(docstr, "docs")
         .rules([
+            maybe(keyword("foreign")).set("foreign"),
             is(ident).set(IDENTIFIER).commit(),
             is(token(":")),
             is(clause_select_component).set("components"),
@@ -1104,7 +1109,7 @@ pub fn gen_parser<'src>() -> Parser<'static> {
                 .set("components")
                 .hint("Trailing separators not allowed")]),
         ])
-        .variables([IDENTIFIER_VAR, list_var("components")])
+        .variables([IDENTIFIER_VAR, list_var("components"), node_var("foreign")])
         .build();
 
     let event_component = parser
@@ -1253,6 +1258,7 @@ pub fn gen_parser<'src>() -> Parser<'static> {
         .variables([list_var("top level statements")])
         .build();
     parser.parser.entry = Some("entry");
+    parser.grammar.globals.push(list_var("imports"));
 
     let valid_result = Validator::default().validate(&parser);
     valid_result.print_all().unwrap();

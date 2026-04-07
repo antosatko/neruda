@@ -3,8 +3,10 @@ use ir::ir::{Context, types::Types};
 use parser::{
     grammar::gen_parser,
     lowering::{self, ModuleOk},
+    parse_directory,
 };
 use std::{
+    collections::HashMap,
     fs::File,
     io::{Read, Write},
     path::PathBuf,
@@ -48,7 +50,7 @@ fn main() {
                 Ok(tokens) => tokens,
                 Err(e) => {
                     return e
-                        .print(&buf, cli.input.to_str())
+                        .print(&buf, Some(&cli.input))
                         .expect("Unable to print lexing err");
                 }
             };
@@ -56,7 +58,7 @@ fn main() {
                 Ok(tokens) => tokens,
                 Err(e) => {
                     return e
-                        .print(&buf, cli.input.to_str())
+                        .print(&buf, Some(&cli.input))
                         .expect("Unable to print parsing err");
                 }
             };
@@ -84,39 +86,28 @@ fn main() {
             }
         }
         EmitTarget::Ir => {
-            let mut buf = String::new();
-            File::open(&cli.input)
-                .expect("Unable to open input file")
-                .read_to_string(&mut buf)
-                .expect("Unable to read input file");
-            let parser = gen_parser();
-            let tokens = match parser.lexer.lex_utf8(&buf) {
-                Ok(tokens) => tokens,
-                Err(e) => {
-                    return e
-                        .print(&buf, cli.input.to_str())
-                        .expect("Unable to print lexing err");
+            let modules = parse_directory(&cli.input, None, |str, path, e| {
+                e.print(str, Some(path)).unwrap();
+            })
+            .unwrap();
+            for (
+                _,
+                ModuleOk {
+                    module,
+                    diagnostics,
+                },
+            ) in &modules
+            {
+                for warn in &diagnostics.warns {
+                    println!("Warning: {} - {:?}", warn.inner, warn.location)
                 }
-            };
-            let ast = match parser.parse(&tokens, &buf) {
-                Ok(tokens) => tokens,
-                Err(e) => {
-                    return e
-                        .print(&buf, cli.input.to_str())
-                        .expect("Unable to print parsing err");
-                }
-            };
-            let ModuleOk {
-                module,
-                diagnostics,
-            } = lowering::module_named("main.nrd", &buf, ast.entry).expect("somting went wrong :)");
-
-            for warn in diagnostics.warns {
-                println!("Warning: {} - {:?}", warn.inner, warn.location)
             }
 
-            let mut ir_ctx = Context::new();
-            ir_ctx.lower_module(&module);
+            let mut ir_ctx = Context::from_ast(HashMap::from_iter(
+                modules
+                    .iter()
+                    .map(|(key, mok)| (key.clone(), mok.module.clone())),
+            ));
 
             {
                 let Types {
@@ -126,6 +117,7 @@ fn main() {
                     structures,
                     arrays,
                     tuples,
+                    modules,
                 } = &ir_ctx.types;
                 println!("function types:");
                 for t in functions.iter() {
@@ -150,6 +142,10 @@ fn main() {
                 println!("tuple types:");
                 for t in tuples.iter() {
                     println!("\t{}", t.stringify(&ir_ctx.types));
+                }
+                println!("module refs:");
+                for t in modules.iter() {
+                    println!("\t- {}", t.stringify(&ir_ctx.types));
                 }
             }
         }

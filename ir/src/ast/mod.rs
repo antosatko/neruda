@@ -190,6 +190,7 @@ pub enum Clauses {
 
 #[derive(Debug, Clone)]
 pub struct SelectClause {
+    pub foreign: Option<Keyword>,
     pub ident: Span<SmolStr>,
     pub docs: Vec<Span<SmolStr>>,
     pub include: Vec<(Span<IdentifierPath>, Mutability, Alias)>,
@@ -625,6 +626,45 @@ impl Display for Number {
             NumberValue::Number(n) => write!(f, "{n}"),
             NumberValue::Int(n) => write!(f, "{n}"),
             NumberValue::Uint(n) => write!(f, "{n}"),
+        }
+    }
+}
+
+impl LoweringError {
+    pub fn info(&self) -> (&'static str, &'static str, String) {
+        match self {
+            LoweringError::ParseIntError(e) => ("Invalid integer literal", "300", e.to_string()),
+            LoweringError::ParseFloatError(e) => ("Invalid float literal", "301", e.to_string()),
+            LoweringError::UnknownNumericSuffix(suffix) => (
+                "Invalid numeric suffix",
+                "302",
+                format!("Unknown numeric suffix `{suffix}`"),
+            ),
+            LoweringError::MutableExclusion => (
+                "conflicting modifiers",
+                "303",
+                "Component cannot be both mutable and excluded".to_string(),
+            ),
+            LoweringError::InvalidUtf8Char(c) => (
+                "Invalid character",
+                "304",
+                format!("Invalid UTF-8 character `{c}`"),
+            ),
+            LoweringError::UnknownEscapeChar(c) => (
+                "Invalid escape sequence",
+                "305",
+                format!("Unknown escape sequence `\\{c}`"),
+            ),
+            LoweringError::UnclosedEscapeChar => (
+                "Unterminated escape sequence",
+                "306",
+                "Escape sequence is not terminated".to_string(),
+            ),
+            LoweringError::EmptyCharLiteral => (
+                "Empty character literal",
+                "307",
+                "Character literal must contain exactly one character".to_string(),
+            ),
         }
     }
 }

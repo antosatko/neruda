@@ -3,7 +3,7 @@ use std::{borrow::Cow, collections::HashMap};
 use arena::{Arena, Key};
 use smol_str::SmolStr;
 
-use crate::ir::objects::AnyObjectKey;
+use crate::ir::objects::{AnyObject, Module};
 
 pub type FunctionArena = Arena<FunctionType>;
 pub type FunctionKey = Key<FunctionType>;
@@ -51,6 +51,11 @@ pub struct GenericType {
     pub inner: AnyTypeKey,
 }
 
+pub type ModuleArena = Arena<Module, ModuleTag>;
+pub type ModuleKey = Key<ModuleTag>;
+#[derive(PartialEq, Debug, Clone, Copy)]
+pub struct ModuleTag;
+
 #[derive(PartialEq, Debug)]
 #[repr(u8)]
 pub enum PrimitiveType {
@@ -72,6 +77,7 @@ pub enum PrimitiveType {
     F64x4,
     Char,
     Void,
+    EntityRef,
 }
 
 #[derive(PartialEq, Debug)]
@@ -83,10 +89,7 @@ pub enum AnyTypeKey {
     Array(ArrayKey),
     Tuple(TupleKey),
     Struct(StructKey),
-}
-
-pub struct Module {
-    pub symbols: HashMap<SmolStr, AnyObjectKey>,
+    ModuleRef(ModuleKey),
 }
 
 #[derive(Default)]
@@ -97,6 +100,7 @@ pub struct Types {
     pub structures: StructArena,
     pub arrays: ArrayArena,
     pub tuples: TupleArena,
+    pub modules: ModuleArena,
 }
 
 impl PrimitiveType {
@@ -119,6 +123,7 @@ impl PrimitiveType {
             "f32x4" => Some(Self::F32x4),
             "f64x4" => Some(Self::F64x4),
             "char" => Some(Self::Char),
+            "entity" => Some(Self::EntityRef),
             _ => None,
         }
     }
@@ -143,6 +148,7 @@ impl PrimitiveType {
             PrimitiveType::F64x4 => "f64x4",
             PrimitiveType::Char => "char",
             PrimitiveType::Void => "()",
+            PrimitiveType::EntityRef => "entity",
         }
     }
 }
@@ -171,6 +177,12 @@ impl StructType {
         }
         out.push('}');
         out
+    }
+}
+
+impl Module {
+    pub fn stringify(&self, _: &Types) -> String {
+        self.path.join("::")
     }
 }
 
@@ -251,6 +263,9 @@ impl AnyTypeKey {
             AnyTypeKey::Tuple(key) => Cow::Owned(types.tuples.get_unchecked(key).stringify(types)),
             AnyTypeKey::Struct(key) => {
                 Cow::Owned(types.structures.get_unchecked(key).stringify(types))
+            }
+            AnyTypeKey::ModuleRef(key) => {
+                Cow::Owned(types.modules.get_unchecked(key).stringify(types))
             }
         }
     }

@@ -235,6 +235,10 @@ fn clause_variant(
             let mut include = Vec::new();
             let mut exclude = Vec::new();
             let mut optional = Vec::new();
+            let foreign = clause
+                .try_get_node("foreign")
+                .as_ref()
+                .map(|n| Keyword(span((), &n)));
             for component in clause.get_list("components") {
                 let mutable = component
                     .try_get_node("mutable")
@@ -262,6 +266,7 @@ fn clause_variant(
             }
             Ok(span(
                 Clauses::Select(SelectClause {
+                    foreign,
                     ident,
                     docs,
                     include,

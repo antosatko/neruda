@@ -95,3 +95,9 @@ pub(crate) static MISSING_GENERIC_PARAMS: ErrorDefinition = ErrorDefinition {
     code: "214",
     msg: "Expected at least one generic parameter",
 };
+
+pub(crate) static MUTABLE_EXLUSION: ErrorDefinition = ErrorDefinition {
+    header: "Mutable exclusion",
+    code: "215",
+    msg: "A mutable component can not be excluded",
+};

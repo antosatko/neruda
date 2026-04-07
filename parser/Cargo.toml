@@ -8,3 +8,5 @@ ruparse.workspace = true
 arena.workspace = true
 smol_str.workspace = true
 ir = { path = "../ir" }
+walkdir = "2.5.0"
+annotate-snippets = "0.12.14"

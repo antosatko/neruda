@@ -1,9 +1,13 @@
+use std::collections::HashMap;
+
+use arena::Key;
 use smol_str::SmolStr;
 
 use crate::ast;
 use crate::ir::Context;
+use crate::ir::objects::{AnyObject, Module};
 use crate::ir::types::{
-    AnyTypeKey, ArrayType, ConstraintKey, ConstraintType, FunctionType, GenericType, PrimitiveType,
+    AnyTypeKey, ArrayType, ConstraintKey, ConstraintType, FunctionType, ModuleTag, PrimitiveType,
     StructType, TupleType,
 };
 
@@ -13,8 +17,45 @@ pub struct GenericContext {
 }
 
 impl Context {
-    pub fn lower_module(&mut self, module: &ast::Module) {
+    pub(crate) fn lower_import_stage(&mut self) {
+        let map: HashMap<Vec<SmolStr>, Key<ModuleTag>> =
+            HashMap::from_iter(self.ast.keys().map(|k| {
+                let mut module = Module::default();
+                module.path = k.clone();
+                let type_key = self.types.modules.push(module);
+                (k.clone(), type_key)
+            }));
+
+        for (key, module) in &self.ast {
+            let ir_module = self.types.modules.get_mut_unchecked(map.get(key).unwrap());
+            for obj in module.objects.iter() {
+                match &obj.inner {
+                    ast::Object::Import { ident, alias } => {
+                        let key: Vec<SmolStr> =
+                            ident.inner.path.iter().map(|a| a.inner.clone()).collect();
+                        let ident = match &alias.0 {
+                            Some(name) => name.inner.inner.clone(),
+                            None => ident.inner.path.last().unwrap().inner.clone(),
+                        };
+                        let ty_key = match map.get(&key) {
+                            Some(k) => *k,
+                            None => todo!("lamo"),
+                        };
+                        let obj = AnyObject::Import { module: ty_key };
+                        ir_module.symbols.insert(ident, obj);
+                    }
+                    _ => (),
+                }
+            }
+        }
+    }
+
+    pub fn lower_module(&mut self, path: Vec<SmolStr>) {
+        /*self.types
+            .module_references
+            .push_unique(ModuleRefType { key: path.clone() });
         let mut generic_ctx = GenericContext::default();
+
         for object in module.objects.iter() {
             match &object.inner {
                 ast::Object::Scheduler {
@@ -83,9 +124,18 @@ impl Context {
                     let key = self.types.functions.push_unique(fn_type);
                     let key = AnyTypeKey::Function(key);
                 }
-                ast::Object::Import { ident, alias } => {}
+                ast::Object::Import { ident, alias } => {
+                    let key = ident.inner.path.iter().map(|a| a.inner.clone()).collect();
+                    let ident = match &alias.0 {
+                        Some(name) => name.inner.inner.clone(),
+                        None => ident.inner.path.last().unwrap().inner.clone(),
+                    };
+                    let ty = ModuleRefType { key: key };
+                    let ty_key = self.types.module_references.push_unique(ty);
+                    let obj = AnyObject::Import { module: ty_key };
+                }
             }
-        }
+        }*/
     }
 }
 

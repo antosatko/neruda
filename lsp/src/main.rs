@@ -253,6 +253,13 @@ impl IndexedWalk for ir::ast::Span<Object> {
                     match &clause.inner {
                         ir::ast::Clauses::Select(select) => {
                             spans.push(select.ident.span(Types::Ident, line_index));
+                            if let Some(foreign) = &select.foreign {
+                                spans.push(foreign.0.span_word(
+                                    Types::Keyword,
+                                    line_index,
+                                    "foreign",
+                                ));
+                            }
                             for (component, mutability, alias) in &select.include {
                                 for ident in &component.inner.path {
                                     spans.push(ident.span(Types::Type, line_index));

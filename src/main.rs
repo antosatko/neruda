@@ -90,20 +90,17 @@ fn main() {
                 e.print(str, Some(path)).unwrap();
             })
             .unwrap();
-            for (
-                _,
-                ModuleOk {
-                    module,
+            for ModuleOk {
+                    module: _,
                     diagnostics,
-                },
-            ) in &modules
+                } in modules.values()
             {
                 for warn in &diagnostics.warns {
                     println!("Warning: {} - {:?}", warn.inner, warn.location)
                 }
             }
 
-            let mut ir_ctx = Context::from_ast(HashMap::from_iter(
+            let ir_ctx = Context::from_ast(HashMap::from_iter(
                 modules
                     .iter()
                     .map(|(key, mok)| (key.clone(), mok.module.clone())),

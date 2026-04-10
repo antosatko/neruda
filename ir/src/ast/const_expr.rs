@@ -18,8 +18,8 @@ impl Expression {
                 match (Cow::as_ref(&l), Cow::as_ref(&r)) {
                     (Expression::Value(l), Expression::Value(r)) => {
                         match (
-                            &l.literal.inner,
-                            &r.literal.inner,
+                            l.literal.inner.as_ref(),
+                            r.literal.inner.as_ref(),
                             l.postfix.len() + r.postfix.len() == 0,
                         ) {
                             (Literal::Number(l), Literal::Number(r), true) => {
@@ -36,7 +36,7 @@ impl Expression {
                                             LoweringDiagnostic::ReducedConstExpr(v.clone()),
                                             v.literal.location,
                                         ));
-                                        Cow::Owned(Expression::Value(v))
+                                        Cow::Owned(Expression::Value(Span::new(v, op.location)))
                                     }
                                     None => Cow::Borrowed(self),
                                 }
@@ -61,7 +61,7 @@ impl Span<Operator> {
     ) -> Option<ConstValue> {
         use Operator::*;
 
-        match self.inner {
+        match self.inner.as_ref() {
             Add | Sub | Mul | Div | Mod => match (l, r) {
                 (ConstValue::Number(l), ConstValue::Number(r)) => self
                     .const_apply_numeric(&l.value, &r.value, diagnostics)
@@ -91,7 +91,7 @@ impl Span<Operator> {
     ) -> Option<bool> {
         use NumberValue::*;
         use Operator::*;
-        Some(match (self.inner, l, r) {
+        Some(match (self.inner.as_ref(), l, r) {
             (Eq, Float(l), Float(r)) => l == r,
             (Eq, Any(l), Any(r)) => l == r,
             (Eq, Int(l), Int(r)) => l == r,
@@ -133,7 +133,7 @@ impl Span<Operator> {
     ) -> Option<NumberValue> {
         use NumberValue::*;
         use Operator::*;
-        Some(match (self.inner, l, r) {
+        Some(match (self.inner.as_ref(), l, r) {
             (Add, Float(l), Float(r)) => Float(l + r),
             (Add, Any(l), Any(r)) => Any(l + r),
             (Add, Int(l), Int(r)) => Int(l + r),

@@ -3,11 +3,14 @@ pub mod format;
 
 use core::panic;
 use std::{
+    borrow::Cow,
     fmt::Display,
     ops::{Add, Deref, DerefMut},
+    rc::Rc,
+    sync::Arc,
 };
 
-use arena::Arena;
+use arena::{Arena, Key};
 use smol_str::SmolStr;
 
 #[derive(Debug, Clone)]
@@ -54,7 +57,7 @@ impl Display for LoweringDiagnostic {
 
 #[derive(Debug, Clone)]
 pub struct Span<T> {
-    pub inner: T,
+    pub inner: Rc<T>,
     pub location: SpanIndex,
 }
 
@@ -66,12 +69,13 @@ pub struct SpanIndex {
 
 impl<T> Span<T> {
     pub fn new(inner: T, location: SpanIndex) -> Self {
+        let inner = Rc::new(inner);
         Self { inner, location }
     }
 
     pub fn map<U, F>(self, f: F) -> Span<U>
     where
-        F: FnOnce(T) -> U,
+        F: FnOnce(Rc<T>) -> U,
     {
         Span::new(f(self.inner), self.location)
     }
@@ -81,12 +85,6 @@ impl<T> Deref for Span<T> {
     type Target = T;
     fn deref(&self) -> &Self::Target {
         &self.inner
-    }
-}
-
-impl<T> DerefMut for Span<T> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.inner
     }
 }
 
@@ -101,9 +99,20 @@ impl Add for SpanIndex {
     }
 }
 
+impl<T> PartialEq for Span<T>
+where
+    T: PartialEq,
+{
+    fn eq(&self, other: &Self) -> bool {
+        (*self.inner).eq(other)
+    }
+}
+
 /* ===================== MODULE ===================== */
+
 #[derive(Debug, Copy, Clone)]
 pub struct ObjectTag;
+pub type AstObjectKey = Key<ObjectTag>;
 
 #[derive(Debug, Clone)]
 pub struct Module {
@@ -299,11 +308,11 @@ pub struct Parameter {
 
 #[derive(Debug, Clone)]
 pub enum Expression {
-    Value(Value),
+    Value(Span<Value>),
 
     Binary {
-        l: Span<Box<Expression>>,
-        r: Span<Box<Expression>>,
+        l: Span<Expression>,
+        r: Span<Expression>,
         op: Span<Operator>,
     },
 }
@@ -362,11 +371,14 @@ pub struct Type {
 
 #[derive(Debug, Clone)]
 pub enum TypeLiteral {
-    Path(IdentifierPath, Option<Span<Vec<Span<Type>>>>),
+    Path(Span<IdentifierPath>, Option<Span<Vec<Span<Type>>>>),
     Struct(Vec<Span<Parameter>>),
     Array(Box<Span<Type>>, Option<usize>),
     Tuple(Vec<Span<Type>>),
-    Enum(Vec<(Span<SmolStr>, Option<Span<Expression>>)>),
+    Enum(
+        Option<Box<Span<Type>>>,
+        Vec<(Span<SmolStr>, Option<Span<Expression>>)>,
+    ),
 }
 
 /* ===================== IDENTIFIERS ===================== */
@@ -379,7 +391,7 @@ pub struct IdentifierPath {
 /* ===================== LITERALS ===================== */
 #[derive(Debug, Clone)]
 pub enum Literal {
-    Identifier(IdentifierPath),
+    Identifier(Span<IdentifierPath>),
 
     Structure(
         Result<Span<IdentifierPath>, Keyword>,
@@ -395,7 +407,7 @@ pub enum Literal {
     Tuple(Vec<Span<Expression>>),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ConstValue {
     Structure(Vec<Span<(Span<SmolStr>, Span<ConstValue>)>>),
 
@@ -412,13 +424,13 @@ pub enum ConstValue {
 
 /* ===================== NUMBERS ===================== */
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Number {
     pub value: NumberValue,
     pub size: Option<u32>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum NumberValue {
     Float(f64),
     Uint(u128),
@@ -584,7 +596,7 @@ pub enum ExprItem {
 
 impl std::fmt::Display for Type {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match &self.literal.inner {
+        match self.literal.inner.deref() {
             TypeLiteral::Path(identifier_path, generics) => {
                 let mut n = 0;
                 for txt in identifier_path.path.iter().map(|a| &a.inner) {
@@ -608,7 +620,7 @@ impl std::fmt::Display for Type {
             }
             TypeLiteral::Struct(parameters) => {
                 write!(f, "struct {}", "{ ")?;
-                for Parameter { ident, ty, docs: _ } in parameters.iter().map(|p| &p.inner) {
+                for Parameter { ident, ty, docs: _ } in parameters.iter().map(|p| p.inner.deref()) {
                     write!(f, "{}: {} ", ident.inner, ty.inner)?;
                 }
                 write!(f, "{}", "}")?;
@@ -627,8 +639,12 @@ impl std::fmt::Display for Type {
                 }
                 write!(f, " )")?;
             }
-            TypeLiteral::Enum(variants) => {
-                write!(f, "enum {}", "{")?;
+            TypeLiteral::Enum(repr, variants) => {
+                write!(f, "enum")?;
+                if let Some(repr) = repr {
+                    write!(f, ": {}", repr.inner)?;
+                }
+                write!(f, " {}", "{")?;
                 for (ident, expr) in variants {
                     write!(f, " {}", ident.inner)?;
                     if expr.is_some() {
@@ -639,6 +655,26 @@ impl std::fmt::Display for Type {
             }
         }
         Ok(())
+    }
+}
+
+impl ConstValue {
+    pub fn stringify(&self) -> Cow<'static, str> {
+        match self {
+            ConstValue::Structure(spans) => todo!(),
+            ConstValue::Number(number) => Cow::Owned(match number.value {
+                NumberValue::Float(v) => v.to_string(),
+                NumberValue::Int(v) => v.to_string(),
+                NumberValue::Any(v) => v.to_string(),
+                NumberValue::Uint(v) => v.to_string(),
+            }),
+            ConstValue::String(smol_str) => Cow::Owned(smol_str.to_string()),
+            ConstValue::Char(v) => Cow::Owned(format!("{v}")),
+            ConstValue::Bool(true) => Cow::Borrowed("true"),
+            ConstValue::Bool(false) => Cow::Borrowed("false"),
+            ConstValue::Array(spans) => todo!(),
+            ConstValue::Tuple(spans) => todo!(),
+        }
     }
 }
 
@@ -653,7 +689,7 @@ impl Body {
 
 impl Display for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match &self.literal.inner {
+        match self.literal.inner.deref() {
             Literal::Number(n) => write!(f, "{n}"),
             _ => write!(f, ":::not implemented:::"),
         }

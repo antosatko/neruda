@@ -10,6 +10,7 @@ use std::{
     fs::File,
     io::{Read, Write},
     path::PathBuf,
+    sync::Arc,
 };
 
 #[derive(Parser, Debug)]
@@ -91,9 +92,9 @@ fn main() {
             })
             .unwrap();
             for ModuleOk {
-                    module: _,
-                    diagnostics,
-                } in modules.values()
+                module: _,
+                diagnostics,
+            } in modules.values()
             {
                 for warn in &diagnostics.warns {
                     println!("Warning: {} - {:?}", warn.inner, warn.location)
@@ -103,7 +104,7 @@ fn main() {
             let ir_ctx = Context::from_ast(HashMap::from_iter(
                 modules
                     .iter()
-                    .map(|(key, mok)| (key.clone(), mok.module.clone())),
+                    .map(|(key, mok)| (key.clone(), Arc::new(mok.module.clone()))),
             ));
 
             {
@@ -115,6 +116,7 @@ fn main() {
                     arrays,
                     tuples,
                     modules,
+                    enums,
                 } = &ir_ctx.types;
                 println!("function types:");
                 for t in functions.iter() {
@@ -132,6 +134,10 @@ fn main() {
                 for t in structures.iter() {
                     println!("\t{}", t.stringify(&ir_ctx.types));
                 }
+                println!("enum types:");
+                for t in enums.iter() {
+                    println!("\t- {}", t.stringify(&ir_ctx.types));
+                }
                 println!("array types:");
                 for t in arrays.iter() {
                     println!("\t{}", t.stringify(&ir_ctx.types));
@@ -143,6 +149,13 @@ fn main() {
                 println!("module refs:");
                 for t in modules.iter() {
                     println!("\t- {}", t.stringify(&ir_ctx.types));
+                }
+            }
+            for module in ir_ctx.types.modules.iter() {
+                println!("Module {}", module.stringify(&ir_ctx.types));
+                for obj in module.objects.iter() {
+                    let ident = &obj.identifier;
+                    println!("\t- {ident} :: {}", obj.data.stringify(&ir_ctx));
                 }
             }
         }

@@ -733,6 +733,7 @@ pub fn gen_parser<'src>() -> Parser<'static> {
         .new_node("enum type literal")
         .rules([
             is(keyword("enum")).commit(),
+            maybe(token(":")).then([is(node("type")).set("representation")]),
             is_one_of([
                 option(token("{")),
                 option(any()).fail(&grammar_errs::MISSING_ENUM_BODY),
@@ -742,7 +743,7 @@ pub fn gen_parser<'src>() -> Parser<'static> {
                 option(token("}")).return_node(),
             ])]),
         ])
-        .variables([list_var("variants")])
+        .variables([list_var("variants"), node_var("representation")])
         .build();
 
     let array_type_literal = parser

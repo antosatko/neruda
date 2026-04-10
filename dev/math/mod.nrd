@@ -1,15 +1,9 @@
 type Im<S> = (S, S)
 
-type A<a> = struct {}
-
 type ImFloat = Im<f32>
 type ImInt = Im<i32>
 
-type eee = enum { sdfgsdf }
-
-const danda: i32 = 60
-
-const danda2: i32 = danda + danda;
+const PI: f64 = 3.14159265359
 
 // [docs] method [generic_params] type . method_identifier params [return_type] (block)
 

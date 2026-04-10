@@ -196,7 +196,7 @@ pub fn module_named(
                     ty,
                     expression,
                 };
-                module.objects.push(span(obj, node));
+                module.objects.push(span(obj, s));
             }
 
             other => s.ice(&format!("Unhandled top-level item: {}", other)),
@@ -488,7 +488,7 @@ fn parse_expression_prec(
     pos: &mut usize,
     min_prec: u8,
 ) -> Span<Expression> {
-    let mut lhs = match &items[*pos].inner {
+    let mut lhs = match items[*pos].inner.as_ref() {
         ExprItem::Value(expr) => {
             let v = expr.clone();
             let s = items[*pos].clone().map(|_| v);
@@ -500,11 +500,11 @@ fn parse_expression_prec(
 
     while *pos < items.len() {
         let op_item = &items[*pos];
-        let op = match op_item.inner {
+        let op = match op_item.inner.as_ref() {
             ExprItem::Operator(op) => op,
             _ => break,
         };
-        let spanned_op = op_item.clone().map(|_| op);
+        let spanned_op = op_item.clone().map(|_| *op);
 
         let prec = op.precedence();
         if prec < min_prec {
@@ -522,8 +522,8 @@ fn parse_expression_prec(
         let loc = lhs.location;
         lhs = Span::new(
             Expression::Binary {
-                l: lhs.map(Box::new),
-                r: rhs.map(Box::new),
+                l: lhs,
+                r: rhs,
                 op: spanned_op,
             },
             loc,
@@ -542,17 +542,20 @@ fn expression_items(
 
     let lvalue_node = node.expect_node("lvalue");
     let lvalue = value(src, &lvalue_node, diagnostics)?;
-    items.push(lvalue.map(|v| ExprItem::Value(Expression::Value(v))));
+    let loc = lvalue.location;
+    items.push(Span::new(ExprItem::Value(Expression::Value(lvalue)), loc));
 
     for entry in node.get_list("rest") {
         match entry {
             Nodes::Token(_) => {
                 let op = operator(entry);
-                items.push(op.map(ExprItem::Operator));
+                let loc = op.location;
+                items.push(Span::new(ExprItem::Operator(*op), loc));
             }
             Nodes::Node(_) => {
                 let v = value(src, entry, diagnostics)?;
-                items.push(v.map(|v| ExprItem::Value(Expression::Value(v))));
+                let loc = v.location;
+                items.push(Span::new(ExprItem::Value(Expression::Value(v)), loc));
             }
         }
     }
@@ -646,7 +649,15 @@ fn literal(
                         };
                         return Ok(span(Literal::Structure(p, args), s));
                     }
-                    None => return Ok(path.unwrap().map(Literal::Identifier)),
+                    None => {
+                        return Ok(match path {
+                            Some(p) => {
+                                let loc = p.location;
+                                Span::new(Literal::Identifier(p), loc)
+                            }
+                            None => unreachable!(),
+                        });
+                    }
                 }
             }
 
@@ -743,7 +754,7 @@ fn ty(
             Type {
                 literal: span(
                     TypeLiteral::Path(
-                        ident_path(src, literal.expect_node("identifier")).inner,
+                        ident_path(src, literal.expect_node("identifier")),
                         generic_arguments(src, literal.try_get_node("generics"), diagnostics)?,
                     ),
                     literal,
@@ -790,10 +801,15 @@ fn ty(
                     Some(expr) => Some(expression(src, expr, diagnostics)?),
                     None => None,
                 };
+                variants.push((ident, expr));
             }
+            let repr = match literal.try_get_node("representation") {
+                Some(repr) => Some(Box::new(ty(src, repr, diagnostics)?)),
+                None => None,
+            };
             Ok(span(
                 Type {
-                    literal: span(TypeLiteral::Enum(variants), literal),
+                    literal: span(TypeLiteral::Enum(repr, variants), literal),
                 },
                 node,
             ))

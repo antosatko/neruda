@@ -3,35 +3,57 @@ use std::{borrow::Cow, collections::HashMap};
 use arena::{Arena, Key};
 use smol_str::SmolStr;
 
-use crate::ir::objects::{AnyObject, Module};
+use crate::{
+    ast::ConstValue,
+    ir::objects::{AnyObject, Module},
+};
 
-pub type FunctionArena = Arena<FunctionType>;
-pub type FunctionKey = Key<FunctionType>;
+pub type FunctionArena = Arena<FunctionType, FunctionTag>;
+pub type FunctionKey = Key<FunctionTag>;
+#[derive(PartialEq, Debug, Copy, Clone)]
+pub struct FunctionTag;
 #[derive(PartialEq, Debug)]
 pub struct FunctionType {
     pub returns: AnyTypeKey,
     pub parameters: Vec<(SmolStr, AnyTypeKey)>,
 }
 
-pub type ArrayArena = Arena<ArrayType>;
-pub type ArrayKey = Key<ArrayType>;
+pub type ArrayArena = Arena<ArrayType, ArrayTag>;
+pub type ArrayKey = Key<ArrayTag>;
+#[derive(PartialEq, Debug, Copy, Clone)]
+pub struct ArrayTag;
 #[derive(PartialEq, Debug)]
 pub struct ArrayType {
     pub element_type: AnyTypeKey,
     pub size: Option<usize>,
 }
 
-pub type TupleArena = Arena<TupleType>;
-pub type TupleKey = Key<TupleType>;
+pub type TupleArena = Arena<TupleType, TupleTag>;
+pub type TupleKey = Key<TupleTag>;
+#[derive(PartialEq, Debug, Copy, Clone)]
+pub struct TupleTag;
 #[derive(PartialEq, Debug)]
 pub struct TupleType {
     pub parameters: Vec<AnyTypeKey>,
 }
-pub type StructArena = Arena<StructType>;
-pub type StructKey = Key<StructType>;
+
+pub type StructArena = Arena<StructType, StructTag>;
+pub type StructKey = Key<StructTag>;
+#[derive(PartialEq, Debug, Copy, Clone)]
+pub struct StructTag;
 #[derive(PartialEq, Debug)]
 pub struct StructType {
     pub parameters: Vec<(SmolStr, AnyTypeKey)>,
+}
+
+pub type EnumArena = Arena<EnumType, EnumTag>;
+pub type EnumKey = Key<EnumTag>;
+#[derive(PartialEq, Debug, Copy, Clone)]
+pub struct EnumTag;
+#[derive(PartialEq, Debug)]
+pub struct EnumType {
+    pub repr: PrimitiveType,
+    pub variants: Vec<(SmolStr, ConstValue)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -43,8 +65,10 @@ pub struct ConstraintType {
     pub constraints: (),
 }
 
-pub type GenericArena = Arena<GenericType>;
-pub type GenericKey = Key<GenericType>;
+pub type GenericArena = Arena<GenericType, GenericTag>;
+pub type GenericKey = Key<GenericTag>;
+#[derive(PartialEq, Debug, Copy, Clone)]
+pub struct GenericTag;
 #[derive(PartialEq, Debug)]
 pub struct GenericType {
     pub generic_parameters: Vec<(SmolStr, ConstraintKey)>,
@@ -56,7 +80,7 @@ pub type ModuleKey = Key<ModuleTag>;
 #[derive(PartialEq, Debug, Clone, Copy)]
 pub struct ModuleTag;
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Copy, Clone)]
 #[repr(u8)]
 pub enum PrimitiveType {
     I8,
@@ -76,11 +100,12 @@ pub enum PrimitiveType {
     F32x4,
     F64x4,
     Char,
+    Bool,
     Void,
     EntityRef,
 }
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Copy, Clone)]
 pub enum AnyTypeKey {
     Primitive(PrimitiveType),
     Constraint(ConstraintKey),
@@ -89,6 +114,7 @@ pub enum AnyTypeKey {
     Array(ArrayKey),
     Tuple(TupleKey),
     Struct(StructKey),
+    Enum(EnumKey),
     ModuleRef(ModuleKey),
 }
 
@@ -98,6 +124,7 @@ pub struct Types {
     pub constraints: ConstraintArena,
     pub generics: GenericArena,
     pub structures: StructArena,
+    pub enums: EnumArena,
     pub arrays: ArrayArena,
     pub tuples: TupleArena,
     pub modules: ModuleArena,
@@ -123,6 +150,7 @@ impl PrimitiveType {
             "f32x4" => Some(Self::F32x4),
             "f64x4" => Some(Self::F64x4),
             "char" => Some(Self::Char),
+            "bool" => Some(Self::Bool),
             "entity" => Some(Self::EntityRef),
             _ => None,
         }
@@ -147,8 +175,77 @@ impl PrimitiveType {
             PrimitiveType::F32x4 => "f32x4",
             PrimitiveType::F64x4 => "f64x4",
             PrimitiveType::Char => "char",
+            PrimitiveType::Bool => "bool",
             PrimitiveType::Void => "()",
             PrimitiveType::EntityRef => "entity",
+        }
+    }
+}
+
+impl PrimitiveType {
+    pub fn int_size(&self) -> Option<u32> {
+        match self {
+            PrimitiveType::I8 => Some(8),
+            PrimitiveType::I16 => Some(16),
+            PrimitiveType::I32 => Some(32),
+            PrimitiveType::I64 => Some(64),
+            PrimitiveType::I128 => Some(128),
+            _ => None,
+        }
+    }
+
+    pub fn uint_size(&self) -> Option<u32> {
+        match self {
+            PrimitiveType::U8 => Some(8),
+            PrimitiveType::U16 => Some(16),
+            PrimitiveType::U32 => Some(32),
+            PrimitiveType::U64 => Some(64),
+            PrimitiveType::U128 => Some(128),
+            _ => None,
+        }
+    }
+
+    pub fn float_size(&self) -> Option<u32> {
+        match self {
+            PrimitiveType::F32 => Some(32),
+            PrimitiveType::F64 => Some(64),
+            _ => None,
+        }
+    }
+
+    pub fn number_size(&self) -> Option<u32> {
+        match self {
+            PrimitiveType::I8 => Some(8),
+            PrimitiveType::I16 => Some(16),
+            PrimitiveType::I32 => Some(32),
+            PrimitiveType::I64 => Some(64),
+            PrimitiveType::I128 => Some(128),
+            PrimitiveType::U8 => Some(8),
+            PrimitiveType::U16 => Some(16),
+            PrimitiveType::U32 => Some(32),
+            PrimitiveType::U64 => Some(64),
+            PrimitiveType::U128 => Some(128),
+            PrimitiveType::F32 => Some(32),
+            PrimitiveType::F64 => Some(64),
+            _ => None,
+        }
+    }
+
+    pub fn is_numeric(&self) -> bool {
+        match self {
+            PrimitiveType::I8 => true,
+            PrimitiveType::I16 => true,
+            PrimitiveType::I32 => true,
+            PrimitiveType::I64 => true,
+            PrimitiveType::I128 => true,
+            PrimitiveType::U8 => true,
+            PrimitiveType::U16 => true,
+            PrimitiveType::U32 => true,
+            PrimitiveType::U64 => true,
+            PrimitiveType::U128 => true,
+            PrimitiveType::F32 => true,
+            PrimitiveType::F64 => true,
+            _ => false,
         }
     }
 }
@@ -174,6 +271,17 @@ impl StructType {
         let mut out = String::from("struct { ");
         for (ident, ty) in &self.parameters {
             out.push_str(&format!("{ident}: {} ", ty.stringify(types)));
+        }
+        out.push('}');
+        out
+    }
+}
+
+impl EnumType {
+    pub fn stringify(&self, _: &Types) -> String {
+        let mut out = String::from("enum { ");
+        for (ident, value) in &self.variants {
+            out.push_str(&format!("{ident}: {} ", value.stringify()));
         }
         out.push('}');
         out
@@ -264,6 +372,7 @@ impl AnyTypeKey {
             AnyTypeKey::Struct(key) => {
                 Cow::Owned(types.structures.get_unchecked(key).stringify(types))
             }
+            AnyTypeKey::Enum(key) => Cow::Owned(types.enums.get_unchecked(key).stringify(types)),
             AnyTypeKey::ModuleRef(key) => {
                 Cow::Owned(types.modules.get_unchecked(key).stringify(types))
             }

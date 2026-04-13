@@ -1,22 +1,157 @@
 {
   "Function": {
     "prefix": "function",
-    "body": ["function ${1:name} ($2) {$0}"]
+    "body": [
+      "function ${1:name}${2:<T>}(${3:params})${4:: ReturnType} {",
+      "\t$0",
+      "}"
+    ],
+    "description": "Defines a regular function with optional generics, parameters, and return type"
   },
-  "Statement function": {
-    "prefix": "statement function",
-    "body": ["function ${1:name} ($2) => ${0:_}"]
+  "Function (arrow)": {
+    "prefix": "fn=>",
+    "body": ["function ${1:name}(${2:params}) => ${0:expression}"],
+    "description": "Creates a concise single-expression arrow function"
+  },
+  "Variable": {
+    "prefix": "var",
+    "body": ["var ${1:name}${2:: Type} = ${0:value}"],
+    "description": "Declares a mutable variable with optional explicit type"
+  },
+  "Const": {
+    "prefix": "const",
+    "body": ["const ${1:name}: ${2:Type} = ${0:value}"],
+    "description": "Declares an immutable constant with explicit type"
+  },
+  "Return": {
+    "prefix": "return",
+    "body": ["return ${0:value}"],
+    "description": "Returns a value from the current function or block"
+  },
+  "If": {
+    "prefix": "if",
+    "body": ["if ${1:condition} {", "\t$0", "}"],
+    "description": "Basic conditional if statement"
+  },
+  "If / Else": {
+    "prefix": "ife",
+    "body": ["if ${1:condition} {", "\t$2", "} else {", "\t$0", "}"],
+    "description": "If-else conditional block"
+  },
+  "If / Else If / Else": {
+    "prefix": "ifel",
+    "body": [
+      "if ${1:condition} {",
+      "\t$2",
+      "} else if ${3:condition} {",
+      "\t$4",
+      "} else {",
+      "\t$0",
+      "}"
+    ],
+    "description": "Chained if / else-if / else conditional structure"
+  },
+  "While": {
+    "prefix": "while",
+    "body": ["while ${1:condition} {", "\t$0", "}"],
+    "description": "While loop that repeats while condition is true"
+  },
+  "Loop": {
+    "prefix": "loop",
+    "body": ["loop {", "\t$0", "}"],
+    "description": "Infinite loop (or language-specific loop construct)"
   },
   "Type": {
     "prefix": "type",
-    "body": ["type ${1:name} = ${0:()}"]
+    "body": ["type ${1:Name}${2:<T>} = ${0:Type}"],
+    "description": "Creates a type alias with optional generics"
+  },
+  "Struct Type": {
+    "prefix": "struct",
+    "body": ["type ${1:Name} = struct {", "\t${1:field}: ${2:Type}", "}"],
+    "description": "Defines an anonymous struct type literal"
+  },
+  "Enum": {
+    "prefix": "enum",
+    "body": ["type ${1:Name} = enum {", "\t${2:Variant}", "\t$0", "}"],
+    "description": "Defines an enumeration with variants"
   },
   "Component": {
     "prefix": "component",
-    "body": ["component ${1:name} = ${0:()}"]
+    "body": ["component ${1:Name}${2: = Type}"],
+    "description": "Defines an ECS component (with optional type)"
   },
   "Import": {
     "prefix": "import",
-    "body": ["import ${1:lib} as ${0:alias}"]
+    "body": ["import ${1:path} as ${0:alias}"],
+    "description": "Imports a module/file with optional alias"
+  },
+  "Trait": {
+    "prefix": "trait",
+    "body": [
+      "trait ${1:Name} {",
+      "\tfunction ${2:method}($3)${4:: ReturnType} => ${0:_}",
+      "}"
+    ],
+    "description": "Defines a trait/interface with method signatures"
+  },
+  "Impl (type)": {
+    "prefix": "impl",
+    "body": [
+      "impl${1:<T>} ${2:Type} {",
+      "\tfunction ${3:method}($4) {",
+      "\t$0",
+      "\t}",
+      "}"
+    ],
+    "description": "Implements methods directly on a concrete type"
+  },
+  "Impl (trait)": {
+    "prefix": "impltrait",
+    "body": ["impl${1:<T>} ${2:Trait} for ${3:Type} {", "\t$0", "}"],
+    "description": "Implements a trait for a specific type"
+  },
+  "System": {
+    "prefix": "system",
+    "body": ["system ${1:Name}($2) ${0:=> _}"],
+    "description": "Defines a basic ECS system with query"
+  },
+  "System (full)": {
+    "prefix": "systemfull",
+    "body": [
+      "system ${1:Name}($2)",
+      "before { ${3:_} }",
+      "{",
+      "\t$4",
+      "}",
+      "after { ${0:_} }"
+    ],
+    "description": "Defines a full ECS system with before/after hooks"
+  },
+  "Query": {
+    "prefix": "query",
+    "body": [
+      " ",
+      "\t${1:select: comp},",
+      "\ton ${2:event: Event},",
+      "\twhere ${0:condition}",
+      " "
+    ],
+    "description": "Builds an ECS query with select, on-event, and where clauses"
+  },
+  "Scheduler": {
+    "prefix": "scheduler",
+    "body": [
+      "scheduler ${1:Name} {",
+      "\tresources {",
+      "\t$2",
+      "\t}",
+      "\tsystems {",
+      "\t$3",
+      "\t}",
+      "\tinit => ${0:_}",
+      "}"
+    ],
+    "description": "Defines an ECS scheduler with resources, systems, and init hook"
   }
 }

@@ -4,16 +4,9 @@ pub mod types;
 
 use std::{collections::HashMap, sync::Arc};
 
-use arena::Arena;
 use smol_str::SmolStr;
 
-use crate::{
-    ast,
-    ir::{
-        objects::Module,
-        types::{AutoTypes, ModuleArena},
-    },
-};
+use crate::{ast, ir::types::AutoTypes};
 
 use self::types::Types;
 

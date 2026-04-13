@@ -1,12 +1,9 @@
-use std::{borrow::Cow, collections::HashMap};
+use std::borrow::Cow;
 
 use arena::{Arena, Key};
 use smol_str::{SmolStr, ToSmolStr};
 
-use crate::{
-    ast::ConstValue,
-    ir::objects::{AnyObject, Module},
-};
+use crate::{ast::ConstValue, ir::objects::Module};
 
 pub type FunctionArena = Arena<FunctionType, FunctionTag>;
 pub type FunctionKey = Key<FunctionTag>;
@@ -351,7 +348,7 @@ impl TupleType {
 }
 
 impl TraitType {
-    pub fn stringify(&self, types: &Types) -> String {
+    pub fn stringify(&self, _: &Types) -> String {
         self.ident.to_string()
     }
 }

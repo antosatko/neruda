@@ -1,13 +1,11 @@
 pub mod const_expr;
-pub mod format;
 
 use core::panic;
 use std::{
     borrow::Cow,
     fmt::Display,
-    ops::{Add, Deref, DerefMut},
+    ops::{Add, Deref},
     rc::Rc,
-    sync::Arc,
 };
 
 use arena::{Arena, Key};

@@ -116,6 +116,7 @@ fn main() {
                     arrays,
                     tuples,
                     modules,
+                    traits,
                     enums,
                 } = &ir_ctx.types;
                 println!("function types:");
@@ -144,6 +145,10 @@ fn main() {
                 }
                 println!("tuple types:");
                 for t in tuples.iter() {
+                    println!("\t{}", t.stringify(&ir_ctx.types));
+                }
+                println!("trait types:");
+                for t in traits.iter() {
                     println!("\t{}", t.stringify(&ir_ctx.types));
                 }
                 println!("module refs:");

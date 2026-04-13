@@ -72,7 +72,7 @@ checksum = "5d38a7a952d7eda94a2a9fa86603be7da3ecb2b5cc0b8341b8131edbf6e32201"
 [[package]]
 name = "arena"
 version = "0.1.0"
-source = "git+https://github.com/antosatko/arena#aee7eb61fdf94cabb44abbdca54e48007c1d2859"
+source = "git+https://github.com/antosatko/arena#beee882a3ce240c2525833638a295b22412c9849"
 
 [[package]]
 name = "async-trait"
@@ -679,7 +679,7 @@ dependencies = [
 [[package]]
 name = "ruparse"
 version = "0.1.0"
-source = "git+https://github.com/antosatko/ruparse#9d47bfd9423b1d21f317304f460af119cda46c84"
+source = "git+https://github.com/antosatko/ruparse#36364bb10592c68e5175acd3fbbe4903a9350c09"
 dependencies = [
  "annotate-snippets",
  "cfg-if",

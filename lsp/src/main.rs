@@ -1,8 +1,8 @@
 use core::panic;
 use dashmap::DashMap;
 use ir::ast::{
-    Alias, Body, Diagnostics, Expression, IdentifierPath, Literal, LoweringError, Module, Object,
-    Parameter, Postfix, Statement, Type, Value,
+    Alias, Body, Diagnostics, Expression, Function, IdentifierPath, Literal, LoweringError, Module,
+    Object, Parameter, Postfix, Statement, Type, Value,
 };
 use line_index::{LineCol, LineIndex, TextSize};
 use parser::{
@@ -157,6 +157,67 @@ impl IndexedWalk for Module {
 impl IndexedWalk for ir::ast::Span<Object> {
     fn index(&self, line_index: &LineIndex, spans: &mut Vec<Span>) {
         match self.inner.as_ref() {
+            Object::TypeImpl {
+                ty,
+                generic_parameters,
+                methods,
+            } => {
+                spans.push(self.span_word(Types::Keyword, line_index, "impl"));
+
+                ty.index(line_index, spans);
+                for method in methods {
+                    spans.push(method.span_word(Types::Keyword, line_index, "function"));
+                    spans.push(method.ident.span(Types::Ident, line_index));
+
+                    method
+                        .parameters
+                        .iter()
+                        .for_each(|p| p.index(line_index, spans));
+                    if let Some(ret) = &method.return_type {
+                        ret.index(line_index, spans);
+                    }
+                    method.body.index(line_index, spans);
+                    if let Some(generics) = method.generics.as_ref() {
+                        spans.extend(generics.iter().map(|g| g.span(Types::Type, line_index)));
+                    }
+                }
+                if let Some(generics) = generic_parameters {
+                    spans.extend(generics.iter().map(|g| g.span(Types::Type, line_index)));
+                }
+            }
+            Object::TraitImpl {
+                ty,
+                trt,
+                for_kw,
+                generic_parameters,
+                methods,
+            } => {
+                spans.push(self.span_word(Types::Keyword, line_index, "impl"));
+                spans.push(for_kw.0.span_word(Types::Keyword, line_index, "for"));
+
+                trt.index(line_index, spans);
+
+                ty.index(line_index, spans);
+                for method in methods {
+                    spans.push(method.span_word(Types::Keyword, line_index, "function"));
+                    spans.push(method.ident.span(Types::Ident, line_index));
+
+                    method
+                        .parameters
+                        .iter()
+                        .for_each(|p| p.index(line_index, spans));
+                    if let Some(ret) = &method.return_type {
+                        ret.index(line_index, spans);
+                    }
+                    method.body.index(line_index, spans);
+                    if let Some(generics) = method.generics.as_ref() {
+                        spans.extend(generics.iter().map(|g| g.span(Types::Type, line_index)));
+                    }
+                }
+                if let Some(generics) = generic_parameters {
+                    spans.extend(generics.iter().map(|g| g.span(Types::Type, line_index)));
+                }
+            }
             Object::Scheduler {
                 ident,
                 resources,
@@ -184,14 +245,38 @@ impl IndexedWalk for ir::ast::Span<Object> {
                     init.0.index(line_index, spans);
                 }
             }
-            Object::Function {
+            Object::Trait {
+                docs: _,
                 ident,
+                methods,
+            } => {
+                spans.push(self.span_word(Types::Keyword, line_index, "trait"));
+                spans.push(ident.span(Types::Ident, line_index));
+                for method in methods {
+                    spans.push(method.span_word(Types::Keyword, line_index, "function"));
+                    spans.push(method.ident.span(Types::Ident, line_index));
+
+                    method
+                        .parameters
+                        .iter()
+                        .for_each(|p| p.index(line_index, spans));
+                    if let Some(ret) = &method.return_type {
+                        ret.index(line_index, spans);
+                    }
+                    method.body.index(line_index, spans);
+                    if let Some(generics) = method.generics.as_ref() {
+                        spans.extend(generics.iter().map(|g| g.span(Types::Type, line_index)));
+                    }
+                }
+            }
+            Object::Function(Function {
+                ident,
+                generics,
                 parameters,
                 return_type,
                 body,
                 docs: _,
-                generics,
-            } => {
+            }) => {
                 spans.push(self.span_word(Types::Keyword, line_index, "function"));
                 spans.push(ident.span(Types::Ident, line_index));
 

@@ -7,7 +7,7 @@ use crate::{
     ast::{self, ConstValue},
     ir::{
         Context,
-        types::{AnyTypeKey, ConstraintKey, ModuleKey},
+        types::{AnyTypeKey, ConstraintKey, ModuleKey, TraitKey},
     },
 };
 
@@ -43,6 +43,9 @@ pub enum AnyObjectData {
         ty: InitState<AnyTypeKey, ()>,
         generics: Vec<ConstraintKey>,
     },
+    Trait {
+        ty: InitState<TraitKey>,
+    },
 }
 
 impl AnyObject {
@@ -54,12 +57,33 @@ impl AnyObject {
         }
     }
 
-    pub fn type_mut(&mut self) -> &mut InitState<AnyTypeKey, ()> {
+    #[track_caller]
+    pub fn type_state_mut(&mut self) -> &mut InitState<AnyTypeKey, ()> {
         match &mut self.data {
-            AnyObjectData::Import { .. } => panic!("Object import has no type"),
+            AnyObjectData::Import { .. } => panic!("Object import has no type state"),
+            AnyObjectData::Trait { .. } => panic!("Object trait has no type state"),
             AnyObjectData::Const { ty, .. } => ty,
             AnyObjectData::TypeAlias { ty, .. } => ty,
         }
+    }
+
+    #[track_caller]
+    pub fn type_of(&self) -> Option<AnyTypeKey> {
+        Some(match &self.data {
+            AnyObjectData::Import { module } => AnyTypeKey::ModuleRef(*module),
+            AnyObjectData::Trait {
+                ty: InitState::Done(ty),
+            } => AnyTypeKey::Trait(*ty),
+            AnyObjectData::Const {
+                ty: InitState::Done(ty),
+                ..
+            } => *ty,
+            AnyObjectData::TypeAlias {
+                ty: InitState::Done(ty),
+                ..
+            } => *ty,
+            _ => return None,
+        })
     }
 }
 
@@ -94,7 +118,7 @@ impl AnyObjectData {
             Self::TypeAlias { ty, generics } => {
                 let generics = match generics.len() {
                     0 => "".to_string(),
-                    _ => format!("<{}>", 5),
+                    l => format!("<{}>", l),
                 };
                 format!(
                     "type{generics} = {}",
@@ -104,6 +128,7 @@ impl AnyObjectData {
                     }
                 )
             }
+            Self::Trait { .. } => "<trait>".to_string(),
         }
     }
 }

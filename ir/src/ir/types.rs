@@ -1,7 +1,7 @@
 use std::{borrow::Cow, collections::HashMap};
 
 use arena::{Arena, Key};
-use smol_str::SmolStr;
+use smol_str::{SmolStr, ToSmolStr};
 
 use crate::{
     ast::ConstValue,
@@ -37,6 +37,15 @@ pub struct TupleType {
     pub parameters: Vec<AnyTypeKey>,
 }
 
+pub type TraitArena = Arena<TraitType, TraitTag>;
+pub type TraitKey = Key<TraitTag>;
+#[derive(PartialEq, Debug, Copy, Clone)]
+pub struct TraitTag;
+#[derive(PartialEq, Debug)]
+pub struct TraitType {
+    pub ident: SmolStr,
+}
+
 pub type StructArena = Arena<StructType, StructTag>;
 pub type StructKey = Key<StructTag>;
 #[derive(PartialEq, Debug, Copy, Clone)]
@@ -62,7 +71,7 @@ pub type ConstraintArena = Arena<ConstraintType, ConstraintTag>;
 pub type ConstraintKey = Key<ConstraintTag>;
 #[derive(PartialEq, Debug)]
 pub struct ConstraintType {
-    pub constraints: (),
+    pub constraints: Vec<TraitKey>,
 }
 
 pub type GenericArena = Arena<GenericType, GenericTag>;
@@ -115,6 +124,7 @@ pub enum AnyTypeKey {
     Tuple(TupleKey),
     Struct(StructKey),
     Enum(EnumKey),
+    Trait(TraitKey),
     ModuleRef(ModuleKey),
 }
 
@@ -127,7 +137,27 @@ pub struct Types {
     pub enums: EnumArena,
     pub arrays: ArrayArena,
     pub tuples: TupleArena,
+    pub traits: TraitArena,
     pub modules: ModuleArena,
+}
+
+pub struct AutoTypes {
+    pub any_trt: TraitKey,
+    pub any_conr: ConstraintKey,
+}
+
+impl AutoTypes {
+    pub fn new(types: &mut Types) -> Self {
+        let any_trt = types.traits.push(TraitType {
+            ident: "Any".to_smolstr(),
+        });
+        Self {
+            any_conr: types.constraints.push(ConstraintType {
+                constraints: [any_trt].into(),
+            }),
+            any_trt,
+        }
+    }
 }
 
 impl PrimitiveType {
@@ -320,6 +350,12 @@ impl TupleType {
     }
 }
 
+impl TraitType {
+    pub fn stringify(&self, types: &Types) -> String {
+        self.ident.to_string()
+    }
+}
+
 impl GenericType {
     pub fn stringify(&self, types: &Types) -> String {
         let mut out = String::from("<");
@@ -349,8 +385,18 @@ impl GenericType {
 }
 
 impl ConstraintType {
-    pub fn stringify(&self, _: &Types) -> String {
-        "".to_string()
+    pub fn stringify(&self, types: &Types) -> String {
+        let mut result = String::new();
+        let mut it = self.constraints.iter();
+        if let Some(constraint) = it.next() {
+            let trt = types.traits.get_unchecked(constraint);
+            result.push_str(trt.ident.as_str());
+        }
+        for constraint in it {
+            let trt = types.traits.get_unchecked(constraint);
+            result.push_str(&format!(" + {}", trt.ident));
+        }
+        result
     }
 }
 
@@ -373,6 +419,7 @@ impl AnyTypeKey {
                 Cow::Owned(types.structures.get_unchecked(key).stringify(types))
             }
             AnyTypeKey::Enum(key) => Cow::Owned(types.enums.get_unchecked(key).stringify(types)),
+            AnyTypeKey::Trait(key) => Cow::Owned(types.traits.get_unchecked(key).stringify(types)),
             AnyTypeKey::ModuleRef(key) => {
                 Cow::Owned(types.modules.get_unchecked(key).stringify(types))
             }

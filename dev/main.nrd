@@ -26,7 +26,7 @@ component Orbiting = entity
 
 
 // Select
-system apply_velocity(e: mut Position as P & Velocity as V) => e.P += e.V
+system apply_velocity(e: mut Position as P + Velocity as V) => e.P += e.V
 // Events
 system on_stop_all(e: mut Velocity, on _: StopAll) => e.Velocity = 0
 // Restrictions
@@ -38,9 +38,9 @@ system count_units(_: Position, count: mut UnitCount)
     after => count = tmp
 // foreign entities
 system orbit(
-    satellite: mut Velocity as V & Position as P & Orbiting as C,
+    satellite: mut Velocity as V + Position as P + Orbiting as C,
     foreign primary: Position as P
 )
 => satellite.V += 1000 / (primary.get(satellite.C).P - satellite.P).pow(2)
 // generic components
-system add<T: AddEq, U>(e: mut T & U) => e.T += e.U
+system add<T: AddEq, U>(e: mut T + U) => e.T += e.U

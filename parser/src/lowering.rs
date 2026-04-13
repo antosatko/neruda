@@ -9,10 +9,10 @@ use smol_str::SmolStr;
 
 use ir::ast::{
     ActionClause, Alias, Associativity, Body, Clauses, Diagnostics, Else, ElseIf, ExprItem,
-    Expression, GenericParameter, IdentifierPath, Keyword, Literal, LoweringError, LoweringWarning,
-    Module, Mutability, Object, Operator, Parameter, RestrictionClause, SelectClause, Span,
-    SpanIndex, Statement, SystemInclusion, Type, TypeLiteral, Value, char_literal, numeric_literal,
-    string_literal,
+    Expression, Function, GenericParameter, IdentifierPath, Keyword, Literal, LoweringError,
+    LoweringWarning, Module, Mutability, Object, Operator, Parameter, RestrictionClause,
+    SelectClause, Span, SpanIndex, Statement, SystemInclusion, Type, TypeLiteral, Value,
+    char_literal, numeric_literal, string_literal,
 };
 
 #[derive(Debug, Clone)]
@@ -80,27 +80,8 @@ pub fn module_named(
             }
 
             "function" => {
-                let ident = expect_ident(src, s, &mut diagnostics);
-                let params = parameters(src, s.expect_node("parameters"), &mut diagnostics)?;
-                let return_type = match s.try_get_node("return type") {
-                    Some(t) => Some(ty(src, t, &mut diagnostics)?),
-                    None => None,
-                };
-                let body = body(src, s.expect_node("code body"), &mut diagnostics)?;
-                let docs = docstrings(src, s);
-                let generics =
-                    generic_params(src, s.try_get_node("generic parameters"), &mut diagnostics);
-
-                let obj = Object::Function {
-                    ident: ident.clone(),
-                    parameters: params,
-                    return_type,
-                    body,
-                    docs,
-                    generics,
-                };
-
-                module.objects.push(span(obj, s));
+                let obj = function(src, s, &mut diagnostics)?;
+                module.objects.push(span(Object::Function(obj), s));
             }
 
             "system" => {
@@ -199,6 +180,57 @@ pub fn module_named(
                 module.objects.push(span(obj, s));
             }
 
+            "trait" => {
+                let ident = expect_ident(src, s.expect_node("identifier"), &mut diagnostics);
+                let docs = docstrings(src, s);
+                let mut methods = Vec::new();
+                for fun in s.get_list("methods") {
+                    methods.push(span(function(src, fun, &mut diagnostics)?, fun));
+                }
+
+                let obj = Object::Trait {
+                    docs,
+                    ident,
+                    methods,
+                };
+                module.objects.push(span(obj, s));
+            }
+
+            "impl" => {
+                let mut methods = Vec::new();
+                for fun in s.get_list("methods") {
+                    methods.push(span(function(src, fun, &mut diagnostics)?, fun));
+                }
+                let generic_parameters =
+                    generic_params(src, s.try_get_node("generic parameters"), &mut diagnostics);
+
+                let variant = s.expect_node("type");
+                let obj = match variant.get_name() {
+                    "trait implementation" => {
+                        let ty = ty(src, variant.expect_node("type"), &mut diagnostics)?;
+                        let trt = ident_path(src, variant.expect_node("trait"));
+                        let for_kw = Keyword(span((), variant.expect_node("kw")));
+                        Object::TraitImpl {
+                            ty,
+                            trt,
+                            for_kw,
+                            generic_parameters,
+                            methods,
+                        }
+                    }
+                    "type implementation" => {
+                        let ty = ty(src, variant.expect_node("type"), &mut diagnostics)?;
+                        Object::TypeImpl {
+                            ty,
+                            generic_parameters,
+                            methods,
+                        }
+                    }
+                    name => s.ice(&format!("This trait implementation does not exist: {name}")),
+                };
+                module.objects.push(span(obj, s));
+            }
+
             other => s.ice(&format!("Unhandled top-level item: {}", other)),
         }
     }
@@ -207,6 +239,31 @@ pub fn module_named(
         module,
         diagnostics,
     })
+}
+
+fn function(
+    src: &str,
+    s: &Nodes<'_>,
+    diagnostics: &mut Diagnostics,
+) -> Result<Function, Span<LoweringError>> {
+    let ident = expect_ident(src, s, diagnostics);
+    let params = parameters(src, s.expect_node("parameters"), diagnostics)?;
+    let return_type = match s.try_get_node("return type") {
+        Some(t) => Some(ty(src, t, diagnostics)?),
+        None => None,
+    };
+    let body = body(src, s.expect_node("code body"), diagnostics)?;
+    let docs = docstrings(src, s);
+    let generics = generic_params(src, s.try_get_node("generic parameters"), diagnostics);
+    let obj = Function {
+        ident: ident.clone(),
+        parameters: params,
+        return_type,
+        body,
+        docs,
+        generics,
+    };
+    Ok(obj)
 }
 
 fn generic_params(
@@ -742,6 +799,7 @@ fn generic_arguments(
     }
 }
 
+#[track_caller]
 fn ty(
     src: &str,
     node: &Nodes,

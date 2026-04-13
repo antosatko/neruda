@@ -11,7 +11,7 @@ use crate::ir::Context;
 use crate::ir::objects::{AnyObject, AnyObjectData, AnyObjectkey, InitState, Module};
 use crate::ir::types::{
     AnyTypeKey, ArrayType, ConstraintKey, ConstraintType, EnumType, ModuleKey, ModuleTag,
-    PrimitiveType, StructType, TupleType,
+    PrimitiveType, StructType, TraitType, TupleType,
 };
 
 #[derive(Default)]
@@ -55,8 +55,18 @@ impl Context {
                         continue;
                     }
                     ast::Object::Scheduler { ident, .. } => continue,
-                    ast::Object::Function { ident, .. } => continue,
+                    ast::Object::Function(function) => continue,
                     ast::Object::Component { ident, .. } => continue,
+                    ast::Object::TypeImpl { .. } => continue,
+                    ast::Object::TraitImpl { .. } => continue,
+                    ast::Object::Trait { ident, .. } => (
+                        ident,
+                        AnyObjectData::Trait {
+                            ty: InitState::Progress(self.types.traits.push(TraitType {
+                                ident: ident.inner.as_ref().clone(),
+                            })),
+                        },
+                    ),
                     ast::Object::Type { ident, .. } => (
                         ident,
                         AnyObjectData::TypeAlias {
@@ -98,28 +108,28 @@ impl Context {
                         ident: _,
                         generics,
                         ty,
-                        docs,
+                        docs: _,
                     } => {
-                        generic_ctx.push_scope(&generics, self);
+                        generic_ctx.push_scope(&generics, self, &mod_key);
                         let obj = self.obj_mut(mod_key, obj_key);
-                        *obj.type_mut() = InitState::Progress(());
+                        *obj.type_state_mut() = InitState::Progress(());
                         let key = ty
                             .as_ref()
                             .map(|t| t.lower(self, mod_key, &mut generic_ctx))
                             .unwrap_or(AnyTypeKey::Primitive(PrimitiveType::Void));
                         let obj = self.obj_mut(mod_key, obj_key);
-                        *obj.type_mut() = InitState::Done(key);
+                        *obj.type_state_mut() = InitState::Done(key);
                         generic_ctx.pop_scope();
                     }
                     ast::Object::Const {
-                        docs,
-                        ident,
+                        docs: _,
+                        ident: _,
                         ty,
                         expression,
                     } => {
                         let type_key = ty.lower(self, mod_key, &mut generic_ctx);
                         let obj = self.obj_mut(mod_key, obj_key);
-                        *obj.type_mut() = InitState::Done(type_key);
+                        *obj.type_state_mut() = InitState::Done(type_key);
                         let mut v = expression.const_eval(self, &mut generic_ctx).unwrap();
                         if !self.type_check_const_value(&mut v, &type_key) {
                             panic!("lala mas to blby")
@@ -390,12 +400,34 @@ impl GenericContext {
         &mut self,
         generics: &Option<ast::Span<Vec<ast::Span<ast::GenericParameter>>>>,
         ctx: &mut Context,
+        mod_key: &ModuleKey,
     ) {
         if let Some(generics) = generics {
             let mut scope = Vec::new();
-            let constraint = ConstraintType { constraints: () };
-            let key = ctx.types.constraints.push_unique(constraint);
             for generic in generics.inner.deref() {
+                let mut constraints = Vec::new();
+                for constr_path in &generic.constraints {
+                    let module = ctx.types.modules.get_mut_unchecked(mod_key);
+                    let obj_key = module
+                        .symbol_map
+                        .get(constr_path.path.first().as_ref().unwrap().inner.as_ref())
+                        .unwrap();
+                    let obj = module.objects.get_unchecked(obj_key);
+                    let ty = match &obj.data {
+                        AnyObjectData::Trait {
+                            ty: InitState::Done(ty) | InitState::Progress(ty),
+                        } => ty,
+                        _ => panic!("nějak si to vyřiď"),
+                    };
+                    constraints.push(*ty);
+                }
+                let key = match constraints.is_empty() {
+                    true => ctx.auto_types.any_conr,
+                    false => ctx
+                        .types
+                        .constraints
+                        .push_unique(ConstraintType { constraints }),
+                };
                 scope.push((generic.identifier.inner.as_ref().clone(), key));
             }
             self.scopes.push(scope);

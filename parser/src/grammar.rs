@@ -31,6 +31,9 @@ const KEYWORDS: &[&'static str] = &[
     "foreign",
     "enum",
     "const",
+    "trait",
+    "impl",
+    "for",
 ];
 
 const KEYWORDS_NON_BLOCKING: &[&'static str] = &["where", "systems", "resources", "on", "import"];
@@ -1062,6 +1065,66 @@ pub fn gen_parser<'src>() -> Parser<'static> {
         ])
         .build();
 
+    let trait_kw = parser
+        .grammar
+        .new_node("trait")
+        .has(docstr, "docs")
+        .rules([
+            is(keyword("trait")).commit(),
+            is(ident).set(IDENTIFIER),
+            is(token("{")),
+            loop_().then([is_one_of([
+                option(function).set("methods"),
+                option(token("}")).return_node(),
+            ])]),
+        ])
+        .variables([IDENTIFIER_VAR, list_var("methods")])
+        .build();
+
+    let type_impl = parser
+        .grammar
+        .new_node("type implementation")
+        .rules([is(any()).important(), is(type_).set("type").commit()])
+        .variables([node_var("type")])
+        .build();
+
+    let trait_impl = parser
+        .grammar
+        .new_node("trait implementation")
+        .rules([
+            is(ident_path).set("trait"),
+            is(keyword("for")).commit().set("kw"),
+            is(type_).set("type"),
+        ])
+        .variables([node_var("trait"), node_var("type"), node_var("kw")])
+        .build();
+
+    let impl_variants = parser
+        .grammar
+        .new_enum("impl type")
+        .options([trait_impl, type_impl])
+        .build();
+
+    let impl_kw = parser
+        .grammar
+        .new_node("impl")
+        .rules([
+            is(keyword("impl")).commit(),
+            maybe(generic_params).set("generic parameters"),
+            is(impl_variants).set("type"),
+            is(token("{")),
+            loop_().then([is_one_of([
+                option(function).set("methods"),
+                option(token("}")).return_node(),
+            ])]),
+        ])
+        .variables([
+            node_var("type"),
+            node_var("generic parameters"),
+            list_var("methods"),
+        ])
+        .build();
+
     let system_include = parser
         .grammar
         .new_node("system inclusion")
@@ -1162,7 +1225,7 @@ pub fn gen_parser<'src>() -> Parser<'static> {
             is(ident).set(IDENTIFIER).commit(),
             is(token(":")),
             is(clause_select_component).set("components"),
-            while_(token("&")).then([is(clause_select_component)
+            while_(token("+")).then([is(clause_select_component)
                 .set("components")
                 .hint("Trailing separators not allowed")]),
         ])
@@ -1188,7 +1251,7 @@ pub fn gen_parser<'src>() -> Parser<'static> {
             is(ident).set(IDENTIFIER).commit(),
             is(token(":")),
             is(event_component).set("event"),
-            while_(token("&")).then([is(event_component)
+            while_(token("+")).then([is(event_component)
                 .set("event")
                 .hint("Trailing separators not allowed")]),
         ])
@@ -1302,7 +1365,7 @@ pub fn gen_parser<'src>() -> Parser<'static> {
         .grammar
         .new_enum("top level statement")
         .options([
-            scheduler, function, system, component, type_kw, import, const_kw,
+            scheduler, function, system, component, type_kw, import, const_kw, trait_kw, impl_kw,
         ])
         .build();
 

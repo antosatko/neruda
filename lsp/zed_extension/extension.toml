@@ -8,6 +8,8 @@ repository = "https://github.com/antosatko/neruda/lsp/zed_extension"
 
 languages = ["languages/neruda"]
 
+snippets = ["./snippets/neruda.json"]
+
 [language_servers.neruda-lsp]
 name = "neruda-lsp"
 languages = ["neruda"]

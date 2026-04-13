@@ -5,9 +5,19 @@ type ImInt = Im<i32>
 
 const PI: f64 = 3.14159265359
 
-// [docs] method [generic_params] type . method_identifier params [return_type] (block)
+impl <S: Add> Add for Im<S> {
+    function add(self: Self, other: Self): Self => (
+        self[0] + other[0],
+        self[1] + other[1],
+    )
+}
 
-// method ImFloat.add(&self, other: Self): Self => (
-//     self.0 + other.0,
-//     self.1 + other.1,
-// )
+trait Add {
+    function add(self: Self, other: Self): Self => _
+}
+
+trait Sub {
+    function sub(self: Self, other: Self): Self => _
+}
+
+type AddAndSub<T: Add + Sub> = T

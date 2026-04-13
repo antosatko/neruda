@@ -1,0 +1,22 @@
+{
+  "Function": {
+    "prefix": "function",
+    "body": ["function ${1:name} ($2) {$0}"]
+  },
+  "Statement function": {
+    "prefix": "statement function",
+    "body": ["function ${1:name} ($2) => ${0:_}"]
+  },
+  "Type": {
+    "prefix": "type",
+    "body": ["type ${1:name} = ${0:()}"]
+  },
+  "Component": {
+    "prefix": "component",
+    "body": ["component ${1:name} = ${0:()}"]
+  },
+  "Import": {
+    "prefix": "import",
+    "body": ["import ${1:lib} as ${0:alias}"]
+  }
+}

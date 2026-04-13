@@ -133,14 +133,7 @@ pub enum Object {
         docs: Vec<Span<SmolStr>>,
     },
 
-    Function {
-        ident: Span<SmolStr>,
-        generics: Option<Span<Vec<Span<GenericParameter>>>>,
-        parameters: Vec<Span<Parameter>>,
-        return_type: Option<Span<Type>>,
-        body: Span<Body>,
-        docs: Vec<Span<SmolStr>>,
-    },
+    Function(Function),
 
     Component {
         ident: Span<SmolStr>,
@@ -176,6 +169,36 @@ pub enum Object {
         ty: Span<Type>,
         expression: Span<Expression>,
     },
+
+    Trait {
+        docs: Vec<Span<SmolStr>>,
+        ident: Span<SmolStr>,
+        methods: Vec<Span<Function>>,
+    },
+
+    TypeImpl {
+        ty: Span<Type>,
+        generic_parameters: Option<Span<Vec<Span<GenericParameter>>>>,
+        methods: Vec<Span<Function>>,
+    },
+
+    TraitImpl {
+        ty: Span<Type>,
+        trt: Span<IdentifierPath>,
+        for_kw: Keyword,
+        generic_parameters: Option<Span<Vec<Span<GenericParameter>>>>,
+        methods: Vec<Span<Function>>,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub struct Function {
+    pub ident: Span<SmolStr>,
+    pub generics: Option<Span<Vec<Span<GenericParameter>>>>,
+    pub parameters: Vec<Span<Parameter>>,
+    pub return_type: Option<Span<Type>>,
+    pub body: Span<Body>,
+    pub docs: Vec<Span<SmolStr>>,
 }
 
 #[derive(Debug, Clone)]
@@ -225,9 +248,6 @@ pub struct ActionClause {
 pub struct RestrictionClause {
     pub expression: Span<Expression>,
 }
-
-#[derive(Debug, Clone)]
-pub struct Function {}
 
 /* ===================== BLOCK / STATEMENTS ===================== */
 

@@ -71,6 +71,16 @@ pub struct ConstraintType {
     pub constraints: Vec<TraitKey>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct NamedTypeTag;
+pub type NamedTypeArena = Arena<NamedTypeType, NamedTypeTag>;
+pub type NamedTypeKey = Key<NamedTypeTag>;
+#[derive(PartialEq, Debug)]
+pub struct NamedTypeType {
+    pub name: SmolStr,
+    pub repr: AnyTypeKey,
+}
+
 pub type GenericArena = Arena<GenericType, GenericTag>;
 pub type GenericKey = Key<GenericTag>;
 #[derive(PartialEq, Debug, Copy, Clone)]
@@ -122,6 +132,7 @@ pub enum AnyTypeKey {
     Struct(StructKey),
     Enum(EnumKey),
     Trait(TraitKey),
+    Named(NamedTypeKey),
     ModuleRef(ModuleKey),
 }
 
@@ -136,6 +147,7 @@ pub struct Types {
     pub tuples: TupleArena,
     pub traits: TraitArena,
     pub modules: ModuleArena,
+    pub named: NamedTypeArena,
 }
 
 pub struct AutoTypes {
@@ -321,6 +333,12 @@ impl Module {
     }
 }
 
+impl NamedTypeType {
+    pub fn stringify(&self, types: &Types) -> String {
+        self.repr.stringify(types).to_string()
+    }
+}
+
 impl ArrayType {
     pub fn stringify(&self, types: &Types) -> String {
         let mut out = format!("[{}", self.element_type.stringify(types));
@@ -420,6 +438,7 @@ impl AnyTypeKey {
             AnyTypeKey::ModuleRef(key) => {
                 Cow::Owned(types.modules.get_unchecked(key).stringify(types))
             }
+            AnyTypeKey::Named(key) => Cow::Owned(types.named.get_unchecked(key).stringify(types)),
         }
     }
 }

@@ -3,14 +3,14 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use arena::Key;
-use smol_str::SmolStr;
+use smol_str::{SmolStr, ToSmolStr};
 
 use crate::ast::{self, ConstValue, Number, NumberValue};
 use crate::ir::Context;
 use crate::ir::objects::{AnyObject, AnyObjectData, AnyObjectkey, InitState, Module};
 use crate::ir::types::{
     AnyTypeKey, ArrayType, ConstraintKey, ConstraintType, EnumType, ModuleKey, ModuleTag,
-    PrimitiveType, StructType, TraitType, TupleType,
+    NamedTypeType, PrimitiveType, StructType, TraitType, TupleType,
 };
 
 #[derive(Default)]
@@ -104,20 +104,25 @@ impl Context {
 
                 match mod_ast.objects.get_unchecked(&obj.ast_object).deref() {
                     ast::Object::Type {
-                        ident: _,
+                        ident,
                         generics,
                         ty,
                         docs: _,
                     } => {
                         generic_ctx.push_scope(&generics, self, &mod_key);
+                        let named_key = unsafe { self.types.named.empty_alloc() };
+                        self.types.named.get_mut_unchecked(&named_key).name =
+                            ident.inner.to_smolstr();
                         let obj = self.obj_mut(mod_key, obj_key);
-                        *obj.type_state_mut() = InitState::Progress(());
+                        *obj.type_state_mut_eager() =
+                            InitState::Progress(AnyTypeKey::Named(named_key));
                         let key = ty
                             .as_ref()
                             .map(|t| t.lower(self, mod_key, &mut generic_ctx))
                             .unwrap_or(AnyTypeKey::Primitive(PrimitiveType::Void));
+                        self.types.named.get_mut_unchecked(&named_key).repr = key;
                         let obj = self.obj_mut(mod_key, obj_key);
-                        *obj.type_state_mut() = InitState::Done(key);
+                        obj.type_state_mut_eager().mark_done();
                         generic_ctx.pop_scope();
                     }
                     ast::Object::Const {

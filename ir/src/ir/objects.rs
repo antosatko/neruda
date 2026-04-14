@@ -40,7 +40,7 @@ pub enum AnyObjectData {
         ty: InitState<AnyTypeKey, ()>,
     },
     TypeAlias {
-        ty: InitState<AnyTypeKey, ()>,
+        ty: InitState<AnyTypeKey>,
         generics: Vec<ConstraintKey>,
     },
     Trait {
@@ -62,7 +62,17 @@ impl AnyObject {
         match &mut self.data {
             AnyObjectData::Import { .. } => panic!("Object import has no type state"),
             AnyObjectData::Trait { .. } => panic!("Object trait has no type state"),
+            AnyObjectData::TypeAlias { .. } => panic!("Object TypeAlias is eager"),
             AnyObjectData::Const { ty, .. } => ty,
+        }
+    }
+
+    #[track_caller]
+    pub fn type_state_mut_eager(&mut self) -> &mut InitState<AnyTypeKey> {
+        match &mut self.data {
+            AnyObjectData::Import { .. } => panic!("Object import has no type state"),
+            AnyObjectData::Trait { .. } => panic!("Object trait has no type state"),
+            AnyObjectData::Const { .. } => panic!("Object const is not eager"),
             AnyObjectData::TypeAlias { ty, .. } => ty,
         }
     }
@@ -84,6 +94,17 @@ impl AnyObject {
             } => *ty,
             _ => return None,
         })
+    }
+}
+
+impl<T> InitState<T, T> {
+    pub fn mark_done(&mut self) {
+        let new = match std::mem::replace(self, InitState::Uninitialized) {
+            InitState::Done(v) => InitState::Done(v),
+            InitState::Progress(v) => InitState::Done(v),
+            InitState::Uninitialized => InitState::Uninitialized,
+        };
+        *self = new;
     }
 }
 

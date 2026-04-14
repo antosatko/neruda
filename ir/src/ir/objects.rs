@@ -7,7 +7,7 @@ use crate::{
     ast::{self, ConstValue},
     ir::{
         Context,
-        types::{AnyTypeKey, ConstraintKey, ModuleKey, TraitKey},
+        types::{AnyTypeKey, ConstraintKey, ModuleKey, NamedTypeKey, TraitKey},
     },
 };
 
@@ -40,12 +40,20 @@ pub enum AnyObjectData {
         ty: InitState<AnyTypeKey, ()>,
     },
     TypeAlias {
-        ty: InitState<AnyTypeKey>,
+        ty: InitState<NamedTypeKey>,
         generics: Vec<ConstraintKey>,
     },
     Trait {
         ty: InitState<TraitKey>,
     },
+    Function(FunctionData),
+}
+
+#[derive(Debug)]
+pub struct FunctionData {
+    pub return_type: InitState<AnyTypeKey, ()>,
+    pub params: HashMap<SmolStr, InitState<AnyTypeKey, ()>>,
+    pub generics: Vec<ConstraintKey>,
 }
 
 impl AnyObject {
@@ -63,16 +71,18 @@ impl AnyObject {
             AnyObjectData::Import { .. } => panic!("Object import has no type state"),
             AnyObjectData::Trait { .. } => panic!("Object trait has no type state"),
             AnyObjectData::TypeAlias { .. } => panic!("Object TypeAlias is eager"),
+            AnyObjectData::Function(_) => panic!("not applicable to function"),
             AnyObjectData::Const { ty, .. } => ty,
         }
     }
 
     #[track_caller]
-    pub fn type_state_mut_eager(&mut self) -> &mut InitState<AnyTypeKey> {
+    pub fn type_state_mut_eager(&mut self) -> &mut InitState<NamedTypeKey> {
         match &mut self.data {
             AnyObjectData::Import { .. } => panic!("Object import has no type state"),
             AnyObjectData::Trait { .. } => panic!("Object trait has no type state"),
             AnyObjectData::Const { .. } => panic!("Object const is not eager"),
+            AnyObjectData::Function(_) => panic!("not applicable to function"),
             AnyObjectData::TypeAlias { ty, .. } => ty,
         }
     }
@@ -91,7 +101,7 @@ impl AnyObject {
             AnyObjectData::TypeAlias {
                 ty: InitState::Done(ty),
                 ..
-            } => *ty,
+            } => AnyTypeKey::Named(*ty),
             _ => return None,
         })
     }
@@ -105,6 +115,26 @@ impl<T> InitState<T, T> {
             InitState::Uninitialized => InitState::Uninitialized,
         };
         *self = new;
+    }
+
+    #[track_caller]
+    pub fn get(&self) -> &T {
+        match self {
+            InitState::Done(v) => v,
+            InitState::Progress(v) => v,
+            InitState::Uninitialized => panic!("uninitialized"),
+        }
+    }
+}
+
+impl<T, U> InitState<T, U> {
+    #[track_caller]
+    pub fn get_done(&self) -> &T {
+        match self {
+            InitState::Done(v) => v,
+            InitState::Progress(_) => panic!("in progress"),
+            InitState::Uninitialized => panic!("uninitialized"),
+        }
     }
 }
 
@@ -144,12 +174,56 @@ impl AnyObjectData {
                 format!(
                     "type{generics} = {}",
                     match ty {
-                        InitState::Done(ty) => ty.stringify(&ctx.types),
+                        InitState::Done(ty) => AnyTypeKey::Named(*ty).stringify(&ctx.types),
                         _ => Cow::Borrowed("<type uninit>"),
                     }
                 )
             }
             Self::Trait { .. } => "<trait>".to_string(),
+            Self::Function(FunctionData {
+                return_type,
+                params,
+                generics,
+            }) => {
+                let mut result = "function ".to_string();
+                if !generics.is_empty() {
+                    result.push('<');
+                    let mut it = generics.iter();
+                    if let Some(ty) = it.next() {
+                        result.push_str(&format!(
+                            "{}",
+                            AnyTypeKey::Constraint(*ty).stringify(&ctx.types)
+                        ));
+                    }
+                    for ty in it {
+                        result.push_str(&format!(
+                            ", {}",
+                            AnyTypeKey::Constraint(*ty).stringify(&ctx.types)
+                        ));
+                    }
+                    result.push('>');
+                }
+                if !params.is_empty() {
+                    result.push('(');
+                    let mut it = params.iter();
+                    if let Some((ident, ty)) = it.next() {
+                        result
+                            .push_str(&format!("{ident}: {}", ty.get_done().stringify(&ctx.types)));
+                    }
+                    for (ident, ty) in it {
+                        result.push_str(&format!(
+                            ", {ident}: {}",
+                            ty.get_done().stringify(&ctx.types)
+                        ));
+                    }
+                    result.push(')');
+                }
+                result.push_str(&format!(
+                    ": {}",
+                    return_type.get_done().stringify(&ctx.types)
+                ));
+                result
+            }
         }
     }
 }

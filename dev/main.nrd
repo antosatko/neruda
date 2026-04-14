@@ -44,3 +44,7 @@ system orbit(
 => satellite.V += 1000 / (primary.get(satellite.C).P - satellite.P).pow(2)
 // generic components
 system add<T: AddEq, U>(e: mut T + U) => e.T += e.U
+
+
+
+function tuple(v: m::Danda): (f32, f32) => (v.v, v.v)

@@ -12,6 +12,10 @@ impl <S: Add> Add for Im<S> {
     )
 }
 
+type Danda = struct {
+	v: f32
+}
+
 trait Add {
     function add(self: Self, other: Self): Self => _
 }

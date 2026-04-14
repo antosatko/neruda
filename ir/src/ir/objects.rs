@@ -150,10 +150,7 @@ impl AnyObjectData {
         match self {
             Self::Import { module } => format!(
                 "module {}",
-                ctx.types
-                    .modules
-                    .get_unchecked(module)
-                    .stringify(&ctx.types)
+                ctx.types.modules.get_unchecked(module).stringify()
             ),
             Self::Const { value, ty } => format!(
                 "const: {} = {}",

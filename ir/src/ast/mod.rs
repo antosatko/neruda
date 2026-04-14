@@ -391,7 +391,7 @@ pub struct Type {
 pub enum TypeLiteral {
     Path(Span<IdentifierPath>, Option<Span<Vec<Span<Type>>>>),
     Struct(Vec<Span<Parameter>>),
-    Array(Box<Span<Type>>, Option<usize>),
+    Array(Box<Span<Type>>, Option<Span<Expression>>),
     Tuple(Vec<Span<Type>>),
     Enum(
         Option<Box<Span<Type>>>,
@@ -646,7 +646,7 @@ impl std::fmt::Display for Type {
             TypeLiteral::Array(ty, len) => {
                 write!(f, "[{}", ty.inner)?;
                 if let Some(len) = len {
-                    write!(f, ", {len}")?;
+                    write!(f, ", expr")?;
                 }
                 write!(f, "]")?;
             }

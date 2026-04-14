@@ -757,7 +757,7 @@ pub fn gen_parser<'src>() -> Parser<'static> {
             is(node("type")).set("type"),
             maybe(token(";")).then([is_one_of([
                 option(token("]")).fail(&grammar_errs::MISSING_ARRAY_LENGTH),
-                option(complex("numeric")).set("length"),
+                option(expression).set("length"),
             ])]),
             is(token("]")),
         ])

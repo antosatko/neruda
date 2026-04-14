@@ -138,7 +138,7 @@ fn main() {
                 }
                 println!("enum types:");
                 for t in enums.iter() {
-                    println!("\t- {}", t.stringify(&ir_ctx.types));
+                    println!("\t- {}", t.stringify());
                 }
                 println!("array types:");
                 for t in arrays.iter() {
@@ -150,19 +150,19 @@ fn main() {
                 }
                 println!("trait types:");
                 for t in traits.iter() {
-                    println!("\t{}", t.stringify(&ir_ctx.types));
+                    println!("\t{}", t.stringify());
                 }
                 println!("module refs:");
                 for t in modules.iter() {
-                    println!("\t- {}", t.stringify(&ir_ctx.types));
+                    println!("\t- {}", t.stringify());
                 }
                 println!("named types:");
                 for t in named.iter() {
-                    println!("\t- {}", t.stringify(&ir_ctx.types));
+                    println!("\t- {}", t.stringify());
                 }
             }
             for module in ir_ctx.types.modules.iter() {
-                println!("Module {}", module.stringify(&ir_ctx.types));
+                println!("Module {}", module.stringify());
                 for obj in module.objects.iter() {
                     let ident = &obj.identifier;
                     println!("\t- {ident} :: {}", obj.data.stringify(&ir_ctx));

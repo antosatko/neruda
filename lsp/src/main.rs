@@ -548,7 +548,9 @@ impl IndexedWalk for ir::ast::Span<Type> {
             }
             ir::ast::TypeLiteral::Array(ty, len) => {
                 ty.index(line_index, spans);
-                let _: Option<usize> = *len;
+                if let Some(len) = len {
+                    len.index(line_index, spans);
+                }
             }
             ir::ast::TypeLiteral::Tuple(params) => {
                 for ty in params {

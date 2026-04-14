@@ -317,7 +317,7 @@ impl StructType {
 }
 
 impl EnumType {
-    pub fn stringify(&self, _: &Types) -> String {
+    pub fn stringify(&self) -> String {
         let mut out = String::from("enum { ");
         for (ident, value) in &self.variants {
             out.push_str(&format!("{ident}: {} ", value.stringify()));
@@ -328,14 +328,14 @@ impl EnumType {
 }
 
 impl Module {
-    pub fn stringify(&self, _: &Types) -> String {
+    pub fn stringify(&self) -> String {
         self.path.join("::")
     }
 }
 
 impl NamedTypeType {
-    pub fn stringify(&self, types: &Types) -> String {
-        self.repr.stringify(types).to_string()
+    pub fn stringify(&self) -> String {
+        self.name.to_string()
     }
 }
 
@@ -366,7 +366,7 @@ impl TupleType {
 }
 
 impl TraitType {
-    pub fn stringify(&self, _: &Types) -> String {
+    pub fn stringify(&self) -> String {
         self.ident.to_string()
     }
 }
@@ -433,12 +433,10 @@ impl AnyTypeKey {
             AnyTypeKey::Struct(key) => {
                 Cow::Owned(types.structures.get_unchecked(key).stringify(types))
             }
-            AnyTypeKey::Enum(key) => Cow::Owned(types.enums.get_unchecked(key).stringify(types)),
-            AnyTypeKey::Trait(key) => Cow::Owned(types.traits.get_unchecked(key).stringify(types)),
-            AnyTypeKey::ModuleRef(key) => {
-                Cow::Owned(types.modules.get_unchecked(key).stringify(types))
-            }
-            AnyTypeKey::Named(key) => Cow::Owned(types.named.get_unchecked(key).stringify(types)),
+            AnyTypeKey::Enum(key) => Cow::Owned(types.enums.get_unchecked(key).stringify()),
+            AnyTypeKey::Trait(key) => Cow::Owned(types.traits.get_unchecked(key).stringify()),
+            AnyTypeKey::ModuleRef(key) => Cow::Owned(types.modules.get_unchecked(key).stringify()),
+            AnyTypeKey::Named(key) => Cow::Owned(types.named.get_unchecked(key).stringify()),
         }
     }
 }

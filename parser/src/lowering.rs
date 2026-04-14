@@ -831,10 +831,13 @@ fn ty(
         )),
         "array type literal" => {
             let type_ = ty(src, literal.expect_node("type"), diagnostics)?;
-            assert!(literal.try_get_node("length").is_none(), "working on it :)");
+            let len = match literal.try_get_node("length") {
+                Some(expr) => Some(expression(src, expr, diagnostics)?),
+                None => None,
+            };
             Ok(span(
                 Type {
-                    literal: span(TypeLiteral::Array(Box::new(type_), None), literal),
+                    literal: span(TypeLiteral::Array(Box::new(type_), len), literal),
                 },
                 node,
             ))

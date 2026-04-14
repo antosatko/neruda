@@ -2,7 +2,7 @@ use std::{
     collections::HashMap,
     ffi::OsString,
     fmt::Write,
-    fs::{self, DirEntry},
+    fs::{self},
     path::Path,
 };
 
@@ -10,11 +10,7 @@ const TERM_WIDTH: usize = 60;
 
 use annotate_snippets::{AnnotationKind, Group, Level, Renderer, Snippet, renderer::DecorStyle};
 use ir::ast::{LoweringError, Span};
-use ruparse::{
-    Parser,
-    lexer::PreprocessorError,
-    parser::{ParseError, ParseResult},
-};
+use ruparse::{Parser, lexer::PreprocessorError, parser::ParseError};
 use smol_str::SmolStr;
 
 use crate::{grammar::gen_parser, lowering::ModuleOk};

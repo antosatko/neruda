@@ -495,9 +495,19 @@ impl ast::Type {
             }
             ast::TypeLiteral::Array(span, size) => {
                 let ty = span.lower(ctx, module, generic_context);
+                let size = match size {
+                    Some(const_expr) => match const_expr.const_eval(ctx, generic_context) {
+                        Some(ConstValue::Number(n)) => match n.value {
+                            NumberValue::Uint(n) | NumberValue::Any(n) => Some(n as _),
+                            _ => todo!(),
+                        },
+                        _ => todo!(),
+                    },
+                    None => None,
+                };
                 let key = ctx.types.arrays.push_unique(ArrayType {
                     element_type: ty,
-                    size: *size,
+                    size: size,
                 });
                 AnyTypeKey::Array(key)
             }

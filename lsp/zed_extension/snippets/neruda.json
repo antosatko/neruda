@@ -1,11 +1,7 @@
 {
   "Function": {
     "prefix": "function",
-    "body": [
-      "function ${1:name}${2:<T>}(${3:params})${4:: ReturnType} {",
-      "\t$0",
-      "}"
-    ],
+    "body": ["function ${1:name}(${2:params})${5:: ReturnType} {", "\t$0", "}"],
     "description": "Defines a regular function with optional generics, parameters, and return type"
   },
   "Function (arrow)": {
@@ -22,11 +18,6 @@
     "prefix": "const",
     "body": ["const ${1:name}: ${2:Type} = ${0:value}"],
     "description": "Declares an immutable constant with explicit type"
-  },
-  "Return": {
-    "prefix": "return",
-    "body": ["return ${0:value}"],
-    "description": "Returns a value from the current function or block"
   },
   "If": {
     "prefix": "if",
@@ -51,40 +42,30 @@
     ],
     "description": "Chained if / else-if / else conditional structure"
   },
-  "While": {
-    "prefix": "while",
-    "body": ["while ${1:condition} {", "\t$0", "}"],
-    "description": "While loop that repeats while condition is true"
-  },
-  "Loop": {
-    "prefix": "loop",
-    "body": ["loop {", "\t$0", "}"],
-    "description": "Infinite loop (or language-specific loop construct)"
-  },
   "Type": {
     "prefix": "type",
-    "body": ["type ${1:Name}${2:<T>} = ${0:Type}"],
+    "body": ["type ${1:Name} = ${0:Type}"],
     "description": "Creates a type alias with optional generics"
   },
-  "Struct Type": {
+  "Struct": {
     "prefix": "struct",
-    "body": ["type ${1:Name} = struct {", "\t${1:field}: ${2:Type}", "}"],
-    "description": "Defines an anonymous struct type literal"
+    "body": ["type ${1:Name} = struct {", "\t$0", "}"],
+    "description": "Defines a struct type"
   },
   "Enum": {
     "prefix": "enum",
-    "body": ["type ${1:Name} = enum {", "\t${2:Variant}", "\t$0", "}"],
+    "body": ["type ${1:Name} = enum {", "\t$0", "}"],
     "description": "Defines an enumeration with variants"
   },
   "Component": {
     "prefix": "component",
-    "body": ["component ${1:Name}${2: = Type}"],
+    "body": ["component ${1:Name} ${0:= Type}"],
     "description": "Defines an ECS component (with optional type)"
   },
   "Import": {
     "prefix": "import",
     "body": ["import ${1:path} as ${0:alias}"],
-    "description": "Imports a module/file with optional alias"
+    "description": "Imports a file with alias"
   },
   "Trait": {
     "prefix": "trait",
@@ -93,22 +74,16 @@
       "\tfunction ${2:method}($3)${4:: ReturnType} => ${0:_}",
       "}"
     ],
-    "description": "Defines a trait/interface with method signatures"
+    "description": "Defines a trait with method signatures"
   },
   "Impl (type)": {
     "prefix": "impl",
-    "body": [
-      "impl${1:<T>} ${2:Type} {",
-      "\tfunction ${3:method}($4) {",
-      "\t$0",
-      "\t}",
-      "}"
-    ],
+    "body": ["impl ${1:Type} {", "\t$0", "}"],
     "description": "Implements methods directly on a concrete type"
   },
   "Impl (trait)": {
     "prefix": "impltrait",
-    "body": ["impl${1:<T>} ${2:Trait} for ${3:Type} {", "\t$0", "}"],
+    "body": ["impl ${1:Trait} for ${2:Type} {", "\t$0", "}"],
     "description": "Implements a trait for a specific type"
   },
   "System": {

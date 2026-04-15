@@ -171,7 +171,9 @@ impl AnyObjectData {
                 format!(
                     "type{generics} = {}",
                     match ty {
-                        InitState::Done(ty) => AnyTypeKey::Named(*ty).stringify(&ctx.types),
+                        InitState::Done(ty) => {
+                            ctx.types.named.get_unchecked(ty).repr.stringify(&ctx.types)
+                        }
                         _ => Cow::Borrowed("<type uninit>"),
                     }
                 )

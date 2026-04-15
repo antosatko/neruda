@@ -23,7 +23,7 @@ impl Expression {
                             l.postfix.len() + r.postfix.len() == 0,
                         ) {
                             (Literal::Number(l), Literal::Number(r), true) => {
-                                match op.const_apply_numeric(&l.value, &r.value, diagnostics) {
+                                match op.const_apply_numeric(&l.value, &r.value) {
                                     Some(value) => {
                                         let v = Value {
                                             literal: Span::new(
@@ -53,24 +53,19 @@ impl Expression {
 }
 
 impl Span<Operator> {
-    pub fn const_apply(
-        &self,
-        l: &ConstValue,
-        r: &ConstValue,
-        diagnostics: &mut Diagnostics,
-    ) -> Option<ConstValue> {
+    pub fn const_apply(&self, l: &ConstValue, r: &ConstValue) -> Option<ConstValue> {
         use Operator::*;
 
         match self.inner.as_ref() {
             Add | Sub | Mul | Div | Mod => match (l, r) {
                 (ConstValue::Number(l), ConstValue::Number(r)) => self
-                    .const_apply_numeric(&l.value, &r.value, diagnostics)
+                    .const_apply_numeric(&l.value, &r.value)
                     .map(|value| ConstValue::Number(Number { value, size: None })),
                 _ => None,
             },
             Eq | NEq | Gr | Le | GrEq | LeEq => match (l, r) {
                 (ConstValue::Number(l), ConstValue::Number(r)) => self
-                    .const_apply_numeric_to_bool(&l.value, &r.value, diagnostics)
+                    .const_apply_numeric_to_bool(&l.value, &r.value)
                     .map(|value| ConstValue::Bool(value)),
                 _ => None,
             },
@@ -79,16 +74,11 @@ impl Span<Operator> {
         }
     }
 
-    fn const_apply_bool(&self, l: bool, r: bool, diagnostics: &mut Diagnostics) -> Option<bool> {
+    fn const_apply_bool(&self, l: bool, r: bool) -> Option<bool> {
         todo!()
     }
 
-    fn const_apply_numeric_to_bool(
-        &self,
-        l: &NumberValue,
-        r: &NumberValue,
-        diagnostics: &mut Diagnostics,
-    ) -> Option<bool> {
+    fn const_apply_numeric_to_bool(&self, l: &NumberValue, r: &NumberValue) -> Option<bool> {
         use NumberValue::*;
         use Operator::*;
         Some(match (self.inner.as_ref(), l, r) {
@@ -125,12 +115,7 @@ impl Span<Operator> {
         })
     }
 
-    fn const_apply_numeric(
-        &self,
-        l: &NumberValue,
-        r: &NumberValue,
-        diagnostics: &mut Diagnostics,
-    ) -> Option<NumberValue> {
+    fn const_apply_numeric(&self, l: &NumberValue, r: &NumberValue) -> Option<NumberValue> {
         use NumberValue::*;
         use Operator::*;
         Some(match (self.inner.as_ref(), l, r) {
@@ -153,27 +138,27 @@ impl Span<Operator> {
             (Div, Any(l), Any(r)) => match (*l).checked_div(*r) {
                 Some(v) => Any(v),
                 None => {
-                    diagnostics
-                        .warns
-                        .push(Span::new(LoweringWarning::DivisionByZero, self.location));
+                    /*diagnostics
+                    .warns
+                    .push(Span::new(LoweringWarning::DivisionByZero, self.location));*/
                     return None;
                 }
             },
             (Div, Int(l), Int(r)) => match (*l).checked_div(*r) {
                 Some(v) => Int(v),
                 None => {
-                    diagnostics
-                        .warns
-                        .push(Span::new(LoweringWarning::DivisionByZero, self.location));
+                    /*diagnostics
+                    .warns
+                    .push(Span::new(LoweringWarning::DivisionByZero, self.location));*/
                     return None;
                 }
             },
             (Div, Uint(l), Uint(r)) => match (*l).checked_div(*r) {
                 Some(v) => Uint(v),
                 None => {
-                    diagnostics
-                        .warns
-                        .push(Span::new(LoweringWarning::DivisionByZero, self.location));
+                    /*diagnostics
+                    .warns
+                    .push(Span::new(LoweringWarning::DivisionByZero, self.location));*/
                     return None;
                 }
             },
@@ -182,27 +167,27 @@ impl Span<Operator> {
             (Mod, Any(l), Any(r)) => match (*l).checked_rem_euclid(*r) {
                 Some(v) => Any(v),
                 None => {
-                    diagnostics
-                        .warns
-                        .push(Span::new(LoweringWarning::DivisionByZero, self.location));
+                    /*diagnostics
+                    .warns
+                    .push(Span::new(LoweringWarning::DivisionByZero, self.location));*/
                     return None;
                 }
             },
             (Mod, Int(l), Int(r)) => match (*l).checked_rem_euclid(*r) {
                 Some(v) => Int(v),
                 None => {
-                    diagnostics
-                        .warns
-                        .push(Span::new(LoweringWarning::DivisionByZero, self.location));
+                    /*diagnostics
+                    .warns
+                    .push(Span::new(LoweringWarning::DivisionByZero, self.location));*/
                     return None;
                 }
             },
             (Mod, Uint(l), Uint(r)) => match (*l).checked_rem_euclid(*r) {
                 Some(v) => Uint(v),
                 None => {
-                    diagnostics
-                        .warns
-                        .push(Span::new(LoweringWarning::DivisionByZero, self.location));
+                    /*diagnostics
+                    .warns
+                    .push(Span::new(LoweringWarning::DivisionByZero, self.location));*/
                     return None;
                 }
             },

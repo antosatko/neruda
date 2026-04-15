@@ -178,22 +178,33 @@ impl Context {
                         ty,
                         expression,
                     } => {
-                        let type_key = ty.lower(self, mod_key, &mut generic_ctx);
-                        let obj = self.obj_mut(mod_key, obj_key);
-                        *obj.type_state_mut() = InitState::Done(type_key);
-                        let mut v = expression.const_eval(self, &mut generic_ctx).unwrap();
-                        if !self.type_check_const_value(&mut v, &type_key) {
-                            panic!("lala mas to blby")
-                        }
-                        let obj = self.obj_mut(mod_key, obj_key);
-                        match &mut obj.data {
-                            AnyObjectData::Const { value, .. } => *value = InitState::Done(v),
-                            _ => (),
-                        }
+                        self.lower_const(mod_key, &mut generic_ctx, obj_key, ty, expression);
                     }
                     _ => (),
                 }
             }
+        }
+    }
+
+    fn lower_const(
+        &mut self,
+        mod_key: Key<ModuleTag>,
+        generic_ctx: &mut GenericContext,
+        obj_key: &AnyObjectkey,
+        ty: &ast::Span<ast::Type>,
+        expression: &ast::Span<ast::Expression>,
+    ) {
+        let type_key = ty.lower(self, mod_key, generic_ctx);
+        let obj = self.obj_mut(mod_key, obj_key);
+        *obj.type_state_mut() = InitState::Done(type_key);
+        let mut v = expression.const_eval(self, mod_key, generic_ctx).unwrap();
+        if !self.type_check_const_value(&mut v, &type_key) {
+            panic!("lala mas to blby")
+        }
+        let obj = self.obj_mut(mod_key, obj_key);
+        match &mut obj.data {
+            AnyObjectData::Const { value, .. } => *value = InitState::Done(v),
+            _ => (),
         }
     }
 
@@ -212,7 +223,7 @@ impl Context {
         path: &[SmolStr],
         mut mod_key: ModuleKey,
         generic_context: &mut GenericContext,
-    ) -> Option<&AnyObject> {
+    ) -> Option<AnyObjectkey> {
         for (is_last, next_stop) in path
             .iter()
             .enumerate()
@@ -222,11 +233,11 @@ impl Context {
             match module
                 .symbol_map
                 .get(next_stop)
-                .map(|k| module.objects.get_unchecked(k))
+                .map(|k| (k, module.objects.get_unchecked(k)))
             {
-                Some(obj) => match &obj.data {
+                Some((k, obj)) => match &obj.data {
                     AnyObjectData::Import { module } => mod_key = *module,
-                    _ if is_last => return Some(obj),
+                    _ if is_last => return Some(k.clone()),
                     _ => return None,
                 },
                 None => return None,
@@ -394,6 +405,7 @@ impl ast::Expression {
     pub fn const_eval(
         &self,
         ctx: &mut Context,
+        mod_key: ModuleKey,
         generic_context: &mut GenericContext,
     ) -> Option<ConstValue> {
         match self {
@@ -402,7 +414,48 @@ impl ast::Expression {
                     return None;
                 }
                 Some(match value.literal.inner.as_ref() {
-                    ast::Literal::Identifier(identifier_path) => todo!(),
+                    ast::Literal::Identifier(identifier_path) => {
+                        let path: Vec<SmolStr> = identifier_path
+                            .path
+                            .iter()
+                            .map(|p| p.inner.as_ref().clone())
+                            .collect();
+                        match ctx.resolve_const_path(&path, mod_key, generic_context) {
+                            Some(key) => {
+                                let obj = ctx
+                                    .types
+                                    .modules
+                                    .get_unchecked(&mod_key)
+                                    .objects
+                                    .get_unchecked(&key);
+                                match &obj.data {
+                                    AnyObjectData::Const {
+                                        value: InitState::Done(v),
+                                        ty: _,
+                                    } => return Some(v.clone()),
+                                    AnyObjectData::Const {
+                                        value: InitState::Progress(_),
+                                        ty,
+                                    } => {
+                                        panic!("we do not like circles around here")
+                                    }
+                                    AnyObjectData::Const { value, ty } => {
+                                        let module = ctx.types.modules.get_unchecked(&mod_key);
+                                        ctx.lower_const(
+                                            mod_key,
+                                            generic_context,
+                                            &key,
+                                            ty,
+                                            expression,
+                                        );
+                                        todo!()
+                                    }
+                                    _ => panic!("nope"),
+                                }
+                            }
+                            None => return None,
+                        }
+                    }
                     ast::Literal::Structure(span, spans) => todo!(),
                     ast::Literal::Number(number) => ConstValue::Number(number.clone()),
                     ast::Literal::String(smol_str) => ConstValue::String(smol_str.clone()),
@@ -411,7 +464,11 @@ impl ast::Expression {
                     ast::Literal::Tuple(spans) => todo!(),
                 })
             }
-            ast::Expression::Binary { l, r, op } => todo!(),
+            ast::Expression::Binary { l, r, op } => {
+                let l = l.const_eval(ctx, mod_key, generic_context)?;
+                let r = r.const_eval(ctx, mod_key, generic_context)?;
+                op.const_apply(&l, &r)
+            }
         }
     }
 }
@@ -451,7 +508,14 @@ impl ast::Type {
                         }
                         AnyTypeKey::Primitive(PrimitiveType::Void)
                     }
-                    None => match &resolved.data {
+                    None => match &ctx
+                        .types
+                        .modules
+                        .get_unchecked(&module)
+                        .objects
+                        .get_unchecked(&resolved)
+                        .data
+                    {
                         AnyObjectData::TypeAlias {
                             ty: InitState::Done(ty) | InitState::Progress(ty),
                             generics: _,
@@ -496,7 +560,7 @@ impl ast::Type {
             ast::TypeLiteral::Array(span, size) => {
                 let ty = span.lower(ctx, module, generic_context);
                 let size = match size {
-                    Some(const_expr) => match const_expr.const_eval(ctx, generic_context) {
+                    Some(const_expr) => match const_expr.const_eval(ctx, module, generic_context) {
                         Some(ConstValue::Number(n)) => match n.value {
                             NumberValue::Uint(n) | NumberValue::Any(n) => Some(n as _),
                             _ => todo!(),

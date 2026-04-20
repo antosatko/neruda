@@ -298,9 +298,9 @@ impl IndexedWalk for ir::ast::Span<Object> {
             }
             Object::Type {
                 ident,
-                ty,
-                docs: _,
                 generics,
+                ty,
+                docs,
             } => {
                 spans.push(self.span_word(Types::Keyword, line_index, "type"));
                 spans.push(ident.span(Types::Ident, line_index));

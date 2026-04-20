@@ -21,8 +21,8 @@ pub struct GenericContext {
 impl Context {
     pub(crate) fn lower_import_stage(&mut self) {
         let map: HashMap<Vec<SmolStr>, Key<ModuleTag>> =
-            HashMap::from_iter(self.ast.keys().map(|k| {
-                let mut module = Module::default();
+            HashMap::from_iter(self.ast.iter().map(|(k, ast)| {
+                let mut module = Module::new(Arc::clone(ast));
                 module.path = k.clone();
                 let type_key = self.types.modules.push(module);
                 (k.clone(), type_key)
@@ -441,14 +441,38 @@ impl ast::Expression {
                                     }
                                     AnyObjectData::Const { value, ty } => {
                                         let module = ctx.types.modules.get_unchecked(&mod_key);
+                                        let (ty, expression) = match module
+                                            .ast
+                                            .objects
+                                            .get_unchecked(&obj.ast_object)
+                                            .inner
+                                            .as_ref()
+                                        {
+                                            ast::Object::Const { ty, expression, .. } => {
+                                                (ty.clone(), expression.clone())
+                                            }
+                                            _ => panic!(),
+                                        };
                                         ctx.lower_const(
                                             mod_key,
                                             generic_context,
                                             &key,
-                                            ty,
-                                            expression,
+                                            &ty,
+                                            &expression,
                                         );
-                                        todo!()
+                                        let obj = ctx
+                                            .types
+                                            .modules
+                                            .get_unchecked(&mod_key)
+                                            .objects
+                                            .get_unchecked(&key);
+                                        match &obj.data {
+                                            AnyObjectData::Const {
+                                                value: InitState::Done(v),
+                                                ..
+                                            } => v.clone(),
+                                            _ => unreachable!(),
+                                        }
                                     }
                                     _ => panic!("nope"),
                                 }

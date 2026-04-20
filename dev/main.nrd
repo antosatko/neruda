@@ -47,5 +47,5 @@ system add<T: AddEq, U>(e: mut T + U) => e.T += e.U
 
 function tuple(v: m::Danda): (f32, f32) => (v.v, v.v)
 
-type IP_ADDR = [bool; BYTE * 4]
+type IPV4_ADDR = [bool; BYTE * 4]
 const BYTE: u32 = 8

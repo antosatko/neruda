@@ -1,4 +1,4 @@
-use std::{borrow::Cow, collections::HashMap};
+use std::{borrow::Cow, collections::HashMap, sync::Arc};
 
 use arena::{Arena, Key};
 use smol_str::SmolStr;
@@ -138,11 +138,22 @@ impl<T, U> InitState<T, U> {
     }
 }
 
-#[derive(Default)]
 pub struct Module {
     pub path: Vec<SmolStr>,
     pub objects: Arena<AnyObject, AnyObjectTag>,
     pub symbol_map: HashMap<SmolStr, AnyObjectkey>,
+    pub ast: Arc<ast::Module>,
+}
+
+impl Module {
+    pub fn new(ast: Arc<ast::Module>) -> Self {
+        Self {
+            path: Default::default(),
+            objects: Default::default(),
+            symbol_map: Default::default(),
+            ast,
+        }
+    }
 }
 
 impl AnyObjectData {

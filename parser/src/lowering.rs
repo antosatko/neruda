@@ -150,10 +150,10 @@ pub fn module_named(
                     generic_params(src, s.try_get_node("generic parameters"), &mut diagnostics);
 
                 let obj = Object::Type {
-                    ident: ident.clone(),
+                    ident,
+                    generics,
                     ty,
                     docs,
-                    generics,
                 };
 
                 module.objects.push(span(obj, s));

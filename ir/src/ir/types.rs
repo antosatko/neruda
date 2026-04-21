@@ -318,7 +318,7 @@ impl StructType {
 
 impl EnumType {
     pub fn stringify(&self) -> String {
-        let mut out = String::from("enum { ");
+        let mut out = format!("enum: {} {} ", self.repr.stringify(), "{");
         for (ident, value) in &self.variants {
             out.push_str(&format!("{ident}: {} ", value.stringify()));
         }

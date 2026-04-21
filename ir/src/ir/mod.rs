@@ -6,12 +6,40 @@ use std::{collections::HashMap, sync::Arc};
 
 use smol_str::SmolStr;
 
-use crate::{ast, ir::types::AutoTypes};
+use crate::{
+    ast::{self, SpanIndex},
+    ir::{
+        objects::AnyObjectkey,
+        types::{AutoTypes, ModuleKey},
+    },
+};
 
 use self::types::Types;
 
-#[derive(Default)]
-pub struct Diagnostics {}
+#[derive(Default, Debug)]
+pub struct Diagnostics {
+    pub warnings: Vec<Warning>,
+}
+
+#[derive(Debug)]
+pub struct Diagnostic<T> {
+    pub span: SpanIndex,
+    pub module: ModuleKey,
+    pub inner: T,
+}
+
+pub type Error = Diagnostic<Errors>;
+pub type Warning = Diagnostic<Warnings>;
+
+#[derive(Debug)]
+pub enum Errors {
+    IllegalType(AnyObjectkey),
+    TypeNotFound(Vec<SmolStr>),
+    ObjectNotFound(Vec<SmolStr>),
+}
+
+#[derive(Debug)]
+pub enum Warnings {}
 
 pub struct Context {
     pub types: Types,
@@ -21,7 +49,7 @@ pub struct Context {
 }
 
 impl Context {
-    pub fn from_ast(ast: HashMap<Vec<SmolStr>, Arc<ast::Module>>) -> Self {
+    pub fn from_ast(ast: HashMap<Vec<SmolStr>, Arc<ast::Module>>) -> Result<Self, Error> {
         let mut types = Types::default();
         let auto_types = AutoTypes::new(&mut types);
         let mut this = Self {
@@ -31,9 +59,10 @@ impl Context {
             ast,
         };
 
-        this.lower_import_stage();
-        this.lower_const_stage();
+        this.lower_import_stage()?;
+        this.lower_const_stage()?;
+        // next stages here
 
-        this
+        Ok(this)
     }
 }

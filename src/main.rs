@@ -105,7 +105,8 @@ fn main() {
                 modules
                     .iter()
                     .map(|(key, mok)| (key.clone(), Arc::new(mok.module.clone()))),
-            ));
+            ))
+            .unwrap();
 
             {
                 let Types {

@@ -22,7 +22,7 @@ type UnitCount = u32
 
 component Position = f32x2
 component Velocity = f32x2
-component Orbiting = entity
+component Orbiting = entity::a
 
 
 // Select
@@ -45,7 +45,12 @@ system orbit(
 // generic components
 system add<T: AddEq, U>(e: mut T + U) => e.T += e.U
 
-function tuple(v: m::Danda): (f32, f32) => (v.v, v.v)
 
+function tuple(v: m::Danda): (f32, f32) => (v.v, v.v)
 type IPV4_ADDR = [bool; BYTE * 4]
 const BYTE: u32 = 8
+
+type Danda = enum: u8 {
+	Danda
+	NeDanda
+}

@@ -6,7 +6,7 @@ use parser::{
     parse_directory,
 };
 use std::{
-    collections::HashMap,
+    collections::{HashMap, hash_set::Intersection},
     fs::File,
     io::{Read, Write},
     path::PathBuf,
@@ -105,14 +105,20 @@ fn main() {
                 modules
                     .iter()
                     .map(|(key, mok)| (key.clone(), Arc::new(mok.module.clone()))),
-            ))
-            .unwrap();
+            ));
+
+            let ir_ctx = match ir_ctx {
+                Ok(c) => c,
+                Err((ir_ctx, err)) => {
+                    err.print("", None, &ir_ctx).unwrap();
+                    return;
+                }
+            };
 
             {
                 let Types {
                     functions,
                     constraints,
-                    generics,
                     structures,
                     arrays,
                     tuples,
@@ -127,10 +133,6 @@ fn main() {
                 }
                 println!("constraint types:");
                 for t in constraints.iter() {
-                    println!("\t{}", t.stringify(&ir_ctx.types));
-                }
-                println!("generic types:");
-                for t in generics.iter() {
                     println!("\t{}", t.stringify(&ir_ctx.types));
                 }
                 println!("structure types:");
@@ -159,7 +161,7 @@ fn main() {
                 }
                 println!("named types:");
                 for t in named.iter() {
-                    println!("\t- {}", t.stringify());
+                    println!("\t- {}", t.stringify(&ir_ctx.types));
                 }
             }
             for module in ir_ctx.types.modules.iter() {

@@ -22,7 +22,7 @@ type UnitCount = u32
 
 component Position = f32x2
 component Velocity = f32x2
-component Orbiting = entity::a
+component Orbiting = entity
 
 
 // Select

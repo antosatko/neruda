@@ -53,10 +53,8 @@ impl Context {
                         ir_module.symbol_map.insert(ident, key);
                         continue;
                     }
-                    ast::Object::Scheduler { ident, .. } => continue,
-                    ast::Object::Function(ast::Function {
-                        parameters, ident, ..
-                    }) => (
+                    ast::Object::Scheduler { .. } => continue,
+                    ast::Object::Function(ast::Function { ident, .. }) => (
                         ident,
                         AnyObjectData::Function(FunctionData {
                             return_type: InitState::Uninitialized,
@@ -64,7 +62,7 @@ impl Context {
                             generics: Vec::new(),
                         }),
                     ),
-                    ast::Object::Component { ident, .. } => continue,
+                    ast::Object::Component { .. } => continue,
                     ast::Object::TypeImpl { .. } => continue,
                     ast::Object::TraitImpl { .. } => continue,
                     ast::Object::Trait { ident, .. } => (
@@ -82,7 +80,7 @@ impl Context {
                             generics: Vec::new(),
                         },
                     ),
-                    ast::Object::System { ident, .. } => continue,
+                    ast::Object::System { .. } => continue,
                     ast::Object::Const { ident, .. } => (
                         ident,
                         AnyObjectData::Const {
@@ -119,7 +117,7 @@ impl Context {
                         ty,
                         docs: _,
                     } => {
-                        generic_ctx.push_scope(&generics, self, &mod_key);
+                        generic_ctx.push_scope(&generics, self, &mod_key)?;
                         let obj = self.obj_mut(mod_key, obj_key);
                         let named_key = if let InitState::Done(ty) | InitState::Progress(ty) =
                             obj.type_state_mut_eager()
@@ -147,7 +145,7 @@ impl Context {
                         body: _,
                         docs: _,
                     }) => {
-                        generic_ctx.push_scope(&generics, self, &mod_key);
+                        generic_ctx.push_scope(&generics, self, &mod_key)?;
                         let obj = self.obj_mut(mod_key, obj_key);
                         if let AnyObjectData::Function(fun) = &mut obj.data {
                             fun.return_type = InitState::Uninitialized
@@ -201,7 +199,14 @@ impl Context {
         *obj.type_state_mut() = InitState::Done(type_key);
         let mut v = expression.const_eval(self, mod_key, generic_ctx).unwrap();
         if !self.type_check_const_value(&mut v, &type_key) {
-            panic!("lala mas to blby")
+            return Err(Diagnostic {
+                span: expression.location,
+                module: mod_key,
+                inner: Errors::TypeMissmatch {
+                    expected: type_key,
+                    got: AnyTypeKey::Primitive(v.type_of()),
+                },
+            });
         }
         let obj = self.obj_mut(mod_key, obj_key);
         match &mut obj.data {
@@ -227,6 +232,12 @@ impl Context {
         mod_key: ModuleKey,
         generic_context: &mut GenericContext,
     ) -> Result<(ModuleKey, AnyObjectkey), Error> {
+        if path.len() == 1 {
+            match generic_context.find_generic(&path[0]) {
+                Some(_) => todo!("toznam"),
+                None => (),
+            }
+        }
         let mut current_mod_key = mod_key;
         for (i, next_stop) in path.iter().enumerate() {
             let is_last = i == path.len() - 1;
@@ -243,7 +254,7 @@ impl Context {
                     }
                     _ => Err(Diagnostic {
                         inner: Errors::ObjectNotFound(path[..i].to_vec()),
-                        span: SpanIndex { index: 0, len: 0 },
+                        span: module.ast.objects.get_unchecked(&obj.ast_object).location,
                         module: mod_key,
                     })?,
                 },
@@ -364,7 +375,7 @@ impl GenericContext {
         generics: &Option<ast::Span<Vec<ast::Span<ast::GenericParameter>>>>,
         ctx: &mut Context,
         mod_key: &ModuleKey,
-    ) {
+    ) -> Result<(), Error> {
         if let Some(generics) = generics {
             let mut scope = Vec::new();
             for generic in generics.inner.deref() {
@@ -374,22 +385,26 @@ impl GenericContext {
                     let obj_key = module
                         .symbol_map
                         .get(constr_path.path.first().as_ref().unwrap().inner.as_ref())
-                        .unwrap();
-                    let obj = module.objects.get_unchecked(obj_key);
+                        .unwrap()
+                        .clone();
+                    let obj = module.objects.get_unchecked(&obj_key);
                     let ty = match &obj.data {
                         AnyObjectData::Trait {
                             ty: InitState::Done(ty) | InitState::Progress(ty),
                         } => ty,
-                        _ => panic!("nějak si to vyřiď"),
+                        _ => {
+                            return Err(Diagnostic {
+                                inner: Errors::NonConstraintType(obj_key, *mod_key),
+                                span: generic.identifier.location,
+                                module: *mod_key,
+                            });
+                        }
                     };
                     constraints.push(*ty);
                 }
                 let key = match constraints.is_empty() {
                     true => ctx.auto_types.any_conr,
-                    false => ctx
-                        .types
-                        .constraints
-                        .push_unique(ConstraintType { constraints }),
+                    false => ctx.types.constraints.push(ConstraintType { constraints }),
                 };
                 scope.push((generic.identifier.inner.as_ref().clone(), key));
             }
@@ -397,6 +412,7 @@ impl GenericContext {
         } else {
             self.scopes.push(Vec::new());
         }
+        Ok(())
     }
 
     #[track_caller]
@@ -452,11 +468,11 @@ impl ast::Expression {
                                     } => return Some(v.clone()),
                                     AnyObjectData::Const {
                                         value: InitState::Progress(_),
-                                        ty,
+                                        ty: _,
                                     } => {
                                         panic!("we do not like circles around here")
                                     }
-                                    AnyObjectData::Const { value, ty } => {
+                                    AnyObjectData::Const { .. } => {
                                         let module = ctx.types.modules.get_unchecked(&mod_key);
                                         let (ty, expression) = match module
                                             .ast
@@ -498,12 +514,12 @@ impl ast::Expression {
                             Err(_) => return None,
                         }
                     }
-                    ast::Literal::Structure(span, spans) => todo!(),
+                    ast::Literal::Structure(_, _) => todo!(),
                     ast::Literal::Number(number) => ConstValue::Number(number.clone()),
                     ast::Literal::String(smol_str) => ConstValue::String(smol_str.clone()),
                     ast::Literal::Char(c) => ConstValue::Char(*c),
-                    ast::Literal::Array(spans) => todo!(),
-                    ast::Literal::Tuple(spans) => todo!(),
+                    ast::Literal::Array(_) => todo!(),
+                    ast::Literal::Tuple(_) => todo!(),
                 })
             }
             ast::Expression::Binary { l, r, op } => {
@@ -524,7 +540,7 @@ impl ast::Type {
     ) -> Result<AnyTypeKey, Error> {
         let Self { literal } = &self;
         match literal.inner.as_ref() {
-            ast::TypeLiteral::Path(identifier_path, generics) => {
+            ast::TypeLiteral::Path(identifier_path, generic_arguments) => {
                 if identifier_path.path.len() == 1
                     && let Some(ident) = identifier_path.path.first()
                 {
@@ -542,31 +558,35 @@ impl ast::Type {
                     .collect();
                 let (resolved_module, resolved) =
                     ctx.resolve_const_path(&path, module, generic_context)?;
-                match generics {
-                    Some(generics) => {
-                        for generic in generics.inner.as_ref() {
-                            let _ = generic.lower(ctx, module, generic_context)?;
+                match &ctx
+                    .types
+                    .modules
+                    .get_unchecked(&resolved_module)
+                    .objects
+                    .get_unchecked(&resolved)
+                    .data
+                {
+                    AnyObjectData::TypeAlias {
+                        ty: InitState::Done(ty) | InitState::Progress(ty),
+                        generics,
+                    } => {
+                        let ty = *ty;
+                        let mut new = AnyTypeKey::Named(ty);
+                        let gen_args = match generic_arguments {
+                            Some(g) => g.inner.as_ref().clone(),
+                            None => Vec::new(),
+                        };
+                        for (idx, constraint) in generics.clone().iter().enumerate() {
+                            let substitution = gen_args[idx].lower(ctx, module, generic_context)?;
+                            new = AnyTypeKey::Named(ty).substitute_named(
+                                substitution,
+                                constraint,
+                                &mut ctx.types,
+                            )?;
                         }
-                        Ok(AnyTypeKey::Primitive(PrimitiveType::Void))
+                        Ok(new)
                     }
-                    None => match &ctx
-                        .types
-                        .modules
-                        .get_unchecked(&resolved_module)
-                        .objects
-                        .get_unchecked(&resolved)
-                        .data
-                    {
-                        AnyObjectData::TypeAlias {
-                            ty: InitState::Done(ty) | InitState::Progress(ty),
-                            generics: _,
-                        } => Ok(AnyTypeKey::Named(*ty)),
-                        _ => Err(Diagnostic {
-                            span: SpanIndex { index: 0, len: 0 },
-                            module: module,
-                            inner: Errors::IllegalType(resolved),
-                        }),
-                    },
+                    _ => todo!(),
                 }
             }
             ast::TypeLiteral::Struct(spans) => {
@@ -596,7 +616,7 @@ impl ast::Type {
                     None => PrimitiveType::I32,
                 };
                 let mut variants = Vec::new();
-                for (ident, expr) in ast_variants {
+                for (ident, _) in ast_variants {
                     variants.push((ident.inner.as_ref().clone(), ConstValue::Bool(true)));
                 }
                 let key = ctx.types.enums.push_unique(EnumType { repr, variants });

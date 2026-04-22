@@ -11,6 +11,8 @@ use std::{
 use arena::{Arena, Key};
 use smol_str::SmolStr;
 
+use crate::ir::types::PrimitiveType;
+
 #[derive(Debug, Clone)]
 pub enum LoweringWarning {
     IdentifierTooLong(String),
@@ -645,7 +647,7 @@ impl std::fmt::Display for Type {
             }
             TypeLiteral::Array(ty, len) => {
                 write!(f, "[{}", ty.inner)?;
-                if let Some(len) = len {
+                if len.is_some() {
                     write!(f, ", expr")?;
                 }
                 write!(f, "]")?;
@@ -679,7 +681,7 @@ impl std::fmt::Display for Type {
 impl ConstValue {
     pub fn stringify(&self) -> Cow<'static, str> {
         match self {
-            ConstValue::Structure(spans) => todo!(),
+            ConstValue::Structure(_) => todo!(),
             ConstValue::Number(number) => Cow::Owned(match number.value {
                 NumberValue::Float(v) => v.to_string(),
                 NumberValue::Int(v) => v.to_string(),
@@ -690,8 +692,32 @@ impl ConstValue {
             ConstValue::Char(v) => Cow::Owned(format!("{v}")),
             ConstValue::Bool(true) => Cow::Borrowed("true"),
             ConstValue::Bool(false) => Cow::Borrowed("false"),
-            ConstValue::Array(spans) => todo!(),
-            ConstValue::Tuple(spans) => todo!(),
+            ConstValue::Array(_) => todo!(),
+            ConstValue::Tuple(_) => todo!(),
+        }
+    }
+
+    pub fn type_of(&self) -> PrimitiveType {
+        match self {
+            Self::Bool(_) => PrimitiveType::Bool,
+            Self::Char(_) => PrimitiveType::Char,
+            Self::Number(Number {
+                value: NumberValue::Any(_),
+                size: _,
+            }) => PrimitiveType::I32,
+            Self::Number(Number {
+                value: NumberValue::Int(_),
+                size: _,
+            }) => PrimitiveType::I32,
+            Self::Number(Number {
+                value: NumberValue::Float(_),
+                size: _,
+            }) => PrimitiveType::F32,
+            Self::Number(Number {
+                value: NumberValue::Uint(_),
+                size: _,
+            }) => PrimitiveType::U32,
+            _ => todo!(),
         }
     }
 }

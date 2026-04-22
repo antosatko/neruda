@@ -1,3 +1,4 @@
+pub mod format_err;
 pub mod lowering;
 pub mod objects;
 pub mod types;
@@ -10,7 +11,7 @@ use crate::{
     ast::{self, SpanIndex},
     ir::{
         objects::AnyObjectkey,
-        types::{AutoTypes, ModuleKey},
+        types::{AnyTypeKey, AutoTypes, ModuleKey},
     },
 };
 
@@ -33,9 +34,15 @@ pub type Warning = Diagnostic<Warnings>;
 
 #[derive(Debug)]
 pub enum Errors {
-    IllegalType(AnyObjectkey),
+    IllegalType(AnyObjectkey, ModuleKey),
     TypeNotFound(Vec<SmolStr>),
     ObjectNotFound(Vec<SmolStr>),
+    TypeMissmatch {
+        expected: AnyTypeKey,
+        got: AnyTypeKey,
+    },
+    NonConstraintType(AnyObjectkey, ModuleKey),
+    CouldNotSubstituteType(AnyTypeKey),
 }
 
 #[derive(Debug)]
@@ -49,7 +56,7 @@ pub struct Context {
 }
 
 impl Context {
-    pub fn from_ast(ast: HashMap<Vec<SmolStr>, Arc<ast::Module>>) -> Result<Self, Error> {
+    pub fn from_ast(ast: HashMap<Vec<SmolStr>, Arc<ast::Module>>) -> Result<Self, (Self, Error)> {
         let mut types = Types::default();
         let auto_types = AutoTypes::new(&mut types);
         let mut this = Self {
@@ -59,8 +66,13 @@ impl Context {
             ast,
         };
 
-        this.lower_import_stage()?;
-        this.lower_const_stage()?;
+        if let Err(e) = this.lower_import_stage() {
+            return Err((this, e));
+        }
+
+        if let Err(e) = this.lower_const_stage() {
+            return Err((this, e));
+        }
         // next stages here
 
         Ok(this)

@@ -3,7 +3,10 @@ use std::borrow::Cow;
 use arena::{Arena, Key};
 use smol_str::{SmolStr, ToSmolStr};
 
-use crate::{ast::ConstValue, ir::objects::Module};
+use crate::{
+    ast::{ConstValue, SpanIndex},
+    ir::{Error, Errors, objects::Module},
+};
 
 pub type FunctionArena = Arena<FunctionType, FunctionTag>;
 pub type FunctionKey = Key<FunctionTag>;
@@ -125,7 +128,6 @@ pub enum PrimitiveType {
 pub enum AnyTypeKey {
     Primitive(PrimitiveType),
     Constraint(ConstraintKey),
-    Generic(GenericKey),
     Function(FunctionKey),
     Array(ArrayKey),
     Tuple(TupleKey),
@@ -140,7 +142,6 @@ pub enum AnyTypeKey {
 pub struct Types {
     pub functions: FunctionArena,
     pub constraints: ConstraintArena,
-    pub generics: GenericArena,
     pub structures: StructArena,
     pub enums: EnumArena,
     pub arrays: ArrayArena,
@@ -334,8 +335,8 @@ impl Module {
 }
 
 impl NamedTypeType {
-    pub fn stringify(&self) -> String {
-        self.name.to_string()
+    pub fn stringify(&self, types: &Types) -> String {
+        self.repr.stringify(types).to_string()
     }
 }
 
@@ -371,34 +372,6 @@ impl TraitType {
     }
 }
 
-impl GenericType {
-    pub fn stringify(&self, types: &Types) -> String {
-        let mut out = String::from("<");
-        let mut iter = self.generic_parameters.iter();
-        if let Some((ident, constraints)) = iter.next() {
-            out.push_str(&format!(
-                "{ident}{}",
-                types
-                    .constraints
-                    .get_unchecked(constraints)
-                    .stringify(types)
-            ));
-        }
-        for (ident, constraints) in iter {
-            out.push_str(&format!(
-                ", {ident}{}",
-                types
-                    .constraints
-                    .get_unchecked(constraints)
-                    .stringify(types)
-            ));
-        }
-        out.push('>');
-        out.push_str(&self.inner.stringify(types));
-        out
-    }
-}
-
 impl ConstraintType {
     pub fn stringify(&self, types: &Types) -> String {
         let mut result = String::new();
@@ -416,14 +389,58 @@ impl ConstraintType {
 }
 
 impl AnyTypeKey {
+    pub fn substitute_named(
+        &self,
+        substitution: AnyTypeKey,
+        cons: &ConstraintKey,
+        types: &mut Types,
+    ) -> Result<AnyTypeKey, Error> {
+        match self {
+            AnyTypeKey::Function(key) => todo!(),
+            AnyTypeKey::Array(key) => todo!(),
+            AnyTypeKey::Tuple(key) => {
+                println!("substituting tuple");
+                let ty = types.tuples.get_unchecked(key);
+                let result = ty
+                    .parameters
+                    .iter()
+                    .map(|ty| match ty {
+                        AnyTypeKey::Constraint(key) => {
+                            if dbg!(key) == dbg!(cons) {
+                                substitution
+                            } else {
+                                *ty
+                            }
+                        }
+                        _ => *ty,
+                    })
+                    .collect();
+
+                let new = TupleType { parameters: result };
+
+                Ok(AnyTypeKey::Tuple(types.tuples.push_unique(new)))
+            }
+            AnyTypeKey::Struct(key) => todo!(),
+            AnyTypeKey::Enum(key) => todo!(),
+            AnyTypeKey::Named(key) => todo!(),
+            AnyTypeKey::ModuleRef(_)
+            | AnyTypeKey::Trait(_)
+            | AnyTypeKey::Primitive(_)
+            | AnyTypeKey::Constraint(_) => {
+                return Err(crate::ir::Diagnostic {
+                    span: SpanIndex { index: 0, len: 0 },
+                    module: todo!(),
+                    inner: Errors::CouldNotSubstituteType(*self),
+                });
+            }
+        }
+    }
+
     pub fn stringify(&self, types: &Types) -> Cow<'static, str> {
         match self {
             AnyTypeKey::Primitive(primitive_type) => Cow::Borrowed(primitive_type.stringify()),
             AnyTypeKey::Constraint(key) => {
                 Cow::Owned(types.constraints.get_unchecked(key).stringify(types))
-            }
-            AnyTypeKey::Generic(key) => {
-                Cow::Owned(types.generics.get_unchecked(key).stringify(types))
             }
             AnyTypeKey::Function(key) => {
                 Cow::Owned(types.functions.get_unchecked(key).stringify(types))
@@ -436,7 +453,7 @@ impl AnyTypeKey {
             AnyTypeKey::Enum(key) => Cow::Owned(types.enums.get_unchecked(key).stringify()),
             AnyTypeKey::Trait(key) => Cow::Owned(types.traits.get_unchecked(key).stringify()),
             AnyTypeKey::ModuleRef(key) => Cow::Owned(types.modules.get_unchecked(key).stringify()),
-            AnyTypeKey::Named(key) => Cow::Owned(types.named.get_unchecked(key).stringify()),
+            AnyTypeKey::Named(key) => Cow::Owned(types.named.get_unchecked(key).stringify(types)),
         }
     }
 }

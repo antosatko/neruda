@@ -1,8 +1,8 @@
 use std::borrow::Cow;
 
 use crate::ast::{
-    ConstValue, Diagnostics, Expression, Literal, LoweringDiagnostic, LoweringWarning, Number,
-    NumberValue, Operator, Span, Value,
+    ConstValue, Diagnostics, Expression, Literal, LoweringDiagnostic, Number, NumberValue,
+    Operator, Span, Value,
 };
 
 impl Expression {
@@ -74,7 +74,7 @@ impl Span<Operator> {
         }
     }
 
-    fn const_apply_bool(&self, l: bool, r: bool) -> Option<bool> {
+    fn _const_apply_bool(&self, _l: bool, _r: bool) -> Option<bool> {
         todo!()
     }
 

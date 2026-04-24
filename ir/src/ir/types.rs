@@ -335,8 +335,8 @@ impl Module {
 }
 
 impl NamedTypeType {
-    pub fn stringify(&self, types: &Types) -> String {
-        self.repr.stringify(types).to_string()
+    pub fn stringify(&self, _: &Types) -> String {
+        self.name.to_string()
     }
 }
 

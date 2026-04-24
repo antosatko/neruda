@@ -1,8 +1,11 @@
 use std::borrow::Cow;
 
-use crate::ast::{
-    ConstValue, Diagnostics, Expression, Literal, LoweringDiagnostic, Number, NumberValue,
-    Operator, Span, Value,
+use crate::{
+    ast::{
+        ConstValue, Diagnostics, Expression, Literal, LoweringDiagnostic, Number, NumberValue,
+        Operator, Span, SpanIndex, Value,
+    },
+    ir::{Diagnostic, Error, Errors, types::ModuleKey},
 };
 
 impl Expression {
@@ -53,24 +56,75 @@ impl Expression {
 }
 
 impl Span<Operator> {
-    pub fn const_apply(&self, l: &ConstValue, r: &ConstValue) -> Option<ConstValue> {
+    pub fn const_apply(
+        &self,
+        left: &ConstValue,
+        right: &ConstValue,
+        module: ModuleKey,
+    ) -> Result<ConstValue, Error> {
         use Operator::*;
 
         match self.inner.as_ref() {
-            Add | Sub | Mul | Div | Mod => match (l, r) {
-                (ConstValue::Number(l), ConstValue::Number(r)) => self
-                    .const_apply_numeric(&l.value, &r.value)
-                    .map(|value| ConstValue::Number(Number { value, size: None })),
-                _ => None,
+            Add | Sub | Mul | Div | Mod => match (left, right) {
+                (ConstValue::Number(l), ConstValue::Number(r)) => {
+                    match self.const_apply_numeric(&l.value, &r.value) {
+                        Some(value) => Ok(ConstValue::Number(Number { value, size: None })),
+                        None => Err(Diagnostic {
+                            span: self.location,
+                            module,
+                            inner: Errors::CanNotApplyConst {
+                                op: self.inner.as_ref().clone(),
+                                left: left.clone(),
+                                right: right.clone(),
+                            },
+                        }),
+                    }
+                }
+                _ => Err(Diagnostic {
+                    span: self.location,
+                    module,
+                    inner: Errors::CanNotApplyConst {
+                        op: self.inner.as_ref().clone(),
+                        left: left.clone(),
+                        right: right.clone(),
+                    },
+                }),
             },
-            Eq | NEq | Gr | Le | GrEq | LeEq => match (l, r) {
-                (ConstValue::Number(l), ConstValue::Number(r)) => self
-                    .const_apply_numeric_to_bool(&l.value, &r.value)
-                    .map(|value| ConstValue::Bool(value)),
-                _ => None,
+            Eq | NEq | Gr | Le | GrEq | LeEq => match (left, right) {
+                (ConstValue::Number(l), ConstValue::Number(r)) => {
+                    match self.const_apply_numeric_to_bool(&l.value, &r.value) {
+                        Some(value) => Ok(ConstValue::Bool(value)),
+                        None => Err(Diagnostic {
+                            span: self.location,
+                            module,
+                            inner: Errors::CanNotApplyConst {
+                                op: self.inner.as_ref().clone(),
+                                left: left.clone(),
+                                right: right.clone(),
+                            },
+                        }),
+                    }
+                }
+                _ => Err(Diagnostic {
+                    span: self.location,
+                    module,
+                    inner: Errors::CanNotApplyConst {
+                        op: self.inner.as_ref().clone(),
+                        left: left.clone(),
+                        right: right.clone(),
+                    },
+                }),
             },
             And | Or => todo!(),
-            Assign | AddAssign | SubAssign | MulAssign | DivAssign | ModAssign => None,
+            Assign | AddAssign | SubAssign | MulAssign | DivAssign | ModAssign => Err(Diagnostic {
+                span: self.location,
+                module,
+                inner: Errors::CanNotApplyConst {
+                    op: self.inner.as_ref().clone(),
+                    left: left.clone(),
+                    right: right.clone(),
+                },
+            }),
         }
     }
 

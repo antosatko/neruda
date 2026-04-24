@@ -5,7 +5,9 @@ use std::{
     borrow::Cow,
     fmt::Display,
     ops::{Add, Deref},
+    path::PathBuf,
     rc::Rc,
+    sync::Arc,
 };
 
 use arena::{Arena, Key};
@@ -117,6 +119,8 @@ pub type AstObjectKey = Key<ObjectTag>;
 #[derive(Debug, Clone)]
 pub struct Module {
     pub name: SmolStr,
+    pub src: Arc<String>,
+    pub path: Option<PathBuf>,
     pub docs: Vec<Span<SmolStr>>,
     pub objects: Arena<Span<Object>, ObjectTag>,
 }
@@ -614,6 +618,32 @@ pub enum ExprItem {
 
 /* ================ DEBUG ============ */
 
+impl std::fmt::Display for Operator {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Operator::Add => write!(f, "+"),
+            Operator::Sub => write!(f, "-"),
+            Operator::Mul => write!(f, "*"),
+            Operator::Div => write!(f, "/"),
+            Operator::Mod => write!(f, "%"),
+            Operator::Eq => write!(f, "=="),
+            Operator::NEq => write!(f, "!="),
+            Operator::Gr => write!(f, ">"),
+            Operator::Le => write!(f, "<"),
+            Operator::GrEq => write!(f, ">="),
+            Operator::LeEq => write!(f, "<="),
+            Operator::And => write!(f, "&&"),
+            Operator::Or => write!(f, "%%"),
+            Operator::Assign => write!(f, "="),
+            Operator::AddAssign => write!(f, "+="),
+            Operator::SubAssign => write!(f, "-="),
+            Operator::MulAssign => write!(f, "*="),
+            Operator::DivAssign => write!(f, "/="),
+            Operator::ModAssign => write!(f, "%="),
+        }
+    }
+}
+
 impl std::fmt::Display for Type {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.literal.inner.deref() {
@@ -689,7 +719,7 @@ impl ConstValue {
                 NumberValue::Uint(v) => v.to_string(),
             }),
             ConstValue::String(smol_str) => Cow::Owned(smol_str.to_string()),
-            ConstValue::Char(v) => Cow::Owned(format!("{v}")),
+            ConstValue::Char(v) => Cow::Owned(format!("'{v}'")),
             ConstValue::Bool(true) => Cow::Borrowed("true"),
             ConstValue::Bool(false) => Cow::Borrowed("false"),
             ConstValue::Array(_) => todo!(),

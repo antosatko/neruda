@@ -6,3 +6,8 @@ edition = "2024"
 [dependencies]
 smol_str.workspace = true
 arena.workspace = true
+annotate-snippets = { version = "0.12.15", optional = true }
+
+[features]
+format = ["dep:annotate-snippets"]
+default = ["format"]

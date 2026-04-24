@@ -3,7 +3,7 @@ use std::{
     ffi::OsString,
     fmt::Write,
     fs::{self},
-    path::Path,
+    path::{Path, PathBuf},
 };
 
 const TERM_WIDTH: usize = 60;
@@ -32,6 +32,7 @@ pub fn parse_source<'a>(
     name: &str,
     src: &'a str,
     parser: Option<&'a Parser>,
+    path: Option<PathBuf>,
 ) -> Result<ModuleOk, AnyParseErr<'a>> {
     let parser = match parser {
         Some(p) => p,
@@ -45,7 +46,7 @@ pub fn parse_source<'a>(
 
     let ast = parser.parse(&tokens, src).map_err(AnyParseErr::Parse)?;
 
-    lowering::module_named(name, src, ast.entry).map_err(AnyParseErr::Lowering)
+    lowering::module_named(name, src, ast.entry, path).map_err(AnyParseErr::Lowering)
 }
 
 pub fn parse_directory<'a, F>(
@@ -68,6 +69,7 @@ where
         .filter(|e| e.path().to_str().map_or(false, |s| s.ends_with(".nrd")))
     {
         let content = fs::read_to_string(entry.path()).map_err(AnyParseErr::Io)?;
+        let pathbuf = entry.clone().into_path();
 
         match entry.path().strip_prefix(path).unwrap().to_str() {
             Some(name_str) => {
@@ -76,7 +78,7 @@ where
                     .iter()
                     .map(|p| SmolStr::new(p.to_str().unwrap()))
                     .collect();
-                match parse_source(name_key, &content, Some(parser)) {
+                match parse_source(name_key, &content, Some(parser), Some(pathbuf)) {
                     Ok(module) => {
                         if parts.last().is_some_and(|last| last.as_str() == "mod") {
                             let _ = parts.pop();

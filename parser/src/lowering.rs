@@ -1,4 +1,4 @@
-use std::borrow::Cow;
+use std::{borrow::Cow, path::PathBuf, sync::Arc};
 
 use arena::Arena;
 use ruparse::{
@@ -25,13 +25,16 @@ pub fn module_named(
     name: impl Into<SmolStr>,
     src: &str,
     node: Node,
+    path: Option<PathBuf>,
 ) -> Result<ModuleOk, Span<LoweringError>> {
     let mut diagnostics = Diagnostics::default();
     let node = &Nodes::Node(node);
     let mut module = Module {
         name: name.into(),
+        path,
         docs: docstrings(src, node),
         objects: Arena::new(),
+        src: Arc::new(src.into()),
     };
 
     for s in node.get_list("top level statements") {

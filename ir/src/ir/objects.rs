@@ -1,6 +1,6 @@
 use std::{borrow::Cow, collections::HashMap, sync::Arc};
 
-use arena::{Arena, Key};
+use arena::Key;
 use smol_str::SmolStr;
 
 use crate::{
@@ -20,6 +20,7 @@ pub struct AnyObject {
     pub data: AnyObjectData,
     pub identifier: SmolStr,
     pub ast_object: ast::AstObjectKey,
+    pub module: ModuleKey,
 }
 
 #[derive(Debug, Default)]
@@ -46,6 +47,9 @@ pub enum AnyObjectData {
     Trait {
         ty: InitState<TraitKey>,
     },
+    Component {
+        ty: InitState<AnyTypeKey, ()>,
+    },
     Function(FunctionData),
 }
 
@@ -57,11 +61,17 @@ pub struct FunctionData {
 }
 
 impl AnyObject {
-    pub fn new(identifier: SmolStr, data: AnyObjectData, ast_object: ast::AstObjectKey) -> Self {
+    pub fn new(
+        identifier: SmolStr,
+        data: AnyObjectData,
+        ast_object: ast::AstObjectKey,
+        module: ModuleKey,
+    ) -> Self {
         Self {
             identifier,
             data,
             ast_object,
+            module,
         }
     }
 
@@ -73,6 +83,7 @@ impl AnyObject {
             AnyObjectData::TypeAlias { .. } => panic!("Object TypeAlias is eager"),
             AnyObjectData::Function(_) => panic!("not applicable to function"),
             AnyObjectData::Const { ty, .. } => ty,
+            AnyObjectData::Component { ty } => ty,
         }
     }
 
@@ -83,6 +94,7 @@ impl AnyObject {
             AnyObjectData::Trait { .. } => panic!("Object trait has no type state"),
             AnyObjectData::Const { .. } => panic!("Object const is not eager"),
             AnyObjectData::Function(_) => panic!("not applicable to function"),
+            AnyObjectData::Component { .. } => panic!("Component is not eager"),
             AnyObjectData::TypeAlias { ty, .. } => ty,
         }
     }
@@ -140,7 +152,6 @@ impl<T, U> InitState<T, U> {
 
 pub struct Module {
     pub path: Vec<SmolStr>,
-    pub objects: Arena<AnyObject, AnyObjectTag>,
     pub symbol_map: HashMap<SmolStr, AnyObjectkey>,
     pub ast: Arc<ast::Module>,
 }
@@ -149,7 +160,6 @@ impl Module {
     pub fn new(ast: Arc<ast::Module>) -> Self {
         Self {
             path: Default::default(),
-            objects: Default::default(),
             symbol_map: Default::default(),
             ast,
         }
@@ -184,6 +194,17 @@ impl AnyObjectData {
                     match ty {
                         InitState::Done(ty) => {
                             ctx.types.named.get_unchecked(ty).repr.stringify(&ctx.types)
+                        }
+                        _ => Cow::Borrowed("<type uninit>"),
+                    }
+                )
+            }
+            Self::Component { ty } => {
+                format!(
+                    "component = {}",
+                    match ty {
+                        InitState::Done(ty) => {
+                            ty.stringify(&ctx.types)
                         }
                         _ => Cow::Borrowed("<type uninit>"),
                     }

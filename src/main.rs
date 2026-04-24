@@ -6,7 +6,7 @@ use parser::{
     parse_directory,
 };
 use std::{
-    collections::{HashMap, hash_set::Intersection},
+    collections::HashMap,
     fs::File,
     io::{Read, Write},
     path::PathBuf,
@@ -66,7 +66,13 @@ fn main() {
             let ModuleOk {
                 module,
                 diagnostics,
-            } = lowering::module_named("main.nrd", &buf, ast.entry).expect("somting went wrong :)");
+            } = lowering::module_named(
+                "main.nrd",
+                &buf,
+                ast.entry,
+                Some(PathBuf::from("./main.nrd")),
+            )
+            .expect("somting went wrong :)");
 
             for warn in diagnostics.warns {
                 println!("Warning: {} - {:?}", warn.inner, warn.location)
@@ -110,7 +116,7 @@ fn main() {
             let ir_ctx = match ir_ctx {
                 Ok(c) => c,
                 Err((ir_ctx, err)) => {
-                    err.print("", None, &ir_ctx).unwrap();
+                    err.print(&ir_ctx).unwrap();
                     return;
                 }
             };
@@ -166,9 +172,11 @@ fn main() {
             }
             for module in ir_ctx.types.modules.iter() {
                 println!("Module {}", module.stringify());
-                for obj in module.objects.iter() {
-                    let ident = &obj.identifier;
-                    println!("\t- {ident} :: {}", obj.data.stringify(&ir_ctx));
+                for (ident, key) in module.symbol_map.iter() {
+                    println!(
+                        "\t- {ident} :: {}",
+                        ir_ctx.objects.get_unchecked(key).data.stringify(&ir_ctx)
+                    );
                 }
             }
         }

@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 any_vec = "0.15.0"
+fixedbitset = "0.5.7"
 smallbitvec = "2.6.0"
 arena.workspace = true
 

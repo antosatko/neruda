@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use dashmap::DashMap;
 use line_index::{LineIndex, TextSize};
 use ruparse::Parser;
@@ -29,7 +31,7 @@ impl Backend {
     async fn validate_document(&self, uri: Url, src: &str) {
         let mut diagnostics = Vec::new();
 
-        match index_file(&self.parser, src) {
+        match index_file(&self.parser, src, Some(PathBuf::from(uri.path()))) {
             Err(e) => {
                 let diag = match e {
                     IndexErr::Lex(err) => {
@@ -64,6 +66,20 @@ impl Backend {
                     }
                     IndexErr::Lowering(err) => {
                         let location = err.location;
+                        let line_index = LineIndex::new(&src);
+                        let start = line_index.line_col(TextSize::new(location.index as _));
+                        let end = line_index
+                            .line_col(TextSize::new((location.index + location.len) as _));
+                        Diagnostic::new_simple(
+                            Range::new(
+                                Position::new(start.line, start.col),
+                                Position::new(end.line, end.col),
+                            ),
+                            strip_ansi_escapes::strip_str(format!("{:?}", err.inner)),
+                        )
+                    }
+                    IndexErr::Ir(err) => {
+                        let location = err.span;
                         let line_index = LineIndex::new(&src);
                         let start = line_index.line_col(TextSize::new(location.index as _));
                         let end = line_index
@@ -190,7 +206,7 @@ impl LanguageServer for Backend {
         };
 
         // If indexing fails, we return an empty token set so the UI doesn't flicker/error out
-        let (_, mut spans, _) = match index_file(&self.parser, &src) {
+        let (_, mut spans, _) = match index_file(&self.parser, &src, Some(PathBuf::from(uri_str))) {
             Ok(s) => s,
             Err(_) => {
                 return Ok(Some(

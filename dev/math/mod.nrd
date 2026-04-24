@@ -3,7 +3,7 @@ type Im<S> = (S, S)
 type ImFloat = Im<f32>
 type ImInt = Im<i32>
 
-const PI: f64 = 3.14159265359
+const PI: f32 = 3.14159265359
 
 impl <S: Add> Add for Im<S> {
     function add(self: Self, other: Self): Self => (

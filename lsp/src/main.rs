@@ -1,8 +1,11 @@
 use core::panic;
 use dashmap::DashMap;
-use ir::ast::{
-    Alias, Body, Diagnostics, Expression, Function, IdentifierPath, Literal, LoweringError, Module,
-    Object, Parameter, Postfix, Statement, Type, Value,
+use ir::{
+    ast::{
+        Alias, Body, Diagnostics, Expression, Function, IdentifierPath, Literal, LoweringError,
+        Module, Object, Parameter, Postfix, Statement, Type, Value,
+    },
+    ir::{Context, Diagnostic},
 };
 use line_index::{LineCol, LineIndex, TextSize};
 use parser::{
@@ -10,6 +13,7 @@ use parser::{
     lowering::{ModuleOk, module_named},
 };
 use ruparse::{Parser, lexer::PreprocessorError, parser::ParseError};
+use std::path::PathBuf;
 use tower_lsp::{LspService, Server};
 
 use crate::server::Backend;
@@ -55,11 +59,13 @@ pub enum IndexErr<'a> {
     Lex(PreprocessorError),
     Parse(ParseError<'a>),
     Lowering(ir::ast::Span<LoweringError>),
+    Ir(ir::ir::Error),
 }
 
 pub fn index_file<'p, 'src>(
     parser: &'p Parser<'p>,
     src: &'src str,
+    path: Option<PathBuf>,
 ) -> Result<(Module, Vec<Span>, Diagnostics), IndexErr<'p>>
 where
     'p: 'src,
@@ -81,7 +87,7 @@ where
     let ModuleOk {
         module,
         diagnostics,
-    } = match module_named("", src, ast.entry) {
+    } = match module_named("", src, ast.entry, path) {
         Ok(ast) => ast,
         Err(e) => return Err(IndexErr::Lowering(e)),
     };

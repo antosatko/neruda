@@ -6,6 +6,7 @@ use arena::{Arena, DynArena, DynKey, Key};
 use crate::bitset::Bitset;
 
 mod bitset;
+pub mod v2;
 
 pub type Unit = u8;
 pub type Mutability = bool;

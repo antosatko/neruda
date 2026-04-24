@@ -1,32 +1,29 @@
-use smallbitvec::SmallBitVec;
+use fixedbitset::FixedBitSet;
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Default)]
 pub struct Bitset {
-    pub data: SmallBitVec,
+    pub data: FixedBitSet,
 }
 
 impl Bitset {
     pub fn new() -> Self {
         Self {
-            data: SmallBitVec::new(),
+            data: FixedBitSet::new(),
         }
     }
 
     pub fn with_capacity(cap: usize) -> Self {
-        let mut data = SmallBitVec::with_capacity(cap);
-        data.extend((0..cap).map(|_| false));
+        let mut data = FixedBitSet::with_capacity(cap);
+        data.grow(cap);
         Self { data }
     }
 
     pub fn resize_total(&mut self, size: usize) {
-        self.data
-            .extend((self.data.capacity()..size).map(|_| false));
+        self.data.grow_and_insert(size);
     }
 
     pub fn zero_all(&mut self) {
-        let cap = self.data.len();
-        self.data.clear();
-        self.data.extend((0..cap).map(|_| false));
+        self.data.set_range(.., false);
     }
 
     pub fn insert(&mut self, n: usize) {
@@ -42,32 +39,35 @@ impl Bitset {
     }
 
     pub fn get(&self, n: usize) -> bool {
-        self.data.get(n).unwrap_or(false)
+        self.data.contains(n)
     }
 
     pub fn into_union(&mut self, other: &Self) {
-        other.iter_inserted().for_each(|n| self.insert(n));
+        self.data.union_with(&other.data);
     }
 
     pub fn empty(&self) -> bool {
-        self.data.all_false()
+        self.data.is_clear()
     }
 
     pub fn iter_inserted(&self) -> impl Iterator<Item = usize> {
-        self.data
-            .iter()
-            .enumerate()
-            .filter(|(_, v)| *v)
-            .map(|(n, _)| n)
+        self.data.ones()
     }
 
     pub fn is_subset(&self, other: &Self) -> bool {
-        self.iter_inserted()
-            .all(|n| other.data.get(n).unwrap_or(false))
+        self.data.is_subset(&other.data)
+    }
+
+    pub fn is_disjoint(&self, other: &Self) -> bool {
+        self.data.is_disjoint(&other.data)
     }
 
     pub fn is_superset(&self, other: &Self) -> bool {
-        other.is_subset(self)
+        self.data.is_superset(&other.data)
+    }
+
+    pub fn iter_intersection<'a>(&'a self, other: &'a Self) -> impl Iterator<Item = usize> {
+        self.data.intersection(&other.data)
     }
 
     pub fn count_predecesors(&self, n: usize) -> Option<usize> {

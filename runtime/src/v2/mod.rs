@@ -9,7 +9,7 @@ mod tests;
 
 use crate::{
     bitset::Bitset,
-    v2::erased::{ErasedVec, TypeOps},
+    v2::erased::{ErasedBox, ErasedVec, TypeOps},
 };
 
 pub type Row = usize;
@@ -34,16 +34,33 @@ pub struct ArcheType {
     flag_columns: Vec<u32>,
 }
 
+pub type UniqueComponentKey = Key<UniqueComponentTag>;
+#[derive(Debug, Copy, Clone, PartialEq, PartialOrd, Ord, Eq)]
+pub struct UniqueComponentTag;
+pub struct UniqueComponent {
+    data: ErasedBox,
+    entity: Option<EntityRefKey>,
+}
+
 pub struct Query {
     include: Bitset,
     exclude: Bitset,
     optional: Bitset,
-    order: Vec<Column>,
+    include_unique: Vec<UniqueComponentKey>,
+    exclude_unique: Vec<UniqueComponentKey>,
 }
 
 pub struct QueryCache {
     query: Query,
+    process_unique: bool,
     archetypes: Vec<(ArcheTypeKey, Vec<Column>)>,
+}
+
+pub struct WorldRef<'w> {
+    archetype: &'w mut ArcheType,
+    entity: Row,
+    unique_components: &'w mut Arena<UniqueComponent, UniqueComponentTag>,
+    binds: &'w Vec<usize>,
 }
 
 pub struct World {
@@ -51,6 +68,7 @@ pub struct World {
     archetypes: Arena<ArcheType, ArcheTypeTag>,
     static_components: Vec<&'static TypeOps>,
     dynamic_components: Vec<&'static TypeOps>,
+    unique_components: Arena<UniqueComponent, UniqueComponentTag>,
     query_cache: Arena<QueryCache>,
     bitset_size: usize,
     flag_components: u8,

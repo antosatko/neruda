@@ -9,18 +9,18 @@ use std::{
 };
 
 #[test]
-fn stores_and_reads_i32() {
-    let ops = Box::leak(Box::new(TypeOps::new::<i32>()));
+fn stores_and_reads() {
+    let ops = Box::leak(Box::new(TypeOps::new::<[i32; 34]>()));
 
     let mut boxed = ErasedBox::new_uninit(ops);
 
-    let mut x = ManuallyDrop::new(42i32);
+    let mut x = ManuallyDrop::new([42i32; 34]);
 
     unsafe {
-        boxed.write_move((&mut *x as *mut i32).cast());
+        boxed.write_move((&mut *x as *mut [i32; 34]).cast());
 
-        let p = boxed.as_ptr() as *const i32;
-        assert_eq!(*p, 42);
+        let p = boxed.as_ptr() as *const [i32; 34];
+        assert_eq!(*p, [42; 34]);
     }
 }
 

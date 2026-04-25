@@ -1,8 +1,10 @@
+use arena::Key;
+
 use crate::{
     bitset::Bitset,
     v2::{
-        ArcheType, ArcheTypeKey, ComponentRef, World,
-        erased::{ErasedVec, TypeOps},
+        ArcheType, ArcheTypeKey, Column, ComponentRef, Query, QueryCache, Row, World, WorldRef,
+        erased::{self, ErasedVec, TypeOps},
     },
 };
 
@@ -15,6 +17,26 @@ impl World {
         match self.static_components.get(component) {
             Some(ops) => ops,
             None => self.dynamic_components[component - self.static_components.len()],
+        }
+    }
+
+    pub(crate) fn iter_query(&mut self, query: Key<QueryCache>, mut cb: impl FnMut(WorldRef<'_>)) {
+        let query_cache = self.query_cache.get_unchecked(&query);
+        let process_unique = query_cache.process_unique;
+
+        for (arch_key, binds) in &query_cache.archetypes {
+            let archetype = self.archetypes.get_unchecked(arch_key);
+            let e_range = 0..archetype.entities.len();
+            for i in e_range {
+                let archetype = self.archetypes.get_mut_unchecked(arch_key);
+                let world_ref = WorldRef {
+                    entity: i,
+                    binds,
+                    archetype,
+                    unique_components: &mut self.unique_components,
+                };
+                cb(world_ref);
+            }
         }
     }
 

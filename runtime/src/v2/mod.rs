@@ -3,11 +3,14 @@ use std::alloc::Layout;
 use arena::{Arena, DynArena, DynKey, Key};
 
 pub mod core;
-mod erased_vec;
+mod erased;
 pub mod ext;
 mod tests;
 
-use crate::{bitset::Bitset, v2::erased_vec::ErasedVec};
+use crate::{
+    bitset::Bitset,
+    v2::erased::{ErasedVec, TypeOps},
+};
 
 pub type Row = usize;
 pub type ComponentRef = usize;
@@ -25,7 +28,7 @@ pub type ArcheTypeKey = Key<ArcheTypeTag>;
 pub struct ArcheTypeTag;
 pub struct ArcheType {
     signature: Bitset,
-    entities: Vec<EntityRef>,
+    entities: Vec<EntityRefKey>,
     dyn_columns: Vec<ErasedVec>,
     static_columns: Vec<ErasedVec>,
     flag_columns: Vec<u32>,
@@ -35,6 +38,7 @@ pub struct Query {
     include: Bitset,
     exclude: Bitset,
     optional: Bitset,
+    order: Vec<Column>,
 }
 
 pub struct QueryCache {
@@ -45,8 +49,8 @@ pub struct QueryCache {
 pub struct World {
     entities: DynArena<EntityRef>,
     archetypes: Arena<ArcheType, ArcheTypeTag>,
-    static_components: Vec<Layout>,
-    dynamic_components: Vec<Layout>,
+    static_components: Vec<&'static TypeOps>,
+    dynamic_components: Vec<&'static TypeOps>,
     query_cache: Arena<QueryCache>,
     bitset_size: usize,
     flag_components: u8,

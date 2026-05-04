@@ -31,7 +31,7 @@ pub struct ArcheType {
     entities: Vec<EntityRefKey>,
     dyn_columns: Vec<ErasedVec>,
     static_columns: Vec<ErasedVec>,
-    flag_columns: Vec<u32>,
+    fixed_columns: Vec<(Vec<UniqueComponentKey>, u32)>,
 }
 
 pub type UniqueComponentKey = Key<UniqueComponentTag>;
@@ -42,18 +42,31 @@ pub struct UniqueComponent {
     entity: Option<EntityRefKey>,
 }
 
-pub struct Query {
-    include: Bitset,
-    exclude: Bitset,
-    optional: Bitset,
-    include_unique: Vec<UniqueComponentKey>,
-    exclude_unique: Vec<UniqueComponentKey>,
+struct RuleSet<T> {
+    include: T,
+    exclude: T,
+    optional: T,
 }
+
+pub struct Query {
+    components: RuleSet<Bitset>,
+    unique: RuleSet<Vec<UniqueComponentKey>>,
+    flags: RuleSet<u32>,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct QueryTag;
+pub type QueryKey = Key<QueryTag>;
 
 pub struct QueryCache {
     query: Query,
     process_unique: bool,
-    archetypes: Vec<(ArcheTypeKey, Vec<Column>)>,
+    archetypes: Vec<ArcheTypeQueryCache>,
+}
+
+pub struct ArcheTypeQueryCache {
+    pub key: ArcheTypeKey,
+    pub binds: Vec<Column>,
 }
 
 pub struct WorldRef<'w> {
@@ -69,7 +82,7 @@ pub struct World {
     static_components: Vec<&'static TypeOps>,
     dynamic_components: Vec<&'static TypeOps>,
     unique_components: Arena<UniqueComponent, UniqueComponentTag>,
-    query_cache: Arena<QueryCache>,
+    query_cache: Arena<QueryCache, QueryTag>,
     bitset_size: usize,
     flag_components: u8,
 }

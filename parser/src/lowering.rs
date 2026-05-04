@@ -809,6 +809,19 @@ fn ty(
     diagnostics: &mut Diagnostics,
 ) -> Result<Span<Type>, Span<LoweringError>> {
     let literal = node.expect_node("literal");
+    let prefix = node.expect_node("prefix");
+    let refs = span(
+        prefix
+            .get_list("prefix")
+            .iter()
+            .map(|n| match n.unwrap_token().kind {
+                TokenKinds::Token("&") => 1,
+                TokenKinds::Token("&&") => 2,
+                _ => unreachable!(),
+            })
+            .sum(),
+        prefix,
+    );
 
     match literal.get_name() {
         "type path" => Ok(span(
@@ -820,6 +833,7 @@ fn ty(
                     ),
                     literal,
                 ),
+                refs,
             },
             node,
         )),
@@ -829,6 +843,7 @@ fn ty(
                     TypeLiteral::Struct(parameters(src, literal, diagnostics)?),
                     literal,
                 ),
+                refs,
             },
             node,
         )),
@@ -841,6 +856,7 @@ fn ty(
             Ok(span(
                 Type {
                     literal: span(TypeLiteral::Array(Box::new(type_), len), literal),
+                    refs,
                 },
                 node,
             ))
@@ -853,6 +869,7 @@ fn ty(
             Ok(span(
                 Type {
                     literal: span(TypeLiteral::Tuple(params), literal),
+                    refs,
                 },
                 node,
             ))
@@ -874,6 +891,7 @@ fn ty(
             Ok(span(
                 Type {
                     literal: span(TypeLiteral::Enum(repr, variants), literal),
+                    refs,
                 },
                 node,
             ))

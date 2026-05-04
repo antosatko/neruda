@@ -46,11 +46,6 @@ system orbit(
 system add<T: AddEq, U>(e: mut T + U) => e.T += e.U
 
 
-function tuple(v: m::Danda): (f32, f32) => (v.v, v.v)
+function tuple(v: m::ImFloat): m::ImFloat => (v.v, v.v)
 type IPV4_ADDR = [bool; BYTE * 4]
 const BYTE: u32 = 8
-
-type Danda = enum: u8 {
-	Danda
-	NeDanda
-}

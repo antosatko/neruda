@@ -390,6 +390,7 @@ pub enum Postfix {
 
 #[derive(Debug, Clone)]
 pub struct Type {
+    pub refs: Span<usize>,
     pub literal: Span<TypeLiteral>,
 }
 

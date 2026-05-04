@@ -534,7 +534,7 @@ impl IndexedWalk for ir::ast::Span<Parameter> {
 
 impl IndexedWalk for ir::ast::Span<Type> {
     fn index(&self, line_index: &LineIndex, spans: &mut Vec<Span>) {
-        let Type { literal } = self.inner.as_ref();
+        let Type { literal, refs: _ } = self.inner.as_ref();
         match literal.inner.as_ref() {
             ir::ast::TypeLiteral::Path(identifier_path, generics) => {
                 for ident in &identifier_path.path {

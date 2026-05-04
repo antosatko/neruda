@@ -5,23 +5,21 @@ type ImInt = Im<i32>
 
 const PI: f32 = 3.14159265359
 
+
+
 impl <S: Add> Add for Im<S> {
-    function add(self: Self, other: Self): Self => (
+    function add(self: &Self, other: &Self): Self => (
         self[0] + other[0],
         self[1] + other[1],
     )
 }
 
-type Danda = struct {
-	v: f32
-}
-
 trait Add {
-    function add(self: Self, other: Self): Self => _
+    function add(self: &Self, other: &Self): Self => _
 }
 
 trait Sub {
-    function sub(self: Self, other: Self): Self => _
+    function sub(self: &Self, other: &Self): Self => _
 }
 
 type AddAndSub<T: Add + Sub> = T

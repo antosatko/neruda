@@ -3,8 +3,9 @@ use arena::Key;
 use crate::{
     bitset::Bitset,
     v2::{
-        ArcheType, ArcheTypeKey, Column, ComponentRef, Query, QueryCache, Row, World, WorldRef,
-        erased::{self, ErasedVec, TypeOps},
+        ArcheType, ArcheTypeKey, ArcheTypeQueryCache, ComponentRef, QueryKey, RuleSet, World,
+        WorldRef,
+        erased::{ErasedVec, TypeOps},
     },
 };
 
@@ -20,17 +21,36 @@ impl World {
         }
     }
 
-    pub(crate) fn iter_query(&mut self, query: Key<QueryCache>, mut cb: impl FnMut(WorldRef<'_>)) {
+    pub fn iter_query(&mut self, query: QueryKey, mut cb: impl FnMut(WorldRef<'_>)) {
         let query_cache = self.query_cache.get_unchecked(&query);
+        let RuleSet {
+            include, exclude, ..
+        } = query_cache.query.flags;
+        let process_flags = include + exclude > 0;
         let process_unique = query_cache.process_unique;
 
-        for (arch_key, binds) in &query_cache.archetypes {
-            let archetype = self.archetypes.get_unchecked(arch_key);
+        for ArcheTypeQueryCache { key, binds } in &query_cache.archetypes {
+            let archetype = self.archetypes.get_unchecked(key);
             let e_range = 0..archetype.entities.len();
-            for i in e_range {
-                let archetype = self.archetypes.get_mut_unchecked(arch_key);
+            for e in e_range {
+                let archetype = self.archetypes.get_mut_unchecked(key);
+
+                let (uniques, flags) = &archetype.fixed_columns[e];
+
+                if process_flags && (*flags & include != include || *flags & exclude != 0) {
+                    continue;
+                }
+
+                if process_unique
+                    && (uniques
+                        .iter()
+                        .any(|unique| query_cache.query.unique.exclude.contains(unique)))
+                {
+                    continue;
+                }
+
                 let world_ref = WorldRef {
-                    entity: i,
+                    entity: e,
                     binds,
                     archetype,
                     unique_components: &mut self.unique_components,
@@ -43,10 +63,10 @@ impl World {
     pub(crate) fn create_archetype(&mut self, signature: Bitset) -> ArcheTypeKey {
         let static_components_cap = self.static_components.len();
 
-        let static_columns: Vec<ErasedVec> = signature
-            .iter_inserted()
-            .take_while(|n| *n < static_components_cap)
-            .map(|idx| ErasedVec::new(self.static_components[idx]))
+        let static_columns: Vec<ErasedVec> = self
+            .static_components
+            .iter()
+            .map(|ops| ErasedVec::new(ops))
             .collect();
         let dyn_columns = signature
             .iter_inserted()
@@ -57,16 +77,18 @@ impl World {
         let key = unsafe { self.archetypes.empty_alloc() };
 
         for cache in self.query_cache.iter_mut().filter(|c| {
-            c.query.include.is_subset(&signature) && c.query.exclude.is_disjoint(&signature)
+            c.query.components.include.is_subset(&signature)
+                && c.query.components.exclude.is_disjoint(&signature)
         }) {
-            let columns = cache
+            let binds = cache
                 .query
+                .components
                 .include
-                .iter_intersection(&cache.query.optional)
+                .iter_intersection(&cache.query.components.optional)
                 .skip_while(|n| *n < static_components_cap)
                 .map(|n| signature.count_predecesors(n).unwrap())
                 .collect();
-            cache.archetypes.push((key, columns));
+            cache.archetypes.push(ArcheTypeQueryCache { key, binds });
         }
 
         let arch_ref = self.archetypes.get_mut_unchecked(&key) as *mut ArcheType;
@@ -77,7 +99,7 @@ impl World {
                 entities: Vec::new(),
                 dyn_columns,
                 static_columns,
-                flag_columns: Vec::new(),
+                fixed_columns: Vec::new(),
             })
         };
         key

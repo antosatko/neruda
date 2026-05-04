@@ -42,7 +42,7 @@ pub enum AnyObjectData {
     },
     TypeAlias {
         ty: InitState<NamedTypeKey>,
-        generics: Vec<ConstraintKey>,
+        generics: Vec<(SmolStr, ConstraintKey)>,
     },
     Trait {
         ty: InitState<TraitKey>,
@@ -185,9 +185,17 @@ impl AnyObjectData {
                 },
             ),
             Self::TypeAlias { ty, generics } => {
-                let generics = match generics.len() {
-                    0 => "".to_string(),
-                    l => format!("<{}>", l),
+                let generics = match generics.is_empty() {
+                    true => Cow::Borrowed(""),
+                    _ => Cow::Owned(format!(
+                        "<{}>",
+                        generics
+                            .iter()
+                            .map(|(i, _)| i.as_str())
+                            .collect::<Vec<&str>>()
+                            .join(", ")
+                            .as_str()
+                    )),
                 };
                 format!(
                     "type{generics} = {}",

@@ -1,6 +1,9 @@
 #![cfg(test)]
 
-use crate::v2::ext::{EntitySpawnerBuilder, WorldBuilder};
+use crate::v2::{
+    EntityRefKey,
+    ext::{EntitySpawnerBuilder, WorldBuilder},
+};
 
 #[test]
 fn build() {
@@ -9,7 +12,9 @@ fn build() {
     let velocity = builder.add_static_component::<(f32, f32)>();
     let position = builder.add_dynamic_component::<(f32, f32)>();
 
-    let player_flag = builder.add_flag_component();
+    let unit_flag = builder.add_flag_component();
+
+    let camera_focus = builder.add_unique_component::<EntityRefKey>();
 
     let q_velocity = builder.add_query(builder.new_query().with_include(velocity));
 
@@ -18,22 +23,22 @@ fn build() {
     assert_eq!(1, world.static_components.len());
     assert_eq!(1, world.dynamic_components.len());
     assert_eq!(1, world.flag_components);
-    assert_eq!(0, world.unique_components.len());
+    assert_eq!(1, world.unique_components.len());
 
     let mut spwner = EntitySpawnerBuilder::new(&world)
-        .with(position)
         .with(velocity)
-        .with_flag(player_flag)
+        .with(position)
+        .with_flag(unit_flag)
         .build(&mut world);
 
-    spwner.insert((0.1, 0.2));
-    spwner.insert((1.0, 1.0));
+    spwner.insert((0.1_f32, 0.2_f32));
+    spwner.insert((1.0_f32, 1.0_f32));
 
     let entity_key = spwner.spawn(&mut world);
 
     world.iter_query(q_velocity, |world| {
         assert_eq!(world.entity(), entity_key);
-        assert!(world.get_flag(player_flag));
-        assert_ne!(world.get_static(velocity), &(1.0, 1.0))
+        assert_eq!(world.get_static(velocity), &(0.1, 0.2));
+        assert!(world.get_flag(unit_flag));
     });
 }

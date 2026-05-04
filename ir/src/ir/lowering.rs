@@ -144,7 +144,10 @@ impl Context {
                     };
                     self.types.named.get_mut_unchecked(&named_key).repr = key;
                     let obj = self.objects.get_mut_unchecked(obj_key);
-                    obj.type_state_mut_eager().mark_done();
+                    if let AnyObjectData::TypeAlias { ty, generics } = &mut obj.data {
+                        ty.mark_done();
+                        generics.extend(generic_ctx.scopes.last().unwrap().iter().cloned());
+                    }
                     generic_ctx.pop_scope();
                 }
                 ast::Object::Component {
@@ -562,7 +565,10 @@ impl ast::Type {
         module: ModuleKey,
         generic_context: &mut GenericContext,
     ) -> Result<AnyTypeKey, Error> {
-        let Self { literal } = &self;
+        let Self { literal, refs } = &self;
+        if *refs.inner > 0 {
+            todo!("do refs lamo")
+        }
         match literal.inner.as_ref() {
             ast::TypeLiteral::Path(identifier_path, generic_arguments) => {
                 if identifier_path.path.len() == 1
@@ -597,7 +603,7 @@ impl ast::Type {
                             Some(g) => g.inner.as_ref().clone(),
                             None => Vec::new(),
                         };
-                        for (idx, constraint) in generics.clone().iter().enumerate() {
+                        for (idx, (_, constraint)) in generics.clone().iter().enumerate() {
                             let substitution = gen_args[idx].lower(ctx, module, generic_context)?;
                             new = AnyTypeKey::Named(ty).substitute_named(
                                 substitution,
@@ -607,7 +613,7 @@ impl ast::Type {
                         }
                         Ok(new)
                     }
-                    _ => todo!(),
+                    _ => unreachable!("all paths are expected to end with a type alias"),
                 }
             }
             ast::TypeLiteral::Struct(spans) => {

@@ -9,10 +9,10 @@ use crate::v2::erased::{ErasedBox, TypeOps};
 
 #[derive(Debug)]
 pub struct ErasedVec {
-    ptr: NonNull<u8>,
-    len: usize,
-    cap: usize,
-    ops: &'static TypeOps,
+    pub ptr: NonNull<u8>,
+    pub len: usize,
+    pub cap: usize,
+    pub ops: &'static TypeOps,
 }
 
 impl ErasedVec {
@@ -25,18 +25,22 @@ impl ErasedVec {
         }
     }
 
+    #[inline]
     pub fn len(&self) -> usize {
         self.len
     }
 
+    #[inline]
     pub fn capacity(&self) -> usize {
         self.cap
     }
 
+    #[inline]
     fn elem_size(&self) -> usize {
         self.ops.layout.size()
     }
 
+    #[inline]
     fn array_layout(&self, cap: usize) -> Layout {
         Layout::from_size_align(self.elem_size() * cap, self.ops.layout.align()).unwrap()
     }
@@ -76,11 +80,13 @@ impl ErasedVec {
         self.cap = new_cap;
     }
 
+    #[inline]
     fn slot_ptr(&self, index: usize) -> *mut u8 {
-        assert!(index < self.cap);
+        debug_assert!(index < self.cap);
         unsafe { self.ptr.as_ptr().add(index * self.elem_size()) }
     }
 
+    #[inline]
     pub unsafe fn push_raw_move(&mut self, src: *mut u8) {
         if self.len == self.cap {
             self.grow();
@@ -93,6 +99,7 @@ impl ErasedVec {
         self.len += 1;
     }
 
+    #[inline]
     pub unsafe fn push_raw_copy_bytes(&mut self, src: *const u8) {
         if self.len == self.cap {
             self.grow();
@@ -105,18 +112,20 @@ impl ErasedVec {
         self.len += 1;
     }
 
+    #[inline]
     pub fn get_raw(&self, index: usize) -> *const u8 {
-        assert!(index < self.len);
+        debug_assert!(index < self.len);
         self.slot_ptr(index)
     }
 
+    #[inline]
     pub fn get_raw_mut(&mut self, index: usize) -> *mut u8 {
-        assert!(index < self.len);
+        debug_assert!(index < self.len);
         self.slot_ptr(index)
     }
 
     pub unsafe fn swap_remove_raw(&mut self, index: usize) {
-        assert!(index < self.len);
+        debug_assert!(index < self.len);
 
         let last = self.len - 1;
 
@@ -132,6 +141,7 @@ impl ErasedVec {
         self.len -= 1;
     }
 
+    #[inline]
     fn push_val<T>(&mut self, val: T) {
         let mut x = std::mem::ManuallyDrop::new(val);
         unsafe {
@@ -141,10 +151,12 @@ impl ErasedVec {
 
     /// Creates a new, empty ErasedVec with the same type operations and layout
     /// as the current one, but with no elements and no allocated memory.
+    #[inline]
     pub fn clear_copy(&self) -> Self {
         Self::new(self.ops)
     }
 
+    #[inline]
     pub fn ops(&self) -> &'static TypeOps {
         self.ops
     }
@@ -152,7 +164,7 @@ impl ErasedVec {
     /// Move an element out of the vector into a new ErasedBox.
     /// Uses swap_remove semantics.
     pub fn swap_remove_box(&mut self, index: usize) -> ErasedBox {
-        assert!(index < self.len);
+        debug_assert!(index < self.len);
 
         let mut out = ErasedBox::new_uninit(self.ops);
 
@@ -176,12 +188,14 @@ impl ErasedVec {
     }
 
     /// Push an ErasedBox into the vector.
+    #[inline]
     pub fn push_box(&mut self, b: &mut ErasedBox) {
-        assert!(std::ptr::eq(self.ops, b.ops()));
+        debug_assert!(std::ptr::eq(self.ops, b.ops()));
         b.move_into_vec(self);
     }
 
     /// Pop last element into an ErasedBox.
+    #[inline]
     pub fn pop_box(&mut self) -> Option<ErasedBox> {
         if self.len == 0 {
             None

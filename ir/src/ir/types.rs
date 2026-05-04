@@ -399,14 +399,13 @@ impl AnyTypeKey {
             AnyTypeKey::Function(key) => todo!(),
             AnyTypeKey::Array(key) => todo!(),
             AnyTypeKey::Tuple(key) => {
-                println!("substituting tuple");
                 let ty = types.tuples.get_unchecked(key);
                 let result = ty
                     .parameters
                     .iter()
                     .map(|ty| match ty {
                         AnyTypeKey::Constraint(key) => {
-                            if dbg!(key) == dbg!(cons) {
+                            if key == cons {
                                 substitution
                             } else {
                                 *ty
@@ -422,7 +421,12 @@ impl AnyTypeKey {
             }
             AnyTypeKey::Struct(key) => todo!(),
             AnyTypeKey::Enum(key) => todo!(),
-            AnyTypeKey::Named(key) => todo!(),
+            AnyTypeKey::Named(key) => types
+                .named
+                .get_unchecked(key)
+                .repr
+                .clone()
+                .substitute_named(substitution, cons, types),
             AnyTypeKey::ModuleRef(_)
             | AnyTypeKey::Trait(_)
             | AnyTypeKey::Primitive(_)

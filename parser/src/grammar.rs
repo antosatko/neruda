@@ -820,11 +820,27 @@ pub fn gen_parser<'src>() -> Parser<'static> {
         ])
         .build();
 
+    let type_prefix_variants = parser
+        .grammar
+        .new_enum("type prefix variants")
+        .options([token("&"), token("&&")])
+        .build();
+
+    let type_prefix = parser
+        .grammar
+        .new_node("type prefix")
+        .rules([while_(type_prefix_variants).set("prefix")])
+        .variables([list_var("prefix")])
+        .build();
+
     let type_ = parser
         .grammar
         .new_node("type")
-        .rules([is(type_literal).commit().set("literal")])
-        .variables([node_var("literal")])
+        .rules([
+            maybe(type_prefix).set("prefix"),
+            is(type_literal).commit().set("literal"),
+        ])
+        .variables([node_var("literal"), node_var("prefix")])
         .build();
 
     let label = parser

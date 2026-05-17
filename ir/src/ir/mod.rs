@@ -6,13 +6,12 @@ pub mod types;
 
 use std::{collections::HashMap, sync::Arc};
 
-use arena::Arena;
 use smol_str::SmolStr;
 
 use crate::{
     ast::{self, ConstValue, Operator, SpanIndex},
     ir::{
-        objects::{AnyObject, AnyObjectTag, AnyObjectkey},
+        objects::{AnyObjectKey, Objects},
         types::{AnyTypeKey, AutoTypes, ModuleKey},
     },
 };
@@ -36,14 +35,14 @@ pub type Warning = Diagnostic<Warnings>;
 
 #[derive(Debug)]
 pub enum Errors {
-    IllegalType(AnyObjectkey),
+    IllegalType(AnyObjectKey),
     TypeNotFound(Vec<SmolStr>),
     ObjectNotFound(Vec<SmolStr>),
     TypeMismatch {
         expected: AnyTypeKey,
         got: AnyTypeKey,
     },
-    NonConstraintType(AnyObjectkey),
+    NonConstraintType(AnyObjectKey),
     CouldNotSubstituteType(AnyTypeKey),
     NotConst,
     CanNotApplyConst {
@@ -58,7 +57,7 @@ pub enum Warnings {}
 
 pub struct Context {
     pub types: Types,
-    pub objects: Arena<AnyObject, AnyObjectTag>,
+    pub objects: Objects,
     pub auto_types: AutoTypes,
     pub ast: HashMap<Vec<SmolStr>, Arc<ast::Module>>,
     pub diagnostics: Diagnostics,

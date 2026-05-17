@@ -1,11 +1,8 @@
 use core::panic;
 use dashmap::DashMap;
-use ir::{
-    ast::{
-        Alias, Body, Diagnostics, Expression, Function, IdentifierPath, Literal, LoweringError,
-        Module, Object, Parameter, Postfix, Statement, Type, Value,
-    },
-    ir::{Context, Diagnostic},
+use ir::ast::{
+    Alias, Body, Diagnostics, Expression, Function, IdentifierPath, Literal, LoweringError, Module,
+    Object, Parameter, Postfix, Statement, Type, Value,
 };
 use line_index::{LineCol, LineIndex, TextSize};
 use parser::{
@@ -563,10 +560,13 @@ impl IndexedWalk for ir::ast::Span<Type> {
                     ty.index(line_index, spans);
                 }
             }
-            ir::ast::TypeLiteral::Enum(repr, variants) => {
+            ir::ast::TypeLiteral::Enum(repr, step, variants) => {
                 spans.push(self.literal.span_word(Types::Keyword, line_index, "enum"));
                 if let Some(repr) = repr {
                     repr.index(line_index, spans);
+                }
+                if let Some(step) = step {
+                    step.index(line_index, spans);
                 }
                 for (ident, expr) in variants {
                     spans.push(ident.span(Types::Type, line_index));

@@ -132,6 +132,7 @@ fn main() {
                     named,
                     traits,
                     enums,
+                    references,
                 } = &ir_ctx.types;
                 println!("function types:");
                 for t in functions.iter() {
@@ -161,6 +162,10 @@ fn main() {
                 for t in traits.iter() {
                     println!("\t{}", t.stringify());
                 }
+                println!("reference types:");
+                for t in references.iter() {
+                    println!("\t{}", t.inner.stringify(&ir_ctx.types));
+                }
                 println!("module refs:");
                 for t in modules.iter() {
                     println!("\t- {}", t.stringify());
@@ -168,15 +173,6 @@ fn main() {
                 println!("named types:");
                 for t in named.iter() {
                     println!("\t- {}", t.stringify(&ir_ctx.types));
-                }
-            }
-            for module in ir_ctx.types.modules.iter() {
-                println!("Module {}", module.stringify());
-                for (ident, key) in module.symbol_map.iter() {
-                    println!(
-                        "\t- {ident} :: {}",
-                        ir_ctx.objects.get_unchecked(key).data.stringify(&ir_ctx)
-                    );
                 }
             }
         }

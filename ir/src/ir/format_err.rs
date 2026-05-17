@@ -46,9 +46,8 @@ impl Error {
 impl Errors {
     pub fn id_header_snippet_report(&self, ctx: &Context) -> (&'static str, String, String) {
         match self {
-            Self::IllegalType(ty) => {
-                let obj = ctx.objects.get_unchecked(ty);
-                let ident = &obj.identifier;
+            Self::IllegalType(obj) => {
+                let ident = obj.ident(ctx);
                 (
                     "400",
                     format!("Use of type {ident} is illegal here"),
@@ -56,8 +55,7 @@ impl Errors {
                 )
             }
             Self::NonConstraintType(obj) => {
-                let obj = ctx.objects.get_unchecked(&obj);
-                let ident = &obj.identifier;
+                let ident = obj.ident(ctx);
                 (
                     "401",
                     format!("Type {ident} must be a trait type"),

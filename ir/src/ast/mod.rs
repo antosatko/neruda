@@ -369,12 +369,19 @@ pub enum Operator {
     ModAssign,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum UnaryOp {
+    Sub,
+    Neg,
+}
+
 /* ===================== VALUES ===================== */
 
 #[derive(Debug, Clone)]
 pub struct Value {
     pub literal: Span<Literal>,
     pub postfix: Vec<Span<Postfix>>,
+    pub unary: Vec<Span<UnaryOp>>,
 }
 
 #[derive(Debug, Clone)]
@@ -402,6 +409,7 @@ pub enum TypeLiteral {
     Tuple(Vec<Span<Type>>),
     Enum(
         Option<Box<Span<Type>>>,
+        Option<Span<Expression>>,
         Vec<(Span<SmolStr>, Option<Span<Expression>>)>,
     ),
 }
@@ -690,8 +698,11 @@ impl std::fmt::Display for Type {
                 }
                 write!(f, " )")?;
             }
-            TypeLiteral::Enum(repr, variants) => {
+            TypeLiteral::Enum(repr, step, variants) => {
                 write!(f, "enum")?;
+                if let Some(step) = step {
+                    write!(f, "({})", "...")?;
+                }
                 if let Some(repr) = repr {
                     write!(f, ": {}", repr.inner)?;
                 }
@@ -749,6 +760,37 @@ impl ConstValue {
                 size: _,
             }) => PrimitiveType::U32,
             _ => todo!(),
+        }
+    }
+
+    pub fn autostep(&self) -> Self {
+        match self {
+            ConstValue::Structure(spans) => todo!(),
+            ConstValue::Number(number) => match number.value {
+                NumberValue::Float(n) => ConstValue::Number(Number {
+                    value: NumberValue::Float(n + 1.0),
+                    size: number.size,
+                }),
+                NumberValue::Int(n) => ConstValue::Number(Number {
+                    value: NumberValue::Int(n + 1),
+                    size: number.size,
+                }),
+                NumberValue::Uint(n) => ConstValue::Number(Number {
+                    value: NumberValue::Uint(n + 1),
+                    size: number.size,
+                }),
+                NumberValue::Any(n) => ConstValue::Number(Number {
+                    value: NumberValue::Any(n + 1),
+                    size: number.size,
+                }),
+            },
+            ConstValue::String(smol_str) => todo!(),
+            ConstValue::Char(c) => {
+                ConstValue::Char((*c as u8).checked_add(1).expect("handle pls") as _)
+            }
+            ConstValue::Bool(_) => todo!(),
+            ConstValue::Array(spans) => todo!(),
+            ConstValue::Tuple(spans) => todo!(),
         }
     }
 }

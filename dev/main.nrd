@@ -46,6 +46,18 @@ system orbit(
 system add<T: AddEq, U>(e: mut T + U) => e.T += e.U
 
 
-function tuple(v: m::ImFloat): m::ImFloat => (v.v, v.v)
+function im2tuple<T>(v: &m::Im<T>): (T, T) => (v[0], v[1])
 type IPV4_ADDR = [bool; BYTE * 4]
 const BYTE: u32 = 8
+
+type Bits = enum (-2 * self) {
+    Zero
+    One = 1
+    Two
+    Three
+    Four
+    Five
+    Six
+    Seven
+    Eight
+}

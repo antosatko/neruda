@@ -4,7 +4,7 @@ use arena::{Arena, Key};
 use smol_str::{SmolStr, ToSmolStr};
 
 use crate::{
-    ast::{ConstValue, SpanIndex},
+    ast::{ConstValue, Number, NumberValue, SpanIndex},
     ir::{Error, Errors, objects::Module},
 };
 
@@ -94,6 +94,15 @@ pub struct GenericType {
     pub inner: AnyTypeKey,
 }
 
+pub type RefArena = Arena<RefType, RefTag>;
+pub type RefKey = Key<RefTag>;
+#[derive(PartialEq, Debug, Copy, Clone)]
+pub struct RefTag;
+#[derive(PartialEq, Debug)]
+pub struct RefType {
+    pub inner: AnyTypeKey,
+}
+
 pub type ModuleArena = Arena<Module, ModuleTag>;
 pub type ModuleKey = Key<ModuleTag>;
 #[derive(PartialEq, Debug, Clone, Copy)]
@@ -134,6 +143,7 @@ pub enum AnyTypeKey {
     Struct(StructKey),
     Enum(EnumKey),
     Trait(TraitKey),
+    Reference(RefKey),
     Named(NamedTypeKey),
     ModuleRef(ModuleKey),
 }
@@ -147,6 +157,7 @@ pub struct Types {
     pub arrays: ArrayArena,
     pub tuples: TupleArena,
     pub traits: TraitArena,
+    pub references: RefArena,
     pub modules: ModuleArena,
     pub named: NamedTypeArena,
 }
@@ -218,6 +229,68 @@ impl PrimitiveType {
             PrimitiveType::Bool => "bool",
             PrimitiveType::Void => "()",
             PrimitiveType::EntityRef => "entity",
+        }
+    }
+
+    pub fn default(&self) -> ConstValue {
+        match self {
+            PrimitiveType::I8 => ConstValue::Number(Number {
+                value: NumberValue::Int(0),
+                size: Some(8),
+            }),
+            PrimitiveType::I16 => ConstValue::Number(Number {
+                value: NumberValue::Int(0),
+                size: Some(16),
+            }),
+            PrimitiveType::I32 => ConstValue::Number(Number {
+                value: NumberValue::Int(0),
+                size: Some(32),
+            }),
+            PrimitiveType::I64 => ConstValue::Number(Number {
+                value: NumberValue::Int(0),
+                size: Some(64),
+            }),
+            PrimitiveType::I128 => ConstValue::Number(Number {
+                value: NumberValue::Int(0),
+                size: Some(128),
+            }),
+
+            PrimitiveType::U8 => ConstValue::Number(Number {
+                value: NumberValue::Uint(0),
+                size: Some(8),
+            }),
+            PrimitiveType::U16 => ConstValue::Number(Number {
+                value: NumberValue::Uint(0),
+                size: Some(16),
+            }),
+            PrimitiveType::U32 => ConstValue::Number(Number {
+                value: NumberValue::Uint(0),
+                size: Some(32),
+            }),
+            PrimitiveType::U64 => ConstValue::Number(Number {
+                value: NumberValue::Uint(0),
+                size: Some(64),
+            }),
+            PrimitiveType::U128 => ConstValue::Number(Number {
+                value: NumberValue::Uint(0),
+                size: Some(128),
+            }),
+            PrimitiveType::F32 => ConstValue::Number(Number {
+                value: NumberValue::Float(0.0),
+                size: Some(32),
+            }),
+            PrimitiveType::F64 => ConstValue::Number(Number {
+                value: NumberValue::Float(0.0),
+                size: Some(64),
+            }),
+            PrimitiveType::Char => ConstValue::Char(0 as char),
+            PrimitiveType::Bool => ConstValue::Bool(false),
+            PrimitiveType::Void => ConstValue::Tuple(Vec::with_capacity(0)),
+            PrimitiveType::F32x2 => todo!(),
+            PrimitiveType::F64x2 => todo!(),
+            PrimitiveType::F32x4 => todo!(),
+            PrimitiveType::F64x4 => todo!(),
+            PrimitiveType::EntityRef => todo!(),
         }
     }
 }
@@ -340,6 +413,12 @@ impl NamedTypeType {
     }
 }
 
+impl RefType {
+    pub fn stringify(&self, types: &Types) -> String {
+        format!("&{}", self.inner.stringify(types))
+    }
+}
+
 impl ArrayType {
     pub fn stringify(&self, types: &Types) -> String {
         let mut out = format!("[{}", self.element_type.stringify(types));
@@ -397,7 +476,15 @@ impl AnyTypeKey {
     ) -> Result<AnyTypeKey, Error> {
         match self {
             AnyTypeKey::Function(key) => todo!(),
-            AnyTypeKey::Array(key) => todo!(),
+            AnyTypeKey::Array(key) => {
+                let ArrayType { element_type, size } = *types.arrays.get_unchecked(key);
+                let new_inner = element_type.substitute_named(substitution, cons, types)?;
+                let new = ArrayType {
+                    size,
+                    element_type: new_inner,
+                };
+                Ok(AnyTypeKey::Array(types.arrays.push_unique(new)))
+            }
             AnyTypeKey::Tuple(key) => {
                 let ty = types.tuples.get_unchecked(key);
                 let result = ty
@@ -419,8 +506,18 @@ impl AnyTypeKey {
 
                 Ok(AnyTypeKey::Tuple(types.tuples.push_unique(new)))
             }
+            AnyTypeKey::Reference(key) => {
+                let resolved = types
+                    .references
+                    .get_unchecked(key)
+                    .inner
+                    .clone()
+                    .substitute_named(substitution, cons, types)?;
+                Ok(AnyTypeKey::Reference(
+                    types.references.push_unique(RefType { inner: resolved }),
+                ))
+            }
             AnyTypeKey::Struct(key) => todo!(),
-            AnyTypeKey::Enum(key) => todo!(),
             AnyTypeKey::Named(key) => types
                 .named
                 .get_unchecked(key)
@@ -430,7 +527,8 @@ impl AnyTypeKey {
             AnyTypeKey::ModuleRef(_)
             | AnyTypeKey::Trait(_)
             | AnyTypeKey::Primitive(_)
-            | AnyTypeKey::Constraint(_) => {
+            | AnyTypeKey::Constraint(_)
+            | AnyTypeKey::Enum(_) => {
                 return Err(crate::ir::Diagnostic {
                     span: SpanIndex { index: 0, len: 0 },
                     module: todo!(),
@@ -450,6 +548,9 @@ impl AnyTypeKey {
                 Cow::Owned(types.functions.get_unchecked(key).stringify(types))
             }
             AnyTypeKey::Array(key) => Cow::Owned(types.arrays.get_unchecked(key).stringify(types)),
+            AnyTypeKey::Reference(key) => {
+                Cow::Owned(types.references.get_unchecked(key).stringify(types))
+            }
             AnyTypeKey::Tuple(key) => Cow::Owned(types.tuples.get_unchecked(key).stringify(types)),
             AnyTypeKey::Struct(key) => {
                 Cow::Owned(types.structures.get_unchecked(key).stringify(types))

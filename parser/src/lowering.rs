@@ -11,7 +11,7 @@ use ir::ast::{
     ActionClause, Alias, Associativity, Body, Clauses, Diagnostics, Else, ElseIf, ExprItem,
     Expression, Function, GenericParameter, IdentifierPath, Keyword, Literal, LoweringError,
     LoweringWarning, Module, Mutability, Object, Operator, Parameter, RestrictionClause,
-    SelectClause, Span, SpanIndex, Statement, SystemInclusion, Type, TypeLiteral, Value,
+    SelectClause, Span, SpanIndex, Statement, SystemInclusion, Type, TypeLiteral, UnaryOp, Value,
     char_literal, numeric_literal, string_literal,
 };
 
@@ -537,7 +537,7 @@ fn expression(
     let items = expression_items(src, node, diagnostics)?;
     let mut pos = 0;
     let expr = parse_expression_prec(&items, &mut pos, 0);
-    match expr.const_reduce(diagnostics) {
+    match expr.const_reduce() {
         Cow::Owned(reduced_expr) => Ok(Span::new(reduced_expr, expr.location)),
         Cow::Borrowed(_) => Ok(expr),
     }
@@ -775,10 +775,18 @@ fn value(
     diagnostics: &mut Diagnostics,
 ) -> Result<Span<Value>, Span<LoweringError>> {
     let literal = literal(src, node.expect_node("literal"), diagnostics)?;
-
+    let mut unary = Vec::new();
+    for op in node.get_list("unary operators") {
+        match op.expect_token().kind {
+            TokenKinds::Token("-") => unary.push(span(UnaryOp::Sub, op)),
+            TokenKinds::Token("!") => unary.push(span(UnaryOp::Neg, op)),
+            _ => unreachable!("ya"),
+        }
+    }
     Ok(span(
         Value {
             literal,
+            unary,
             postfix: Vec::new(),
         },
         node,
@@ -888,9 +896,13 @@ fn ty(
                 Some(repr) => Some(Box::new(ty(src, repr, diagnostics)?)),
                 None => None,
             };
+            let step = match literal.try_get_node("step") {
+                Some(e) => Some(expression(src, e, diagnostics)?),
+                None => None,
+            };
             Ok(span(
                 Type {
-                    literal: span(TypeLiteral::Enum(repr, variants), literal),
+                    literal: span(TypeLiteral::Enum(repr, step, variants), literal),
                     refs,
                 },
                 node,

@@ -1,6 +1,6 @@
-use std::{borrow::Cow, collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::Arc};
 
-use arena::Key;
+use arena::{Arena, Key};
 use smol_str::SmolStr;
 
 use crate::{
@@ -11,13 +11,9 @@ use crate::{
     },
 };
 
-#[derive(Debug, Clone)]
-pub struct AnyObjectTag;
-pub type AnyObjectkey = Key<AnyObjectTag>;
-
 #[derive(Debug)]
-pub struct AnyObject {
-    pub data: AnyObjectData,
+pub struct AnyObject<T> {
+    pub data: T,
     pub identifier: SmolStr,
     pub ast_object: ast::AstObjectKey,
     pub module: ModuleKey,
@@ -31,26 +27,82 @@ pub enum InitState<T, U = T> {
     Uninitialized,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ImportObjTag;
+pub type ImportObjKey = Key<ImportObjTag>;
+pub type ImportObjArena = Arena<AnyObject<ImportObj>, ImportObjTag>;
 #[derive(Debug)]
-pub enum AnyObjectData {
-    Import {
-        module: ModuleKey,
-    },
-    Const {
-        value: InitState<ConstValue, ()>,
-        ty: InitState<AnyTypeKey, ()>,
-    },
-    TypeAlias {
-        ty: InitState<NamedTypeKey>,
-        generics: Vec<(SmolStr, ConstraintKey)>,
-    },
-    Trait {
-        ty: InitState<TraitKey>,
-    },
-    Component {
-        ty: InitState<AnyTypeKey, ()>,
-    },
-    Function(FunctionData),
+pub struct ImportObj {
+    pub module: ModuleKey,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ConstObjTag;
+pub type ConstObjKey = Key<ConstObjTag>;
+pub type ConstObjArena = Arena<AnyObject<ConstObj>, ConstObjTag>;
+#[derive(Debug)]
+pub struct ConstObj {
+    pub value: InitState<ConstValue, ()>,
+    pub ty: InitState<AnyTypeKey, ()>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct TypeAliasObjTag;
+pub type TypeAliasObjKey = Key<TypeAliasObjTag>;
+pub type TypeAliasObjArena = Arena<AnyObject<TypeAliasObj>, TypeAliasObjTag>;
+#[derive(Debug)]
+pub struct TypeAliasObj {
+    pub ty: InitState<NamedTypeKey>,
+    pub generics: Vec<(SmolStr, ConstraintKey)>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct TraitObjTag;
+pub type TraitObjKey = Key<TraitObjTag>;
+pub type TraitObjArena = Arena<AnyObject<TraitObj>, TraitObjTag>;
+#[derive(Debug)]
+pub struct TraitObj {
+    pub ty: InitState<TraitKey>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ComponentObjTag;
+pub type ComponentObjKey = Key<ComponentObjTag>;
+pub type ComponentObjArena = Arena<AnyObject<ComponentObj>, ComponentObjTag>;
+#[derive(Debug)]
+pub struct ComponentObj {
+    pub ty: InitState<AnyTypeKey, ()>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct FunctionObjTag;
+pub type FunctionObjKey = Key<FunctionObjTag>;
+pub type FunctionObjArena = Arena<AnyObject<FunctionObj>, FunctionObjTag>;
+#[derive(Debug)]
+pub struct FunctionObj {
+    pub return_type: InitState<AnyTypeKey, ()>,
+    pub params: HashMap<SmolStr, InitState<AnyTypeKey, ()>>,
+    pub generics: Vec<ConstraintKey>,
+}
+
+#[derive(Default)]
+pub struct Objects {
+    pub imports: ImportObjArena,
+    pub constants: ConstObjArena,
+    pub types: TypeAliasObjArena,
+    pub traits: TraitObjArena,
+    pub components: ComponentObjArena,
+    pub functions: FunctionObjArena,
+}
+
+#[derive(Debug, Clone)]
+pub enum AnyObjectKey {
+    Import(ImportObjKey),
+    Const(ConstObjKey),
+    Type(TypeAliasObjKey),
+    Trait(TraitObjKey),
+    Component(ComponentObjKey),
+    Function(FunctionObjKey),
 }
 
 #[derive(Debug)]
@@ -60,10 +112,10 @@ pub struct FunctionData {
     pub generics: Vec<ConstraintKey>,
 }
 
-impl AnyObject {
+impl<T> AnyObject<T> {
     pub fn new(
         identifier: SmolStr,
-        data: AnyObjectData,
+        data: T,
         ast_object: ast::AstObjectKey,
         module: ModuleKey,
     ) -> Self {
@@ -77,45 +129,17 @@ impl AnyObject {
 
     #[track_caller]
     pub fn type_state_mut(&mut self) -> &mut InitState<AnyTypeKey, ()> {
-        match &mut self.data {
-            AnyObjectData::Import { .. } => panic!("Object import has no type state"),
-            AnyObjectData::Trait { .. } => panic!("Object trait has no type state"),
-            AnyObjectData::TypeAlias { .. } => panic!("Object TypeAlias is eager"),
-            AnyObjectData::Function(_) => panic!("not applicable to function"),
-            AnyObjectData::Const { ty, .. } => ty,
-            AnyObjectData::Component { ty } => ty,
-        }
+        todo!()
     }
 
     #[track_caller]
     pub fn type_state_mut_eager(&mut self) -> &mut InitState<NamedTypeKey> {
-        match &mut self.data {
-            AnyObjectData::Import { .. } => panic!("Object import has no type state"),
-            AnyObjectData::Trait { .. } => panic!("Object trait has no type state"),
-            AnyObjectData::Const { .. } => panic!("Object const is not eager"),
-            AnyObjectData::Function(_) => panic!("not applicable to function"),
-            AnyObjectData::Component { .. } => panic!("Component is not eager"),
-            AnyObjectData::TypeAlias { ty, .. } => ty,
-        }
+        todo!()
     }
 
     #[track_caller]
     pub fn type_of(&self) -> Option<AnyTypeKey> {
-        Some(match &self.data {
-            AnyObjectData::Import { module } => AnyTypeKey::ModuleRef(*module),
-            AnyObjectData::Trait {
-                ty: InitState::Done(ty),
-            } => AnyTypeKey::Trait(*ty),
-            AnyObjectData::Const {
-                ty: InitState::Done(ty),
-                ..
-            } => *ty,
-            AnyObjectData::TypeAlias {
-                ty: InitState::Done(ty),
-                ..
-            } => AnyTypeKey::Named(*ty),
-            _ => return None,
-        })
+        todo!()
     }
 }
 
@@ -152,7 +176,7 @@ impl<T, U> InitState<T, U> {
 
 pub struct Module {
     pub path: Vec<SmolStr>,
-    pub symbol_map: HashMap<SmolStr, AnyObjectkey>,
+    pub symbol_map: HashMap<SmolStr, AnyObjectKey>,
     pub ast: Arc<ast::Module>,
 }
 
@@ -166,7 +190,56 @@ impl Module {
     }
 }
 
-impl AnyObjectData {
+impl AnyObjectKey {
+    pub fn ident<'a>(&self, ctx: &'a Context) -> &'a SmolStr {
+        match self {
+            AnyObjectKey::Import(key) => &ctx.objects.imports.get_unchecked(key).identifier,
+            AnyObjectKey::Const(key) => &ctx.objects.constants.get_unchecked(key).identifier,
+            AnyObjectKey::Type(key) => &ctx.objects.types.get_unchecked(key).identifier,
+            AnyObjectKey::Trait(key) => &ctx.objects.traits.get_unchecked(key).identifier,
+            AnyObjectKey::Component(key) => &ctx.objects.components.get_unchecked(key).identifier,
+            AnyObjectKey::Function(key) => &ctx.objects.functions.get_unchecked(key).identifier,
+        }
+    }
+}
+
+impl From<ImportObjKey> for AnyObjectKey {
+    fn from(value: ImportObjKey) -> Self {
+        AnyObjectKey::Import(value)
+    }
+}
+
+impl From<ConstObjKey> for AnyObjectKey {
+    fn from(value: ConstObjKey) -> Self {
+        AnyObjectKey::Const(value)
+    }
+}
+
+impl From<FunctionObjKey> for AnyObjectKey {
+    fn from(value: FunctionObjKey) -> Self {
+        AnyObjectKey::Function(value)
+    }
+}
+
+impl From<ComponentObjKey> for AnyObjectKey {
+    fn from(value: ComponentObjKey) -> Self {
+        AnyObjectKey::Component(value)
+    }
+}
+
+impl From<TraitObjKey> for AnyObjectKey {
+    fn from(value: TraitObjKey) -> Self {
+        AnyObjectKey::Trait(value)
+    }
+}
+
+impl From<TypeAliasObjKey> for AnyObjectKey {
+    fn from(value: TypeAliasObjKey) -> Self {
+        AnyObjectKey::Type(value)
+    }
+}
+
+/*impl AnyObjectData {
     pub fn stringify(&self, ctx: &Context) -> String {
         match self {
             Self::Import { module } => format!(
@@ -265,4 +338,4 @@ impl AnyObjectData {
             }
         }
     }
-}
+}*/

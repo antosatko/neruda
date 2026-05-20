@@ -54,6 +54,7 @@ pub type TypeAliasObjArena = Arena<AnyObject<TypeAliasObj>, TypeAliasObjTag>;
 pub struct TypeAliasObj {
     pub ty: InitState<NamedTypeKey>,
     pub generics: Vec<(SmolStr, ConstraintKey)>,
+    pub constants: HashMap<SmolStr, ConstObjKey>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -95,7 +96,7 @@ pub struct Objects {
     pub functions: FunctionObjArena,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum AnyObjectKey {
     Import(ImportObjKey),
     Const(ConstObjKey),
@@ -171,6 +172,14 @@ impl<T, U> InitState<T, U> {
             InitState::Progress(_) => panic!("in progress"),
             InitState::Uninitialized => panic!("uninitialized"),
         }
+    }
+
+    /// Returns `true` if the init state is [`Done`].
+    ///
+    /// [`Done`]: InitState::Done
+    #[must_use]
+    pub fn is_done(&self) -> bool {
+        matches!(self, Self::Done(..))
     }
 }
 

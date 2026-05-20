@@ -118,6 +118,7 @@ impl Context {
                                         self.types.named.empty_alloc()
                                     }),
                                     generics: Vec::new(),
+                                    constants: HashMap::new(),
                                 },
                                 identifier: ident.inner.as_ref().clone(),
                                 ast_object: obj_key,
@@ -152,97 +153,17 @@ impl Context {
         let mut generic_ctx = GenericContext::default();
         let type_keys: Vec<TypeAliasObjKey> = self.objects.types.iter_keys().collect();
         for type_key in type_keys {
-            let this = self.objects.types.get_unchecked(&type_key);
-            let ast_key = this.ast_object;
-            let mod_key = this.module;
-            let module_path = &self.types.modules.get_unchecked(&mod_key).path;
-            if let ast::Object::Type {
-                ident,
-                generics,
-                ty,
-                docs: _,
-            } = self
-                .ast
-                .get(module_path)
-                .unwrap()
-                .objects
-                .get_unchecked(&ast_key)
-                .clone()
-                .deref()
-            {
-                generic_ctx.push_scope(&generics, self, &mod_key)?;
-                let obj = self.objects.types.get_mut_unchecked(&type_key);
-                let named_key =
-                    if let InitState::Done(ty) | InitState::Progress(ty) = &mut obj.data.ty {
-                        *ty
-                    } else {
-                        unreachable!("type should already be prepared")
-                    };
-                self.types.named.get_mut_unchecked(&named_key).name = ident.inner.to_smolstr();
-                let key = match ty {
-                    Some(t) => t.lower(self, mod_key, &mut generic_ctx)?,
-                    _ => AnyTypeKey::Primitive(PrimitiveType::Void),
-                };
-                self.types.named.get_mut_unchecked(&named_key).repr = key;
-                let obj = self.objects.types.get_mut_unchecked(&type_key);
-                obj.data.ty.mark_done();
-                obj.data
-                    .generics
-                    .extend(generic_ctx.scopes.last().unwrap().iter().cloned());
-                generic_ctx.pop_scope();
-            }
+            self.lower_type_alias_with_key(&mut generic_ctx, type_key)?;
         }
 
         let const_keys: Vec<ConstObjKey> = self.objects.constants.iter_keys().collect();
         for const_key in const_keys {
-            let this = self.objects.constants.get_unchecked(&const_key);
-            let ast_key = this.ast_object;
-            let mod_key = this.module;
-            let module_path = &self.types.modules.get_unchecked(&mod_key).path;
-            if let ast::Object::Const {
-                docs: _,
-                ident: _,
-                ty,
-                expression,
-            } = self
-                .ast
-                .get(module_path)
-                .unwrap()
-                .objects
-                .get_unchecked(&ast_key)
-                .clone()
-                .deref()
-            {
-                self.lower_const(mod_key, &mut generic_ctx, &const_key, ty, expression, &None)?;
-            }
+            self.lower_const_with_key(&mut generic_ctx, const_key)?;
         }
 
         let component_keys: Vec<ComponentObjKey> = self.objects.components.iter_keys().collect();
         for component_key in component_keys {
-            let this = self.objects.components.get_unchecked(&component_key);
-            let ast_key = this.ast_object;
-            let mod_key = this.module;
-            let module_path = &self.types.modules.get_unchecked(&mod_key).path;
-            if let ast::Object::Component {
-                ty,
-                docs: _,
-                ident: _,
-            } = self
-                .ast
-                .get(module_path)
-                .unwrap()
-                .objects
-                .get_unchecked(&ast_key)
-                .clone()
-                .deref()
-            {
-                let ty = match ty {
-                    Some(ty) => ty.lower(self, mod_key, &mut generic_ctx)?,
-                    None => AnyTypeKey::Primitive(PrimitiveType::Void),
-                };
-                let obj = self.objects.components.get_mut_unchecked(&component_key);
-                obj.data.ty = InitState::Done(ty);
-            }
+            self.lower_component_with_key(&mut generic_ctx, component_key)?;
         }
         /*
         let obj_keys: Vec<AnyObjectKey> = self.objects.iter_keys().collect();
@@ -314,6 +235,183 @@ impl Context {
         Ok(())
     }
 
+    fn lower_component_with_key(
+        &mut self,
+        generic_ctx: &mut GenericContext,
+        component_key: Key<super::objects::ComponentObjTag>,
+    ) -> Result<(), Diagnostic<Errors>> {
+        let this = self.objects.components.get_unchecked(&component_key);
+        let ast_key = this.ast_object;
+        let mod_key = this.module;
+        let module_path = &self.types.modules.get_unchecked(&mod_key).path;
+        Ok(
+            if let ast::Object::Component {
+                ty,
+                docs: _,
+                ident: _,
+            } = self
+                .ast
+                .get(module_path)
+                .unwrap()
+                .objects
+                .get_unchecked(&ast_key)
+                .clone()
+                .deref()
+            {
+                let ty = match ty {
+                    Some(ty) => ty.lower(self, mod_key, generic_ctx)?,
+                    None => AnyTypeKey::Primitive(PrimitiveType::Void),
+                };
+                let obj = self.objects.components.get_mut_unchecked(&component_key);
+                obj.data.ty = InitState::Done(ty);
+            },
+        )
+    }
+
+    fn lower_const_with_key(
+        &mut self,
+        generic_ctx: &mut GenericContext,
+        const_key: Key<super::objects::ConstObjTag>,
+    ) -> Result<&mut AnyObject<ConstObj>, Diagnostic<Errors>> {
+        let this = self.objects.constants.get_unchecked(&const_key);
+        let ast_key = this.ast_object;
+        let mod_key = this.module;
+        let module_path = &self.types.modules.get_unchecked(&mod_key).path;
+        Ok(
+            if let ast::Object::Const {
+                docs: _,
+                ident: _,
+                ty,
+                expression,
+            } = self
+                .ast
+                .get(module_path)
+                .unwrap()
+                .objects
+                .get_unchecked(&ast_key)
+                .clone()
+                .deref()
+            {
+                let this = &mut *self;
+                let obj_key: &ConstObjKey = &const_key;
+                let self_def: &Option<ConstValue> = &None;
+                let type_key = ty.lower(this, mod_key, generic_ctx)?;
+                let obj = this.objects.constants.get_mut_unchecked(obj_key);
+                obj.data.ty = InitState::Done(type_key);
+                let mut v = match expression.const_eval(this, mod_key, generic_ctx, self_def) {
+                    Ok(v) => v,
+                    Err(e) => Err(e)?,
+                };
+                if !this.type_check_const_value(&mut v, &type_key) {
+                    return Err(Diagnostic {
+                        span: expression.location,
+                        module: mod_key,
+                        inner: Errors::TypeMismatch {
+                            expected: type_key,
+                            got: AnyTypeKey::Primitive(v.type_of()),
+                        },
+                    });
+                }
+                let obj = this.objects.constants.get_mut_unchecked(obj_key);
+                obj.data.value = InitState::Done(v);
+                this.objects.constants.get_mut_unchecked(obj_key)
+            } else {
+                self.objects.constants.get_mut_unchecked(&const_key)
+            },
+        )
+    }
+
+    fn lower_type_alias_with_key(
+        &mut self,
+        generic_ctx: &mut GenericContext,
+        type_key: Key<super::objects::TypeAliasObjTag>,
+    ) -> Result<&mut AnyObject<TypeAliasObj>, Diagnostic<Errors>> {
+        let this = self.objects.types.get_unchecked(&type_key);
+        let ast_key = this.ast_object;
+        let mod_key = this.module;
+        let module_path = &self.types.modules.get_unchecked(&mod_key).path;
+        Ok(
+            if let ast::Object::Type {
+                ident,
+                generics,
+                ty,
+                docs: _,
+            } = self
+                .ast
+                .get(module_path)
+                .unwrap()
+                .objects
+                .get_unchecked(&ast_key)
+                .clone()
+                .deref()
+            {
+                {
+                    if self
+                        .objects
+                        .types
+                        .get_unchecked(&type_key)
+                        .data
+                        .ty
+                        .is_done()
+                    {
+                        return Ok(self.objects.types.get_mut_unchecked(&type_key));
+                    }
+                    let this = &mut *self;
+                    generic_ctx.push_scope(&generics, this, &mod_key)?;
+                    let obj = this.objects.types.get_mut_unchecked(&type_key);
+                    let named_key =
+                        if let InitState::Done(ty) | InitState::Progress(ty) = &mut obj.data.ty {
+                            *ty
+                        } else {
+                            unreachable!("type should already be prepared")
+                        };
+                    this.types.named.get_mut_unchecked(&named_key).name = obj.identifier.clone();
+                    let key = match ty {
+                        Some(t) => t.lower(this, mod_key, generic_ctx)?,
+                        _ => AnyTypeKey::Primitive(PrimitiveType::Void),
+                    };
+                    match &key {
+                        AnyTypeKey::Enum(key) => {
+                            let ty = this.types.enums.get_unchecked(key);
+                            for variant in &ty.variants {
+                                let ident = variant.0.clone();
+                                let const_obj = AnyObject {
+                                    data: ConstObj {
+                                        ty: InitState::Done(AnyTypeKey::Primitive(
+                                            variant.1.type_of(),
+                                        )),
+                                        value: InitState::Done(variant.1.clone()),
+                                    },
+                                    ast_object: ast_key,
+                                    identifier: ident.clone(),
+                                    module: mod_key,
+                                };
+                                let obj_key = this.objects.constants.push(const_obj);
+                                this.objects
+                                    .types
+                                    .get_mut_unchecked(&type_key)
+                                    .data
+                                    .constants
+                                    .insert(ident, obj_key);
+                            }
+                        }
+                        _ => (),
+                    }
+                    this.types.named.get_mut_unchecked(&named_key).repr = key;
+                    let obj = this.objects.types.get_mut_unchecked(&type_key);
+                    obj.data.ty.mark_done();
+                    obj.data
+                        .generics
+                        .extend(generic_ctx.scopes.last().unwrap().iter().cloned());
+                    generic_ctx.pop_scope();
+                    self.objects.types.get_mut_unchecked(&type_key)
+                }
+            } else {
+                unreachable!()
+            },
+        )
+    }
+
     fn lower_const(
         &mut self,
         mod_key: Key<ModuleTag>,
@@ -349,137 +447,109 @@ impl Context {
         &mut self,
         path: &[SmolStr],
         mod_key: ModuleKey,
-        generic_context: &mut GenericContext,
+        generic_ctx: &mut GenericContext,
         span: SpanIndex,
     ) -> Result<AnyObjectKey, Error> {
+        enum PathNode {
+            Module(ModuleKey),
+            Object(AnyObjectKey),
+        }
         if path.len() == 1 {
-            match generic_context.find_generic(&path[0]) {
+            match generic_ctx.find_generic(&path[0]) {
                 Some(_) => todo!("toznam"),
                 None => (),
             }
         }
-        let mut current_mod_key = mod_key;
+        let mut current_path_node = PathNode::Module(mod_key);
         for (i, next_stop) in path.iter().enumerate() {
-            let is_last = i == path.len() - 1;
-            let module = self.types.modules.get_unchecked(&current_mod_key);
-            match module.symbol_map.get(next_stop) {
-                Some(AnyObjectKey::Import(obj_key)) => {
-                    current_mod_key = self.objects.imports.get_unchecked(obj_key).data.module
+            match &current_path_node {
+                PathNode::Module(module) => {
+                    let module = self.types.modules.get_unchecked(&module);
+                    match module.symbol_map.get(next_stop) {
+                        Some(AnyObjectKey::Import(obj_key)) => {
+                            current_path_node = PathNode::Module(
+                                self.objects.imports.get_unchecked(obj_key).data.module,
+                            )
+                        }
+                        Some(any_key) => current_path_node = PathNode::Object(*any_key),
+                        _ => Err(Diagnostic {
+                            inner: Errors::ObjectNotFound(path[..i].to_vec()),
+                            span,
+                            module: mod_key,
+                        })?,
+                    }
                 }
-                Some(o) if is_last && next_stop == o.ident(self) => {
-                    return Ok(o.clone());
-                }
-                None => {
-                    return Err(Diagnostic {
-                        inner: Errors::ObjectNotFound(path[..i].to_vec()),
-                        span,
-                        module: mod_key,
-                    })?;
-                }
-                _ => Err(Diagnostic {
-                    inner: Errors::ObjectNotFound(path[..i].to_vec()),
-                    span: module.ast.objects.get_unchecked(todo!()).location,
-                    module: mod_key,
-                })?,
+                PathNode::Object(obj_key) => match obj_key {
+                    AnyObjectKey::Type(type_key) => {
+                        println!("Add generics to const path");
+                        let type_obj = self.lower_type_alias_with_key(generic_ctx, *type_key)?;
+                        match type_obj.data.constants.get(next_stop) {
+                            Some(v) => {
+                                current_path_node = PathNode::Object(AnyObjectKey::Const(*v))
+                            }
+                            _ => Err(Diagnostic {
+                                inner: Errors::ObjectNotFound(path[..i].to_vec()),
+                                span,
+                                module: mod_key,
+                            })?,
+                        }
+                    }
+                    _ => todo!(),
+                },
             }
         }
-        Err(Diagnostic {
-            inner: Errors::ObjectNotFound(path.to_vec()),
-            span,
-            module: mod_key,
-        })
+        match current_path_node {
+            PathNode::Module(_) => todo!("err out"),
+            PathNode::Object(key) => Ok(key),
+        }
     }
 
     fn type_check_const_value(&self, value: &mut ConstValue, ty: &AnyTypeKey) -> bool {
         match (ty, value) {
             (AnyTypeKey::Primitive(PrimitiveType::Char), ConstValue::Char(_)) => true,
-            (
-                AnyTypeKey::Primitive(ty),
-                ConstValue::Number(Number {
-                    size: None,
-                    value: NumberValue::Any(_),
-                }),
-            ) if ty.is_numeric() => true,
-            (
-                AnyTypeKey::Primitive(ty),
-                ConstValue::Number(Number {
-                    size,
-                    value: NumberValue::Any(_),
-                }),
-            ) if ty.number_size() == *size => true,
 
-            (
-                AnyTypeKey::Primitive(ty),
-                ConstValue::Number(Number {
-                    size,
-                    value: NumberValue::Float(_),
-                }),
-            ) if *size == None => match ty.float_size() {
-                Some(s) => {
-                    *size = Some(s);
-                    true
-                }
-                None => false,
-            },
-            (
-                AnyTypeKey::Primitive(ty),
-                ConstValue::Number(Number {
-                    size: Some(size),
-                    value: NumberValue::Float(_),
-                }),
-            ) => match ty.float_size() {
-                Some(s) => *size == s,
-                None => false,
-            },
+            (AnyTypeKey::Primitive(prim), ConstValue::Number(Number { size, value })) => {
+                match value {
+                    NumberValue::Any(_) => match size {
+                        None => prim.is_numeric(),
+                        Some(s) => prim.number_size() == Some(*s),
+                    },
 
-            (
-                AnyTypeKey::Primitive(ty),
-                ConstValue::Number(Number {
-                    size,
-                    value: NumberValue::Int(_),
-                }),
-            ) if *size == None => match ty.float_size() {
-                Some(s) => {
-                    *size = Some(s);
-                    true
-                }
-                None => false,
-            },
-            (
-                AnyTypeKey::Primitive(ty),
-                ConstValue::Number(Number {
-                    size: Some(size),
-                    value: NumberValue::Int(_),
-                }),
-            ) => match ty.float_size() {
-                Some(s) => *size == s,
-                None => false,
-            },
+                    NumberValue::Float(_) => match prim.float_size() {
+                        Some(expected) => match size {
+                            None => {
+                                *size = Some(expected);
+                                true
+                            }
+                            Some(actual) => *actual == expected,
+                        },
+                        None => false,
+                    },
 
-            (
-                AnyTypeKey::Primitive(ty),
-                ConstValue::Number(Number {
-                    size,
-                    value: NumberValue::Uint(_),
-                }),
-            ) if *size == None => match ty.float_size() {
-                Some(s) => {
-                    *size = Some(s);
-                    true
+                    NumberValue::Int(_) => match prim.int_size() {
+                        Some(expected) => match size {
+                            None => {
+                                *size = Some(expected);
+                                true
+                            }
+                            Some(actual) => *actual == expected,
+                        },
+                        None => false,
+                    },
+
+                    NumberValue::Uint(_) => match prim.uint_size() {
+                        Some(expected) => match size {
+                            None => {
+                                *size = Some(expected);
+                                true
+                            }
+                            Some(actual) => *actual == expected,
+                        },
+                        None => false,
+                    },
                 }
-                None => false,
-            },
-            (
-                AnyTypeKey::Primitive(ty),
-                ConstValue::Number(Number {
-                    size: Some(size),
-                    value: NumberValue::Uint(_),
-                }),
-            ) => match ty.float_size() {
-                Some(s) => *size == s,
-                None => false,
-            },
-            (AnyTypeKey::Primitive(ty), ConstValue::Number(_)) if ty.is_numeric() => true,
+            }
+
             _ => false,
         }
     }
@@ -558,7 +628,7 @@ impl ast::Expression {
         &self,
         ctx: &mut Context,
         mod_key: ModuleKey,
-        generic_context: &mut GenericContext,
+        generic_ctx: &mut GenericContext,
         self_def: &Option<ConstValue>,
     ) -> Result<ConstValue, Error> {
         match self.const_reduce().as_ref() {
@@ -580,7 +650,7 @@ impl ast::Expression {
                         match ctx.resolve_const_path(
                             &path,
                             mod_key,
-                            generic_context,
+                            generic_ctx,
                             identifier_path.location,
                         ) {
                             Ok(key) => {
@@ -602,29 +672,7 @@ impl ast::Expression {
                                         panic!("we do not like circles around here")
                                     }
                                     ConstObj { .. } => {
-                                        let module = ctx.types.modules.get_unchecked(&mod_key);
-                                        let (ty, expression) = match module
-                                            .ast
-                                            .objects
-                                            .get_unchecked(&obj.ast_object)
-                                            .inner
-                                            .as_ref()
-                                        {
-                                            ast::Object::Const { ty, expression, .. } => {
-                                                (ty.clone(), expression.clone())
-                                            }
-                                            _ => panic!(),
-                                        };
-                                        ctx.lower_const(
-                                            mod_key,
-                                            generic_context,
-                                            &obj_key,
-                                            &ty,
-                                            &expression,
-                                            &None,
-                                        )
-                                        .unwrap();
-                                        let obj = ctx.objects.constants.get_unchecked(&obj_key);
+                                        let obj = ctx.lower_const_with_key(generic_ctx, obj_key)?;
                                         match &obj.data {
                                             ConstObj {
                                                 value: InitState::Done(v),
@@ -660,8 +708,8 @@ impl ast::Expression {
                     index: l.location.index,
                     len: r.location.len + r.location.index - l.location.index,
                 };
-                let l = l.const_eval(ctx, mod_key, generic_context, self_def)?;
-                let r = r.const_eval(ctx, mod_key, generic_context, self_def)?;
+                let l = l.const_eval(ctx, mod_key, generic_ctx, self_def)?;
+                let r = r.const_eval(ctx, mod_key, generic_ctx, self_def)?;
                 match op.const_apply(&l, &r, mod_key) {
                     Ok(v) => Ok(v),
                     Err(mut e) => {
@@ -679,7 +727,7 @@ impl ast::Type {
         &self,
         ctx: &mut Context,
         module: ModuleKey,
-        generic_context: &mut GenericContext,
+        generic_ctx: &mut GenericContext,
     ) -> Result<AnyTypeKey, Error> {
         let Self { literal, refs } = &self;
         let type_val = match literal.inner.as_ref() {
@@ -689,25 +737,19 @@ impl ast::Type {
                 {
                     if let Some(ty) = PrimitiveType::from_str(&ident.inner) {
                         AnyTypeKey::Primitive(ty)
-                    } else if let Some(ty) = generic_context.find_generic(ident) {
+                    } else if let Some(ty) = generic_ctx.find_generic(ident) {
                         AnyTypeKey::Constraint(*ty)
                     } else {
                         resolve_type_path(
                             ctx,
                             module,
-                            generic_context,
+                            generic_ctx,
                             identifier_path,
                             generic_arguments,
                         )?
                     }
                 } else {
-                    resolve_type_path(
-                        ctx,
-                        module,
-                        generic_context,
-                        identifier_path,
-                        generic_arguments,
-                    )?
+                    resolve_type_path(ctx, module, generic_ctx, identifier_path, generic_arguments)?
                 }
             }
             ast::TypeLiteral::Struct(spans) => {
@@ -722,7 +764,7 @@ impl ast::Type {
                     }
                     parameters.push((
                         ident.as_ref().clone(),
-                        param.ty.lower(ctx, module, generic_context)?,
+                        param.ty.lower(ctx, module, generic_ctx)?,
                     ));
                 }
                 let key = ctx.types.structures.push_unique(StructType { parameters });
@@ -730,7 +772,7 @@ impl ast::Type {
             }
             ast::TypeLiteral::Enum(repr, step, ast_variants) => {
                 let repr = match repr {
-                    Some(repr) => match repr.lower(ctx, module, generic_context)? {
+                    Some(repr) => match repr.lower(ctx, module, generic_ctx)? {
                         AnyTypeKey::Primitive(prim) => prim,
                         _ => todo!("must be prim"),
                     },
@@ -741,7 +783,7 @@ impl ast::Type {
                 let mut last_value = match iter.next() {
                     Some((ident, expr)) => {
                         let value = match expr {
-                            Some(e) => e.const_eval(ctx, module, generic_context, &None)?,
+                            Some(e) => e.const_eval(ctx, module, generic_ctx, &None)?,
                             None => repr.default(),
                         };
                         variants.push((ident.inner.as_ref().clone(), value.clone()));
@@ -751,10 +793,10 @@ impl ast::Type {
                 };
                 for (ident, expr) in iter {
                     let value = match expr {
-                        Some(e) => e.const_eval(ctx, module, generic_context, &Some(last_value))?,
+                        Some(e) => e.const_eval(ctx, module, generic_ctx, &Some(last_value))?,
                         None => match step {
                             Some(step) => {
-                                step.const_eval(ctx, module, generic_context, &Some(last_value))?
+                                step.const_eval(ctx, module, generic_ctx, &Some(last_value))?
                             }
                             None => last_value.autostep(),
                         },
@@ -766,12 +808,13 @@ impl ast::Type {
                 AnyTypeKey::Enum(key)
             }
             ast::TypeLiteral::Array(span, size) => {
-                let ty = span.lower(ctx, module, generic_context)?;
+                let ty = span.lower(ctx, module, generic_ctx)?;
                 let size = match size {
                     Some(const_expr) => {
-                        match const_expr.const_eval(ctx, module, generic_context, &None) {
+                        match const_expr.const_eval(ctx, module, generic_ctx, &None) {
                             Ok(ConstValue::Number(n)) => match n.value {
                                 NumberValue::Uint(n) | NumberValue::Any(n) => Some(n as _),
+                                NumberValue::Int(n) => Some(n as _),
                                 _ => todo!(),
                             },
                             Err(e) => Err(e)?,
@@ -789,7 +832,7 @@ impl ast::Type {
             ast::TypeLiteral::Tuple(spans) => {
                 let mut parameters = Vec::new();
                 for ty in spans {
-                    parameters.push(ty.lower(ctx, module, generic_context)?);
+                    parameters.push(ty.lower(ctx, module, generic_ctx)?);
                 }
                 match parameters.is_empty() {
                     true => AnyTypeKey::Primitive(PrimitiveType::Void),
@@ -810,7 +853,7 @@ impl ast::Type {
 fn resolve_type_path(
     ctx: &mut Context,
     module: Key<ModuleTag>,
-    generic_context: &mut GenericContext,
+    generic_ctx: &mut GenericContext,
     identifier_path: &ast::Span<ast::IdentifierPath>,
     generic_arguments: &Option<ast::Span<Vec<ast::Span<ast::Type>>>>,
 ) -> Result<AnyTypeKey, Diagnostic<Errors>> {
@@ -819,13 +862,13 @@ fn resolve_type_path(
         .iter()
         .map(|p| p.inner.as_ref().clone())
         .collect();
-    let resolved =
-        ctx.resolve_const_path(&path, module, generic_context, identifier_path.location)?;
+    let resolved = ctx.resolve_const_path(&path, module, generic_ctx, identifier_path.location)?;
     Ok(match resolved {
         AnyObjectKey::Type(key) => {
             if let TypeAliasObj {
                 ty: InitState::Done(ty) | InitState::Progress(ty),
                 generics,
+                constants: _,
             } = &mut ctx.objects.types.get_mut_unchecked(&key).data
             {
                 let ty = *ty;
@@ -835,7 +878,7 @@ fn resolve_type_path(
                     None => Vec::new(),
                 };
                 for (idx, (_, constraint)) in generics.clone().iter().enumerate() {
-                    let substitution = gen_args[idx].lower(ctx, module, generic_context)?;
+                    let substitution = gen_args[idx].lower(ctx, module, generic_ctx)?;
                     new = AnyTypeKey::Named(ty).substitute_named(
                         substitution,
                         constraint,

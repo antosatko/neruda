@@ -50,7 +50,9 @@ function im2tuple<T>(v: &m::Im<T>): (T, T) => (v[0], v[1])
 type IPV4_ADDR = [bool; BYTE * 4]
 const BYTE: u32 = 8
 
-type Bits = enum (-2 * self) {
+type _128_BYTES = [u8; Bits::Eight]
+
+type Bits = enum (2 * self): u32 {
     Zero
     One = 1
     Two
@@ -61,3 +63,11 @@ type Bits = enum (-2 * self) {
     Seven
     Eight
 }
+
+type Buffer = [u32; 1920 * 1080]
+type BufferType = enum {
+    Front
+    Back
+    Count
+}
+type DoubleBuffer = [Buffer; BufferType::Count]

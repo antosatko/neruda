@@ -84,6 +84,7 @@ pub struct FunctionObj {
     pub return_type: InitState<AnyTypeKey, ()>,
     pub params: HashMap<SmolStr, InitState<AnyTypeKey, ()>>,
     pub generics: Vec<ConstraintKey>,
+    pub type_of: InitState<AnyTypeKey, ()>,
 }
 
 #[derive(Default)]

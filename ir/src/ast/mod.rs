@@ -725,7 +725,7 @@ impl ConstValue {
         match self {
             ConstValue::Structure(_) => todo!(),
             ConstValue::Number(number) => Cow::Owned(match number.value {
-                NumberValue::Float(v) => v.to_string(),
+                NumberValue::Float(v) => format!("{v:.1}"),
                 NumberValue::Int(v) => v.to_string(),
                 NumberValue::Any(v) => v.to_string(),
                 NumberValue::Uint(v) => v.to_string(),

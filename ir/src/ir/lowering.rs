@@ -8,11 +8,11 @@ use smol_str::{SmolStr, ToSmolStr};
 use crate::ast::{self, ConstValue, Number, NumberValue, SpanIndex};
 use crate::ir::objects::{
     AnyObject, AnyObjectKey, ComponentObj, ComponentObjKey, ConstObj, ConstObjKey, FunctionObj,
-    ImportObj, InitState, Module, TraitObj, TypeAliasObj, TypeAliasObjKey,
+    FunctionObjKey, ImportObj, InitState, Module, TraitObj, TypeAliasObj, TypeAliasObjKey,
 };
 use crate::ir::types::{
-    AnyTypeKey, ArrayType, ConstraintKey, ConstraintType, EnumType, ModuleKey, ModuleTag,
-    PrimitiveType, RefType, StructType, TraitType, TupleType,
+    AnyTypeKey, ArrayType, ConstraintKey, ConstraintType, EnumType, FunctionType, ModuleKey,
+    ModuleTag, PrimitiveType, RefType, StructType, TraitType, TupleType,
 };
 use crate::ir::{Context, Diagnostic, Error, Errors};
 
@@ -69,6 +69,7 @@ impl Context {
                                     return_type: InitState::Uninitialized,
                                     params: HashMap::new(),
                                     generics: Vec::new(),
+                                    type_of: InitState::Uninitialized,
                                 },
                                 identifier: ident.inner.as_ref().clone(),
                                 ast_object: obj_key,
@@ -164,6 +165,65 @@ impl Context {
         let component_keys: Vec<ComponentObjKey> = self.objects.components.iter_keys().collect();
         for component_key in component_keys {
             self.lower_component_with_key(&mut generic_ctx, component_key)?;
+        }
+
+        let function_keys: Vec<FunctionObjKey> = self.objects.functions.iter_keys().collect();
+        for function_key in function_keys {
+            let mut generic_ctx = GenericContext::default();
+            let obj = self.objects.functions.get_unchecked(&function_key);
+            let mod_key = obj.module;
+            let module = self.types.modules.get_unchecked(&mod_key);
+
+            match self
+                .ast
+                .get(&module.path)
+                .unwrap()
+                .objects
+                .get_unchecked(&obj.ast_object)
+                .clone()
+                .deref()
+            {
+                ast::Object::Function(ast::Function {
+                    ident: _,
+                    generics,
+                    parameters,
+                    return_type,
+                    body: _,
+                    docs: _,
+                }) => {
+                    generic_ctx.push_scope(&generics, self, &mod_key)?;
+                    let return_type = match return_type {
+                        Some(ty) => ty.lower(self, mod_key, &mut generic_ctx)?,
+                        None => AnyTypeKey::Primitive(PrimitiveType::Void),
+                    };
+                    let fun = self.objects.functions.get_mut_unchecked(&function_key);
+                    fun.data.return_type = InitState::Done(return_type);
+
+                    let mut params = HashMap::new();
+                    for param in parameters {
+                        let ident = param.ident.inner.deref().clone();
+                        let ty = param.ty.lower(self, mod_key, &mut generic_ctx)?;
+                        params.insert(ident, InitState::Done(ty));
+                    }
+                    let fun = self.objects.functions.get_mut_unchecked(&function_key);
+                    fun.data.params = params;
+
+                    let type_of = FunctionType {
+                        parameters: fun
+                            .data
+                            .params
+                            .iter()
+                            .map(|(_, ty)| *ty.get_done())
+                            .collect(),
+                        returns: *fun.data.return_type.get_done(),
+                    };
+                    let type_of = AnyTypeKey::Function(self.types.functions.push_unique(type_of));
+                    fun.data.type_of = InitState::Done(type_of);
+
+                    generic_ctx.pop_scope();
+                }
+                _ => unreachable!(),
+            }
         }
         /*
         let obj_keys: Vec<AnyObjectKey> = self.objects.iter_keys().collect();
@@ -481,7 +541,7 @@ impl Context {
                 }
                 PathNode::Object(obj_key) => match obj_key {
                     AnyObjectKey::Type(type_key) => {
-                        println!("Add generics to const path");
+                        dbg!("Add generics to const path",);
                         let type_obj = self.lower_type_alias_with_key(generic_ctx, *type_key)?;
                         match type_obj.data.constants.get(next_stop) {
                             Some(v) => {
@@ -499,7 +559,11 @@ impl Context {
             }
         }
         match current_path_node {
-            PathNode::Module(_) => todo!("err out"),
+            PathNode::Module(module) => Err(Diagnostic {
+                span,
+                module: mod_key,
+                inner: Errors::EvalModule(path.to_vec(), module),
+            }),
             PathNode::Object(key) => Ok(key),
         }
     }
@@ -575,7 +639,7 @@ impl GenericContext {
                         .clone();
                     let trt_key = match obj_key {
                         AnyObjectKey::Trait(k) => k,
-                        _ => todo!("no to jsem necekal"),
+                        k => todo!("no to jsem necekal: {k:?}"),
                     };
                     let ty = match ctx.objects.traits.get_unchecked(&trt_key).data {
                         TraitObj {
@@ -687,7 +751,11 @@ impl ast::Expression {
                                 if path == ["self"] {
                                     match self_def {
                                         Some(v) => Ok(v.clone()),
-                                        None => todo!("self undefined"),
+                                        None => Err(Diagnostic {
+                                            span: value.location,
+                                            module: mod_key,
+                                            inner: Errors::UndefinedSelf,
+                                        }),
                                     }
                                 } else {
                                     return Err(e);
@@ -760,7 +828,7 @@ impl ast::Type {
                         .iter()
                         .any(|(p_ident, _)| p_ident == ident.as_ref())
                     {
-                        panic!("duplicate parameter identifiers")
+                        todo!("duplicate parameter identifiers")
                     }
                     parameters.push((
                         ident.as_ref().clone(),
@@ -774,7 +842,11 @@ impl ast::Type {
                 let repr = match repr {
                     Some(repr) => match repr.lower(ctx, module, generic_ctx)? {
                         AnyTypeKey::Primitive(prim) => prim,
-                        _ => todo!("must be prim"),
+                        got => Err(Diagnostic {
+                            span: repr.location,
+                            module,
+                            inner: Errors::NonPrimitiveType { got },
+                        })?,
                     },
                     None => PrimitiveType::I32,
                 };
@@ -789,7 +861,7 @@ impl ast::Type {
                         variants.push((ident.inner.as_ref().clone(), value.clone()));
                         value
                     }
-                    None => panic!("handle pls"),
+                    None => todo!("handle pls"),
                 };
                 for (ident, expr) in iter {
                     let value = match expr {
@@ -815,10 +887,20 @@ impl ast::Type {
                             Ok(ConstValue::Number(n)) => match n.value {
                                 NumberValue::Uint(n) | NumberValue::Any(n) => Some(n as _),
                                 NumberValue::Int(n) => Some(n as _),
-                                _ => todo!(),
+                                value => Err(Diagnostic {
+                                    span: const_expr.location,
+                                    module,
+                                    inner: Errors::ExpectedNumericConst {
+                                        got: ConstValue::Number(Number { value, size: None }),
+                                    },
+                                })?,
                             },
                             Err(e) => Err(e)?,
-                            _ => todo!(),
+                            Ok(got) => Err(Diagnostic {
+                                span: const_expr.location,
+                                module,
+                                inner: Errors::ExpectedNumericConst { got },
+                            })?,
                         }
                     }
                     None => None,
@@ -879,10 +961,13 @@ fn resolve_type_path(
                 };
                 for (idx, (_, constraint)) in generics.clone().iter().enumerate() {
                     let substitution = gen_args[idx].lower(ctx, module, generic_ctx)?;
+                    let span = gen_args[idx].location;
                     new = AnyTypeKey::Named(ty).substitute_named(
                         substitution,
                         constraint,
                         &mut ctx.types,
+                        module,
+                        span,
                     )?;
                 }
                 new

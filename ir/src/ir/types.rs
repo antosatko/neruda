@@ -15,7 +15,7 @@ pub struct FunctionTag;
 #[derive(PartialEq, Debug)]
 pub struct FunctionType {
     pub returns: AnyTypeKey,
-    pub parameters: Vec<(SmolStr, AnyTypeKey)>,
+    pub parameters: Vec<AnyTypeKey>,
 }
 
 pub type ArrayArena = Arena<ArrayType, ArrayTag>;
@@ -367,11 +367,11 @@ impl FunctionType {
     pub fn stringify(&self, types: &Types) -> String {
         let mut out = String::from("function(");
         let mut iter = self.parameters.iter();
-        if let Some((ident, ty)) = iter.next() {
-            out.push_str(&format!("{ident}: {}", ty.stringify(types)));
+        if let Some(ty) = iter.next() {
+            out.push_str(&format!("{}", ty.stringify(types)));
         }
-        for (ident, ty) in iter {
-            out.push_str(&format!(", {ident}: {}", ty.stringify(types)));
+        for ty in iter {
+            out.push_str(&format!(", {}", ty.stringify(types)));
         }
         out.push(')');
         out.push_str(&format!(": {}", self.returns.stringify(types)));
@@ -473,12 +473,15 @@ impl AnyTypeKey {
         substitution: AnyTypeKey,
         cons: &ConstraintKey,
         types: &mut Types,
+        module: ModuleKey,
+        span: SpanIndex,
     ) -> Result<AnyTypeKey, Error> {
         match self {
             AnyTypeKey::Function(key) => todo!(),
             AnyTypeKey::Array(key) => {
                 let ArrayType { element_type, size } = *types.arrays.get_unchecked(key);
-                let new_inner = element_type.substitute_named(substitution, cons, types)?;
+                let new_inner =
+                    element_type.substitute_named(substitution, cons, types, module, span)?;
                 let new = ArrayType {
                     size,
                     element_type: new_inner,
@@ -512,26 +515,39 @@ impl AnyTypeKey {
                     .get_unchecked(key)
                     .inner
                     .clone()
-                    .substitute_named(substitution, cons, types)?;
+                    .substitute_named(substitution, cons, types, module, span)?;
                 Ok(AnyTypeKey::Reference(
                     types.references.push_unique(RefType { inner: resolved }),
                 ))
             }
-            AnyTypeKey::Struct(key) => todo!(),
+            AnyTypeKey::Struct(key) => {
+                let original = types.structures.get_unchecked(key);
+                let mut parameters = Vec::with_capacity(original.parameters.len());
+                for i in 0..original.parameters.len() {
+                    let (ident, ty) = types.structures.get_unchecked(key).parameters[i].clone();
+                    let s = ty
+                        .substitute_named(substitution, cons, types, module, span)
+                        .unwrap_or(ty);
+                    parameters.push((ident, s));
+                }
+                Ok(AnyTypeKey::Struct(
+                    types.structures.push_unique(StructType { parameters }),
+                ))
+            }
             AnyTypeKey::Named(key) => types
                 .named
                 .get_unchecked(key)
                 .repr
                 .clone()
-                .substitute_named(substitution, cons, types),
+                .substitute_named(substitution, cons, types, module, span),
             AnyTypeKey::ModuleRef(_)
             | AnyTypeKey::Trait(_)
             | AnyTypeKey::Primitive(_)
             | AnyTypeKey::Constraint(_)
             | AnyTypeKey::Enum(_) => {
                 return Err(crate::ir::Diagnostic {
-                    span: SpanIndex { index: 0, len: 0 },
-                    module: todo!(),
+                    span,
+                    module,
                     inner: Errors::CouldNotSubstituteType(*self),
                 });
             }

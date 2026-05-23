@@ -50,6 +50,14 @@ pub enum Errors {
         left: ConstValue,
         right: ConstValue,
     },
+    EvalModule(Vec<SmolStr>, ModuleKey),
+    UndefinedSelf,
+    NonPrimitiveType {
+        got: AnyTypeKey,
+    },
+    ExpectedNumericConst {
+        got: ConstValue,
+    },
 }
 
 #[derive(Debug)]

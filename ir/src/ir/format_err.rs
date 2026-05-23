@@ -100,6 +100,29 @@ impl Errors {
                 ),
                 format!("Not applicable"),
             ),
+            Errors::EvalModule(path, _) => (
+                "408",
+                format!("Could not evaluate a module {}", path.join("::")),
+                format!("Module evaluation"),
+            ),
+            Errors::UndefinedSelf => (
+                "409",
+                format!("Self is not defined in this context"),
+                format!("Self undefined"),
+            ),
+            Errors::NonPrimitiveType { got } => (
+                "410",
+                format!(
+                    "Context only allows primitive types, got: {}",
+                    got.stringify(&ctx.types)
+                ),
+                format!("Non primitive type"),
+            ),
+            Errors::ExpectedNumericConst { got } => (
+                "411",
+                format!("Expected a numeric constant, got: {}", got.stringify()),
+                format!("Expected numeric"),
+            ),
         }
     }
 }

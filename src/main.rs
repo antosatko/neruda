@@ -1,5 +1,5 @@
 use clap::{Parser, ValueEnum};
-use ir::ir::{Context, types::Types};
+use ir::const_stage::{Context, objects::Objects, types::Types};
 use parser::{
     grammar::gen_parser,
     lowering::{self, ModuleOk},
@@ -121,6 +121,10 @@ fn main() {
                 }
             };
 
+            for warn in &ir_ctx.diagnostics.warnings {
+                warn.print(&ir_ctx).unwrap();
+            }
+
             {
                 let Types {
                     functions,
@@ -173,6 +177,22 @@ fn main() {
                 println!("named types:");
                 for t in named.iter() {
                     println!("\t- {}", t.stringify(&ir_ctx.types));
+                }
+            }
+            {
+                let Objects {
+                    imports,
+                    constants,
+                    types,
+                    traits,
+                    components,
+                    functions,
+                } = &ir_ctx.objects;
+                for fun in functions.iter() {
+                    println!("Function: {}", fun.identifier);
+                    fun.data.ir.get_done().variables.iter().for_each(|v| {
+                        println!("\tvar {}: {}", *v.identifier, v.ty.stringify(&ir_ctx.types))
+                    });
                 }
             }
         }

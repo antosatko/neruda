@@ -78,3 +78,10 @@ type DoubleBuffer<T> = struct {
 }
 
 type DrawSurface = DoubleBuffer<DrawBuffer>
+
+
+function nevimco(): i32 {
+    var a: i32 = 7
+    var b: m::Im<DrawSurface>
+    return a * 8
+}

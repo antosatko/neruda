@@ -5,7 +5,7 @@ use smol_str::{SmolStr, ToSmolStr};
 
 use crate::{
     ast::{ConstValue, Number, NumberValue, SpanIndex},
-    ir::{Error, Errors, objects::Module},
+    const_stage::{Error, Errors, objects::Module},
 };
 
 pub type FunctionArena = Arena<FunctionType, FunctionTag>;
@@ -545,7 +545,7 @@ impl AnyTypeKey {
             | AnyTypeKey::Primitive(_)
             | AnyTypeKey::Constraint(_)
             | AnyTypeKey::Enum(_) => {
-                return Err(crate::ir::Diagnostic {
+                return Err(crate::const_stage::Diagnostic {
                     span,
                     module,
                     inner: Errors::CouldNotSubstituteType(*self),

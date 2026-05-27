@@ -5,7 +5,7 @@ use crate::{
         ConstValue, Diagnostics, Expression, Literal, LoweringDiagnostic, Number, NumberValue,
         Operator, Span, SpanIndex, UnaryOp, Value,
     },
-    ir::{Diagnostic, Error, Errors, types::ModuleKey},
+    const_stage::{Diagnostic, Error, Errors, types::ModuleKey},
 };
 
 impl Expression {

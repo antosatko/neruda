@@ -437,8 +437,11 @@ fn block(
             }
 
             "return" => {
-                let expr = expression(src, stmt_node.expect_node("expression"), diagnostics);
-                span(Statement::Return { expression: expr? }, stmt_node)
+                let expr = match stmt_node.try_get_node("expression") {
+                    Some(e) => Some(expression(src, e, diagnostics)?),
+                    None => None,
+                };
+                span(Statement::Return { expression: expr }, stmt_node)
             }
 
             "loop" => {

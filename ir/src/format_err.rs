@@ -1,8 +1,8 @@
-use std::fmt::Write;
+use std::{fmt::Write, ops::Deref};
 
 use annotate_snippets::{AnnotationKind, Group, Level, Renderer, Snippet, renderer::DecorStyle};
 
-use crate::ir::{Context, Error, Errors};
+use crate::const_stage::{Context, Diagnostic, Error, Errors, Warnings};
 
 const TERM_WIDTH: usize = 60;
 
@@ -23,7 +23,7 @@ impl Error {
         }
         let report = Group::with_title(
             Level::ERROR
-                .with_name("syntax error")
+                .with_name("semantic error")
                 .primary_title(header)
                 .id(id),
         )
@@ -122,6 +122,72 @@ impl Errors {
                 "411",
                 format!("Expected a numeric constant, got: {}", got.stringify()),
                 format!("Expected numeric"),
+            ),
+            Errors::DuplicateIdentifier(ident) => (
+                "412",
+                format!("Identifier {ident} defined multiple times"),
+                format!("Duplicate Identifier"),
+            ),
+        }
+    }
+}
+
+impl Diagnostic<Warnings> {
+    pub fn write(&self, w: &mut impl Write, ctx: &Context) -> std::fmt::Result {
+        let (id, header, snippet) = self.inner.id_header_snippet_report(ctx);
+        let span = self.span.index..self.span.index + self.span.len;
+        let src = &ctx.types.modules.get_unchecked(&self.module).ast.src;
+        let mut snippet = Snippet::source(src.as_ref())
+            .annotation(AnnotationKind::Primary.span(span).label(snippet))
+            // .annotation(
+            //     AnnotationKind::Visible
+            //         .span(self.location.index - 5..self.location.index + self.location.len),
+            // )
+            .fold(true);
+        if let Some(file) = &ctx.types.modules.get_unchecked(&self.module).ast.path {
+            snippet = snippet.path(file.to_str());
+        }
+        let report = Group::with_title(
+            Level::WARNING
+                .with_name("semantic warning")
+                .primary_title(header)
+                .id(id),
+        )
+        .element(snippet);
+        let render = Renderer::styled()
+            .decor_style(DecorStyle::Unicode)
+            .term_width(TERM_WIDTH)
+            .render(&[report]);
+        write!(w, "{render}")
+    }
+
+    pub fn print(&self, ctx: &Context) -> std::fmt::Result {
+        let mut msg = String::new();
+        self.write(&mut msg, ctx)?;
+        println!("{msg}");
+        Ok(())
+    }
+}
+
+impl Warnings {
+    pub fn id_header_snippet_report(&self, ctx: &Context) -> (&'static str, String, String) {
+        match self {
+            Self::VariableUnused { function, var } => (
+                "500",
+                format!(
+                    "Variable '{}' is never used",
+                    ctx.objects
+                        .functions
+                        .get_unchecked(function)
+                        .data
+                        .ir
+                        .get_done()
+                        .variables
+                        .get_unchecked(var)
+                        .identifier
+                        .deref()
+                ),
+                format!("Unused variable"),
             ),
         }
     }

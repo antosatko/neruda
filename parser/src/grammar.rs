@@ -935,7 +935,7 @@ pub fn gen_parser<'src>() -> Parser<'static> {
         .new_node("return")
         .rules([
             is(keyword("return")).commit(),
-            is(expression).set("expression"),
+            maybe(expression).set("expression"),
             is(end_stmt),
         ])
         .variables([node_var("expression")])

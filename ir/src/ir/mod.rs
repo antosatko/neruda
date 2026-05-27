@@ -1,97 +1,79 @@
-#[cfg(feature = "format")]
-pub mod format_err;
-pub mod lowering;
-pub mod objects;
-pub mod types;
+use std::{collections::HashMap, ops::Deref};
 
-use std::{collections::HashMap, sync::Arc};
-
+use arena::{Arena, Key};
 use smol_str::SmolStr;
 
+pub mod lowerng;
+
 use crate::{
-    ast::{self, ConstValue, Operator, SpanIndex},
-    ir::{
-        objects::{AnyObjectKey, Objects},
-        types::{AnyTypeKey, AutoTypes, ModuleKey},
+    ast::Span,
+    const_stage::{
+        Error, Errors,
+        types::{AnyTypeKey, ModuleKey},
     },
 };
 
-use self::types::Types;
+const ERR_VAR_SHADOWING: bool = true;
 
-#[derive(Default, Debug)]
-pub struct Diagnostics {
-    pub warnings: Vec<Warning>,
+pub type VariableKey = Key<VariableTag>;
+pub type VariableArena = Arena<Variable, VariableTag>;
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+pub struct VariableTag;
+#[derive(Debug)]
+pub struct Variable {
+    pub identifier: Span<SmolStr>,
+    pub ty: AnyTypeKey,
+    pub used: bool,
+}
+
+pub struct BlockCtx {
+    pub scopes: Vec<HashMap<SmolStr, VariableKey>>,
 }
 
 #[derive(Debug)]
-pub struct Diagnostic<T> {
-    pub span: SpanIndex,
-    pub module: ModuleKey,
-    pub inner: T,
-}
-
-pub type Error = Diagnostic<Errors>;
-pub type Warning = Diagnostic<Warnings>;
-
-#[derive(Debug)]
-pub enum Errors {
-    IllegalType(AnyObjectKey),
-    TypeNotFound(Vec<SmolStr>),
-    ObjectNotFound(Vec<SmolStr>),
-    TypeMismatch {
-        expected: AnyTypeKey,
-        got: AnyTypeKey,
-    },
-    NonConstraintType(AnyObjectKey),
-    CouldNotSubstituteType(AnyTypeKey),
-    NotConst,
-    CanNotApplyConst {
-        op: Operator,
-        left: ConstValue,
-        right: ConstValue,
-    },
-    EvalModule(Vec<SmolStr>, ModuleKey),
-    UndefinedSelf,
-    NonPrimitiveType {
-        got: AnyTypeKey,
-    },
-    ExpectedNumericConst {
-        got: ConstValue,
-    },
+pub struct FunctionIr {
+    pub variables: VariableArena,
+    pub instructions: Vec<Instruction>,
 }
 
 #[derive(Debug)]
-pub enum Warnings {}
+pub enum Instruction {}
 
-pub struct Context {
-    pub types: Types,
-    pub objects: Objects,
-    pub auto_types: AutoTypes,
-    pub ast: HashMap<Vec<SmolStr>, Arc<ast::Module>>,
-    pub diagnostics: Diagnostics,
-}
+impl BlockCtx {
+    pub fn push_scope(&mut self) {
+        self.scopes.push(HashMap::new());
+    }
 
-impl Context {
-    pub fn from_ast(ast: HashMap<Vec<SmolStr>, Arc<ast::Module>>) -> Result<Self, (Self, Error)> {
-        let mut types = Types::default();
-        let auto_types = AutoTypes::new(&mut types);
-        let mut this = Self {
-            types,
-            objects: Default::default(),
-            auto_types,
-            diagnostics: Diagnostics::default(),
-            ast,
-        };
+    pub fn pop_scope(&mut self) {
+        self.scopes.pop();
+    }
 
-        if let Err(e) = this.lower_import_stage() {
-            return Err((this, e));
+    pub fn find_var(&self, ident: &str) -> Option<VariableKey> {
+        self.scopes
+            .iter()
+            .rev()
+            .find_map(|s| s.get(ident).map(|v| *v))
+    }
+
+    pub fn declare_var(
+        &mut self,
+        ident: &Span<SmolStr>,
+        module: &ModuleKey,
+        key: VariableKey,
+    ) -> Result<(), Error> {
+        if ERR_VAR_SHADOWING && self.find_var(&ident).is_some() {
+            return Err(Error {
+                inner: Errors::DuplicateIdentifier(ident.deref().clone()),
+                module: *module,
+                span: ident.location,
+            });
         }
-
-        if let Err(e) = this.lower_const_stage() {
-            return Err((this, e));
+        match self.scopes.last_mut() {
+            Some(scope) => {
+                scope.insert(ident.deref().clone(), key);
+                Ok(())
+            }
+            None => unreachable!("Scope expected to exist for variable declaration"),
         }
-        // next stages here
-
-        Ok(this)
     }
 }

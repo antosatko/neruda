@@ -5,10 +5,12 @@ use smol_str::SmolStr;
 
 use crate::{
     ast::{self, ConstValue},
-    ir::{
+    const_stage::{
         Context,
         types::{AnyTypeKey, ConstraintKey, ModuleKey, NamedTypeKey, TraitKey},
     },
+    generics::GScopeKey,
+    ir::FunctionIr,
 };
 
 #[derive(Debug)]
@@ -53,7 +55,7 @@ pub type TypeAliasObjArena = Arena<AnyObject<TypeAliasObj>, TypeAliasObjTag>;
 #[derive(Debug)]
 pub struct TypeAliasObj {
     pub ty: InitState<NamedTypeKey>,
-    pub generics: Vec<(SmolStr, ConstraintKey)>,
+    pub generics: InitState<GScopeKey, ()>,
     pub constants: HashMap<SmolStr, ConstObjKey>,
 }
 
@@ -85,6 +87,7 @@ pub struct FunctionObj {
     pub params: HashMap<SmolStr, InitState<AnyTypeKey, ()>>,
     pub generics: Vec<ConstraintKey>,
     pub type_of: InitState<AnyTypeKey, ()>,
+    pub ir: InitState<FunctionIr, ()>,
 }
 
 #[derive(Default)]
@@ -112,6 +115,7 @@ pub struct FunctionData {
     pub return_type: InitState<AnyTypeKey, ()>,
     pub params: HashMap<SmolStr, InitState<AnyTypeKey, ()>>,
     pub generics: Vec<ConstraintKey>,
+    pub ir: InitState<FunctionIr, ()>,
 }
 
 impl<T> AnyObject<T> {

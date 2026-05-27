@@ -13,7 +13,7 @@ use std::{
 use arena::{Arena, Key};
 use smol_str::SmolStr;
 
-use crate::ir::types::PrimitiveType;
+use crate::const_stage::types::PrimitiveType;
 
 #[derive(Debug, Clone)]
 pub enum LoweringWarning {
@@ -275,7 +275,7 @@ pub enum Statement {
     },
 
     Return {
-        expression: Span<Expression>,
+        expression: Option<Span<Expression>>,
     },
 
     Break {

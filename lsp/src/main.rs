@@ -56,7 +56,7 @@ pub enum IndexErr<'a> {
     Lex(PreprocessorError),
     Parse(ParseError<'a>),
     Lowering(ir::ast::Span<LoweringError>),
-    Ir(ir::ir::Error),
+    Ir(ir::const_stage::Error),
 }
 
 pub fn index_file<'p, 'src>(
@@ -514,7 +514,9 @@ impl IndexedWalk for ir::ast::Span<Statement> {
             }
             Statement::Return { expression } => {
                 spans.push(self.span_word(Types::Keyword, line_index, "return"));
-                expression.index(line_index, spans);
+                if let Some(e) = expression {
+                    e.index(line_index, spans);
+                }
             }
             Statement::Expr { expression } => expression.index(line_index, spans),
         }

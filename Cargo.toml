@@ -1,5 +1,5 @@
 [workspace]
-members = ["codegen","ir", "lsp", "parser", "runtime"]
+members = ["ir", "lsp", "parser", "runtime"]
 
 [package]
 name = "neruda"

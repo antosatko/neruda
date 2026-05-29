@@ -505,31 +505,29 @@ pub fn gen_parser<'src>() -> Parser<'static> {
         .variables([IDENTIFIER_VAR, node_var("expression")])
         .build();
 
+    let ident_path_literal = parser
+        .grammar
+        .new_node("identifier path literal")
+        .rules([
+            is(ident_path).set(IDENTIFIER).commit(),
+            maybe(node("generics")).set("generics"),
+        ])
+        .variables([IDENTIFIER_VAR, node_var("generics")])
+        .build();
+
     let struct_literal = parser
         .grammar
         .new_node("struct literal")
         .rules([
+            is(keyword("struct")).commit(),
+            maybe(ident_path_literal).set("type"),
             is(token("{")).commit(),
             loop_().then([is_one_of([
                 option(named_argument).set("arguments"),
                 option(token("}")).return_node(),
             ])]),
         ])
-        .variables([list_var("arguments")])
-        .build();
-
-    let ident_path_literal = parser
-        .grammar
-        .new_node("identifier path literal")
-        .rules([
-            is_one_of([
-                option(ident_path).set(IDENTIFIER),
-                option(keyword("struct")),
-            ])
-            .commit(),
-            maybe(struct_literal).set("struct literal"),
-        ])
-        .variables([IDENTIFIER_VAR, node_var("struct literal")])
+        .variables([list_var("arguments"), node_var("type")])
         .build();
 
     let literals = parser
@@ -538,6 +536,7 @@ pub fn gen_parser<'src>() -> Parser<'static> {
         .options([
             ident_path_literal,
             complex("string"),
+            struct_literal,
             complex("char"),
             array_literal,
             tuple_literal,
@@ -867,8 +866,13 @@ pub fn gen_parser<'src>() -> Parser<'static> {
                 option(token(")")).fail(&grammar_errs::EMPTY_TYPE_DECLARATION),
                 option(type_).set("type"),
             ]),
+            maybe(token("=")).then([is(expression).set("default value")]),
         ])
-        .variables([node_var("identifier"), node_var("type")])
+        .variables([
+            node_var("identifier"),
+            node_var("type"),
+            node_var("default value"),
+        ])
         .build();
 
     let parameter_list = parser

@@ -1,6 +1,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use arena::{Arena, Key};
+use arena_scope::ScopeKey;
 use smol_str::SmolStr;
 
 use crate::{
@@ -9,7 +10,6 @@ use crate::{
         Context,
         types::{AnyTypeKey, ConstraintKey, ModuleKey, NamedTypeKey, TraitKey},
     },
-    generics::GScopeKey,
     ir::FunctionIr,
 };
 
@@ -55,7 +55,7 @@ pub type TypeAliasObjArena = Arena<AnyObject<TypeAliasObj>, TypeAliasObjTag>;
 #[derive(Debug)]
 pub struct TypeAliasObj {
     pub ty: InitState<NamedTypeKey>,
-    pub generics: InitState<GScopeKey, ()>,
+    pub generics: InitState<ScopeKey, ()>,
     pub constants: HashMap<SmolStr, ConstObjKey>,
 }
 

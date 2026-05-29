@@ -26,16 +26,18 @@ async fn main() {
         client,
         document_map: DashMap::new(),
         parser: gen_parser(),
+        workspace_root: DashMap::new(),
     });
 
     Server::new(stdin, stdout, socket).serve(service).await;
 }
+
 #[derive(Debug, Copy, Clone)]
 pub struct Span {
-    len: usize,
-    line: usize,
-    column: usize,
-    ty: u8,
+    pub len: usize,
+    pub line: usize,
+    pub column: usize,
+    pub ty: u8,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -56,7 +58,6 @@ pub enum IndexErr<'a> {
     Lex(PreprocessorError),
     Parse(ParseError<'a>),
     Lowering(ir::ast::Span<LoweringError>),
-    Ir(ir::const_stage::Error),
 }
 
 pub fn index_file<'p, 'src>(
@@ -75,7 +76,9 @@ where
         Ok(t) => t,
         Err(e) => return Err(IndexErr::Lex(e)),
     };
+
     index_tokens(&tokens, &mut spans);
+
     let ast = match parser.parse(&tokens, src) {
         Ok(m) => m,
         Err(e) => return Err(IndexErr::Parse(e)),
@@ -107,16 +110,21 @@ impl IntoSpan for Token<'_> {
 
 fn index_tokens(tokens: &Vec<Token>, spans: &mut Vec<Span>) {
     let line_index = &LineIndex::new("");
+
     for token in tokens {
         match &token.kind {
             ruparse::lexer::TokenKinds::Complex(t) => match *t {
                 "tl docstr" | "docstr" | "comment" => {
                     spans.push(token.span(Types::Comment, line_index))
                 }
+
                 "numeric" | "float" => spans.push(token.span(Types::Number, line_index)),
+
                 "char" | "string" => spans.push(token.span(Types::String, line_index)),
+
                 a => panic!("got a: {a}"),
             },
+
             _ => (),
         }
     }
@@ -129,6 +137,7 @@ trait IndexedWalk {
 trait IntoSpan {
     #[must_use]
     fn span(&self, ty: Types, line_index: &LineIndex) -> Span;
+
     #[must_use]
     fn span_word(&self, ty: Types, line_index: &LineIndex, word: &str) -> Span {
         let mut this = self.span(ty, line_index);
@@ -140,6 +149,7 @@ trait IntoSpan {
 impl<T> IntoSpan for ir::ast::Span<T> {
     fn span(&self, ty: Types, line_index: &LineIndex) -> Span {
         let LineCol { line, col } = line_index.line_col(TextSize::new(self.location.index as _));
+
         Span {
             len: self.location.len,
             line: line as usize,
@@ -635,25 +645,33 @@ impl IndexedWalk for ir::ast::Span<Literal> {
     fn index(&self, line_index: &LineIndex, spans: &mut Vec<Span>) {
         match self.inner.as_ref() {
             Literal::Identifier(path) => {
-                for ident in &path.path {
+                for ident in &path.path.path {
                     spans.push(ident.span(Types::Ident, line_index));
+                }
+                if let Some(g) = &path.generics {
+                    for arg in g.inner.as_ref() {
+                        arg.index(line_index, spans);
+                    }
                 }
             }
             Literal::Array(exprs) | Literal::Tuple(exprs) => {
                 exprs.iter().for_each(|e| e.index(line_index, spans));
             }
-            Literal::Structure(path, args) => {
-                match path {
-                    Ok(p) => {
-                        for ident in &p.path {
-                            spans.push(ident.span(Types::Ident, line_index));
-                        }
-                    }
-                    Err(kw) => spans.push(kw.0.span_word(Types::Keyword, line_index, "struct")),
-                }
-                for arg in args {
+            Literal::Structure { kw, ty, fields } => {
+                spans.push(kw.0.span_word(Types::Keyword, line_index, "struct"));
+                for arg in fields {
                     spans.push(arg.0.span(Types::Ident, line_index));
                     arg.1.index(line_index, spans);
+                }
+                if let Some(ty) = ty {
+                    for ident in &ty.path.path {
+                        spans.push(ident.span(Types::Ident, line_index));
+                    }
+                    if let Some(g) = &ty.generics {
+                        for arg in g.inner.as_ref() {
+                            arg.index(line_index, spans);
+                        }
+                    }
                 }
             }
             Literal::Number(_) | Literal::String(_) | Literal::Char(_) => (),

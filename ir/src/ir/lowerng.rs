@@ -7,7 +7,7 @@ use crate::{
     const_stage::{
         Context, Diagnostic, Error, Warnings,
         objects::{FunctionObjKey, InitState},
-        types::{AnyTypeKey, ModuleKey},
+        types::ModuleKey,
     },
     ir::{BlockCtx, FunctionIr, Variable},
 };

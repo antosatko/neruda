@@ -78,12 +78,12 @@ impl Errors {
             }
             Errors::TypeNotFound(smol_strs) => (
                 "404",
-                format!("Type {} not found", smol_strs.join("::")),
+                format!("Type '{}' not found", smol_strs.join("::")),
                 format!("Unknown"),
             ),
             Errors::ObjectNotFound(smol_strs) => (
                 "405",
-                format!("Object {} not found", smol_strs.join("::")),
+                format!("Object '{}' not found", smol_strs.join("::")),
                 format!("Unknown"),
             ),
             Errors::NotConst => (
@@ -102,7 +102,7 @@ impl Errors {
             ),
             Errors::EvalModule(path, _) => (
                 "408",
-                format!("Could not evaluate a module {}", path.join("::")),
+                format!("Could not evaluate module '{}'", path.join("::")),
                 format!("Module evaluation"),
             ),
             Errors::UndefinedSelf => (
@@ -125,8 +125,13 @@ impl Errors {
             ),
             Errors::DuplicateIdentifier(ident) => (
                 "412",
-                format!("Identifier {ident} defined multiple times"),
+                format!("Identifier '{ident}' defined multiple times"),
                 format!("Duplicate Identifier"),
+            ),
+            Errors::GenericArityMismatch { expected, found } => (
+                "413",
+                format!("Expected {expected} generic argument(s), found {found}"),
+                format!("Generic arity mismatch"),
             ),
         }
     }

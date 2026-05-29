@@ -12,7 +12,7 @@ pub type FunctionArena = Arena<FunctionType, FunctionTag>;
 pub type FunctionKey = Key<FunctionTag>;
 #[derive(PartialEq, Debug, Copy, Clone)]
 pub struct FunctionTag;
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Clone)]
 pub struct FunctionType {
     pub returns: AnyTypeKey,
     pub parameters: Vec<AnyTypeKey>,
@@ -52,7 +52,7 @@ pub type StructKey = Key<StructTag>;
 pub struct StructTag;
 #[derive(PartialEq, Debug)]
 pub struct StructType {
-    pub parameters: Vec<(SmolStr, AnyTypeKey)>,
+    pub parameters: Vec<(SmolStr, AnyTypeKey, Option<ConstValue>)>,
 }
 
 pub type EnumArena = Arena<EnumType, EnumTag>;
@@ -382,8 +382,12 @@ impl FunctionType {
 impl StructType {
     pub fn stringify(&self, types: &Types) -> String {
         let mut out = String::from("struct { ");
-        for (ident, ty) in &self.parameters {
-            out.push_str(&format!("{ident}: {} ", ty.stringify(types)));
+        for (ident, ty, default) in &self.parameters {
+            out.push_str(&format!("{ident}: {}", ty.stringify(types)));
+            if let Some(v) = default {
+                out.push_str(&format!(" = {}", v.stringify()));
+            }
+            out.push_str("; ");
         }
         out.push('}');
         out
@@ -394,7 +398,7 @@ impl EnumType {
     pub fn stringify(&self) -> String {
         let mut out = format!("enum: {} {} ", self.repr.stringify(), "{");
         for (ident, value) in &self.variants {
-            out.push_str(&format!("{ident}: {} ", value.stringify()));
+            out.push_str(&format!("{ident}: {}; ", value.stringify()));
         }
         out.push('}');
         out
@@ -477,7 +481,29 @@ impl AnyTypeKey {
         span: SpanIndex,
     ) -> Result<AnyTypeKey, Error> {
         match self {
-            AnyTypeKey::Function(key) => todo!(),
+            AnyTypeKey::Function(key) => {
+                let FunctionType {
+                    returns,
+                    parameters,
+                } = types.functions.get_unchecked(key).clone();
+                let new_returns =
+                    returns.substitute_named(substitution, cons, types, module, span)?;
+                let mut new_parameters = Vec::with_capacity(parameters.len());
+                for p in parameters {
+                    new_parameters.push(p.substitute_named(
+                        substitution,
+                        cons,
+                        types,
+                        module,
+                        span,
+                    )?);
+                }
+                let new = FunctionType {
+                    parameters: new_parameters,
+                    returns: new_returns,
+                };
+                Ok(AnyTypeKey::Function(types.functions.push_unique(new)))
+            }
             AnyTypeKey::Array(key) => {
                 let ArrayType { element_type, size } = *types.arrays.get_unchecked(key);
                 let new_inner =
@@ -524,11 +550,12 @@ impl AnyTypeKey {
                 let original = types.structures.get_unchecked(key);
                 let mut parameters = Vec::with_capacity(original.parameters.len());
                 for i in 0..original.parameters.len() {
-                    let (ident, ty) = types.structures.get_unchecked(key).parameters[i].clone();
+                    let (ident, ty, default) =
+                        types.structures.get_unchecked(key).parameters[i].clone();
                     let s = ty
                         .substitute_named(substitution, cons, types, module, span)
                         .unwrap_or(ty);
-                    parameters.push((ident, s));
+                    parameters.push((ident, s, default));
                 }
                 Ok(AnyTypeKey::Struct(
                     types.structures.push_unique(StructType { parameters }),

@@ -4,14 +4,14 @@ pub mod types;
 
 use std::{collections::HashMap, sync::Arc};
 
-use arena::{Arena, Key};
+use arena_scope::ScopeTree;
 use smol_str::SmolStr;
 
 use crate::{
     ast::{self, ConstValue, Operator, SpanIndex},
     const_stage::{
         objects::{AnyObjectKey, FunctionObjKey, Objects},
-        types::{AnyTypeKey, AutoTypes, ConstraintKey, ModuleKey},
+        types::{AnyTypeKey, AutoTypes, ModuleKey},
     },
     generics::GContext,
     ir::VariableKey,
@@ -60,6 +60,10 @@ pub enum Errors {
         got: ConstValue,
     },
     DuplicateIdentifier(SmolStr),
+    GenericArityMismatch {
+        expected: usize,
+        found: usize,
+    },
 }
 
 #[derive(Debug)]
@@ -89,7 +93,7 @@ impl Context {
             auto_types,
             diagnostics: Diagnostics::default(),
             ast,
-            generic_ctx: GContext::default(),
+            generic_ctx: ScopeTree::default(),
         };
 
         if let Err(e) = this.lower_import_stage() {

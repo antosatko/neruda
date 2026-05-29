@@ -6,6 +6,7 @@ use std::{
     fmt::Display,
     ops::{Add, Deref},
     path::PathBuf,
+    ptr::write,
     rc::Rc,
     sync::Arc,
 };
@@ -59,7 +60,7 @@ impl Display for LoweringDiagnostic {
 
 #[derive(Debug, Clone)]
 pub struct Span<T> {
-    pub inner: Rc<T>,
+    pub inner: Arc<T>,
     pub location: SpanIndex,
 }
 
@@ -71,13 +72,13 @@ pub struct SpanIndex {
 
 impl<T> Span<T> {
     pub fn new(inner: T, location: SpanIndex) -> Self {
-        let inner = Rc::new(inner);
+        let inner = Arc::new(inner);
         Self { inner, location }
     }
 
     pub fn map<U, F>(self, f: F) -> Span<U>
     where
-        F: FnOnce(Rc<T>) -> U,
+        F: FnOnce(Arc<T>) -> U,
     {
         Span::new(f(self.inner), self.location)
     }
@@ -326,6 +327,7 @@ pub struct Parameter {
     pub ident: Span<SmolStr>,
     pub ty: Span<Type>,
     pub docs: Vec<Span<SmolStr>>,
+    pub default_value: Option<Span<Expression>>,
 }
 
 /* ===================== EXPRESSIONS ===================== */
@@ -423,13 +425,19 @@ pub struct IdentifierPath {
 
 /* ===================== LITERALS ===================== */
 #[derive(Debug, Clone)]
+pub struct IdentifierLiteral {
+    pub path: Span<IdentifierPath>,
+    pub generics: Option<Span<Vec<Span<Type>>>>,
+}
+#[derive(Debug, Clone)]
 pub enum Literal {
-    Identifier(Span<IdentifierPath>),
+    Identifier(IdentifierLiteral),
 
-    Structure(
-        Result<Span<IdentifierPath>, Keyword>,
-        Vec<Span<(Span<SmolStr>, Span<Expression>)>>,
-    ),
+    Structure {
+        kw: Keyword,
+        ty: Option<Span<IdentifierLiteral>>,
+        fields: Vec<Span<(Span<SmolStr>, Span<Expression>)>>,
+    },
 
     Number(Number),
 
@@ -679,8 +687,17 @@ impl std::fmt::Display for Type {
             }
             TypeLiteral::Struct(parameters) => {
                 write!(f, "struct {}", "{ ")?;
-                for Parameter { ident, ty, docs: _ } in parameters.iter().map(|p| p.inner.deref()) {
+                for Parameter {
+                    ident,
+                    ty,
+                    docs: _,
+                    default_value,
+                } in parameters.iter().map(|p| p.inner.deref())
+                {
                     write!(f, "{}: {} ", ident.inner, ty.inner)?;
+                    if let Some(_) = default_value {
+                        write!(f, "= ...; ")?;
+                    }
                 }
                 write!(f, "{}", "}")?;
             }
@@ -700,7 +717,7 @@ impl std::fmt::Display for Type {
             }
             TypeLiteral::Enum(repr, step, variants) => {
                 write!(f, "enum")?;
-                if let Some(step) = step {
+                if let Some(_) = step {
                     write!(f, "({})", "...")?;
                 }
                 if let Some(repr) = repr {

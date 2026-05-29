@@ -1,12 +1,9 @@
-use std::{borrow::Cow, rc::Rc};
+use std::borrow::Cow;
 
-use crate::{
-    ast::{
-        ConstValue, Diagnostics, Expression, Literal, LoweringDiagnostic, Number, NumberValue,
-        Operator, Span, SpanIndex, UnaryOp, Value,
-    },
-    const_stage::{Diagnostic, Error, Errors, types::ModuleKey},
+use crate::ast::{
+    ConstValue, Expression, Literal, Number, NumberValue, Operator, Span, UnaryOp, Value,
 };
+use crate::const_stage::{Diagnostic, Error, Errors, types::ModuleKey};
 
 impl Expression {
     pub fn const_reduce<'a>(&'a self) -> Cow<'a, Expression> {

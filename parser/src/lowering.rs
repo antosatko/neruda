@@ -9,10 +9,10 @@ use smol_str::SmolStr;
 
 use ir::ast::{
     ActionClause, Alias, Associativity, Body, Clauses, Diagnostics, Else, ElseIf, ExprItem,
-    Expression, Function, GenericParameter, IdentifierPath, Keyword, Literal, LoweringError,
-    LoweringWarning, Module, Mutability, Object, Operator, Parameter, RestrictionClause,
-    SelectClause, Span, SpanIndex, Statement, SystemInclusion, Type, TypeLiteral, UnaryOp, Value,
-    char_literal, numeric_literal, string_literal,
+    Expression, Function, GenericParameter, IdentifierLiteral, IdentifierPath, Keyword, Literal,
+    LoweringError, LoweringWarning, Module, Mutability, Object, Operator, Parameter,
+    RestrictionClause, SelectClause, Span, SpanIndex, Statement, SystemInclusion, Type,
+    TypeLiteral, UnaryOp, Value, char_literal, numeric_literal, string_literal,
 };
 
 #[derive(Debug, Clone)]
@@ -693,35 +693,25 @@ fn literal(
 ) -> Result<Span<Literal>, Span<LoweringError>> {
     match node {
         Nodes::Node(n) => match n.name {
-            "identifier path literal" => {
-                let path = node
-                    .try_get_node("identifier")
-                    .as_ref()
-                    .map(|i| ident_path(src, i));
-                match node.try_get_node("struct literal").as_ref() {
-                    Some(s) => {
-                        let mut args = Vec::new();
-                        for arg in s.get_list("arguments") {
-                            let ident = expect_ident(src, arg, diagnostics);
-                            let expr = expression(src, arg.expect_node("expression"), diagnostics)?;
-                            args.push(span((ident, expr), arg));
-                        }
-                        let p = match path {
-                            Some(p) => Ok(p),
-                            None => Err(Keyword(span((), node))),
-                        };
-                        return Ok(span(Literal::Structure(p, args), s));
-                    }
-                    None => {
-                        return Ok(match path {
-                            Some(p) => {
-                                let loc = p.location;
-                                Span::new(Literal::Identifier(p), loc)
-                            }
-                            None => unreachable!(),
-                        });
-                    }
+            "identifier path literal" => Ok(span(
+                Literal::Identifier(identifier_path_literal(src, node, diagnostics)?),
+                node,
+            )),
+
+            "struct literal" => {
+                let ty = match node.try_get_node("type").as_ref() {
+                    Some(v) => Some(span(identifier_path_literal(src, v, diagnostics)?, v)),
+                    None => None,
+                };
+                let kw = Keyword(span((), node));
+                let fields_list = node.get_list("arguments");
+                let mut fields = Vec::with_capacity(fields_list.len());
+                for field in fields_list {
+                    let ident = expect_ident(src, field, diagnostics);
+                    let expr = expression(src, field.expect_node("expression"), diagnostics)?;
+                    fields.push(span((ident, expr), field));
                 }
+                Ok(span(Literal::Structure { kw, ty, fields }, node))
             }
 
             "array literal" => {
@@ -770,6 +760,18 @@ fn literal(
             _ => panic!("Unexpected token kind for literal: {:?}", tok.kind),
         },
     }
+}
+
+#[track_caller]
+fn identifier_path_literal(
+    src: &str,
+    node: &Nodes<'_>,
+    diagnostics: &mut Diagnostics,
+) -> Result<IdentifierLiteral, Span<LoweringError>> {
+    let path = ident_path(src, node.expect_node("identifier"));
+    let generics = generic_arguments(src, node.try_get_node("generics"), diagnostics)?;
+    let identifier_path_literal = IdentifierLiteral { generics, path };
+    Ok(identifier_path_literal)
 }
 
 fn value(
@@ -923,7 +925,19 @@ fn parameter(
     let ident = expect_ident(src, node.expect_node("identifier"), diagnostics);
     let ty = ty(src, node.expect_node("type"), diagnostics)?;
     let docs = docstrings(src, node);
-    Ok(span(Parameter { ident, ty, docs }, node))
+    let default_value = match node.try_get_node("default value") {
+        Some(v) => Some(expression(src, v, diagnostics)?),
+        None => None,
+    };
+    Ok(span(
+        Parameter {
+            ident,
+            ty,
+            docs,
+            default_value,
+        },
+        node,
+    ))
 }
 
 fn parameters(

@@ -3,7 +3,7 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use arena::Key;
-use smol_str::{SmolStr, ToSmolStr};
+use smol_str::SmolStr;
 
 use crate::ast::{self, ConstValue, Number, NumberValue, SpanIndex};
 use crate::const_stage::objects::{
@@ -11,8 +11,8 @@ use crate::const_stage::objects::{
     FunctionObjKey, ImportObj, InitState, Module, TraitObj, TypeAliasObj, TypeAliasObjKey,
 };
 use crate::const_stage::types::{
-    AnyTypeKey, ArrayType, ConstraintKey, ConstraintType, EnumType, FunctionType, ModuleKey,
-    ModuleTag, PrimitiveType, RefType, StructType, TraitType, TupleType,
+    AnyTypeKey, ArrayType, EnumType, FunctionType, ModuleKey, ModuleTag, PrimitiveType, RefType,
+    StructType, TraitType, TupleType,
 };
 use crate::const_stage::{Context, Diagnostic, Error, Errors};
 
@@ -44,7 +44,12 @@ impl Context {
                         };
                         let ty_key = match map.get(&key) {
                             Some(k) => *k,
-                            None => todo!("lamo"),
+                            None => {
+                                todo!(
+                                    "lamo: {key:?}\n{:?}",
+                                    map.keys().cloned().collect::<Vec<Vec<SmolStr>>>()
+                                )
+                            }
                         };
                         let obj = ImportObj { module: ty_key };
                         let obj = AnyObject::new(ident.clone(), obj, obj_key, *module_key);
@@ -324,7 +329,7 @@ impl Context {
         let module_path = &self.types.modules.get_unchecked(&mod_key).path;
         Ok(
             if let ast::Object::Type {
-                ident,
+                ident: _,
                 generics,
                 ty,
                 docs: _,
@@ -567,10 +572,12 @@ impl ast::Expression {
                     ast::Literal::Identifier(identifier_path) => {
                         let path: Vec<SmolStr> = identifier_path
                             .path
+                            .path
                             .iter()
                             .map(|p| p.inner.as_ref().clone())
                             .collect();
-                        match ctx.resolve_const_path(&path, mod_key, identifier_path.location) {
+                        match ctx.resolve_const_path(&path, mod_key, identifier_path.path.location)
+                        {
                             Ok(key) => {
                                 let obj_key = if let AnyObjectKey::Const(key) = key {
                                     key
@@ -617,7 +624,7 @@ impl ast::Expression {
                             }
                         }
                     }
-                    ast::Literal::Structure(_, _) => todo!(),
+                    ast::Literal::Structure { fields, kw, ty } => todo!(),
                     ast::Literal::Number(number) => Ok(ConstValue::Number(number.clone())),
                     ast::Literal::String(smol_str) => Ok(ConstValue::String(smol_str.clone())),
                     ast::Literal::Char(c) => Ok(ConstValue::Char(*c)),
@@ -655,7 +662,7 @@ impl ast::Type {
                     if let Some(ty) = PrimitiveType::from_str(&ident.inner) {
                         AnyTypeKey::Primitive(ty)
                     } else if let Some(ty) = ctx.generic_ctx.get(ident) {
-                        AnyTypeKey::Constraint(ty)
+                        AnyTypeKey::Constraint(*ty)
                     } else {
                         resolve_type_path(ctx, module, identifier_path, generic_arguments)?
                     }
@@ -664,16 +671,29 @@ impl ast::Type {
                 }
             }
             ast::TypeLiteral::Struct(spans) => {
-                let mut parameters = Vec::new();
+                let mut parameters: Vec<(SmolStr, AnyTypeKey, Option<ConstValue>)> = Vec::new();
                 for param in spans {
                     let ident = &param.ident.inner;
-                    if parameters
+                    if let Some((duplicate, _, _)) = parameters
                         .iter()
-                        .any(|(p_ident, _)| p_ident == ident.as_ref())
+                        .find(|(p_ident, _, _)| p_ident == ident.as_ref())
                     {
-                        todo!("duplicate parameter identifiers")
+                        Err(Error {
+                            inner: Errors::DuplicateIdentifier(duplicate.clone()),
+                            module,
+                            span: param.ident.location,
+                        })?
                     }
-                    parameters.push((ident.as_ref().clone(), param.ty.lower(ctx, module)?));
+
+                    let default = match &param.default_value {
+                        Some(v) => Some(v.const_eval(ctx, module, &None)?),
+                        None => None,
+                    };
+                    parameters.push((
+                        ident.as_ref().clone(),
+                        param.ty.lower(ctx, module)?,
+                        default,
+                    ));
                 }
                 let key = ctx.types.structures.push_unique(StructType { parameters });
                 AnyTypeKey::Struct(key)
@@ -779,38 +799,57 @@ fn resolve_type_path(
         .iter()
         .map(|p| p.inner.as_ref().clone())
         .collect();
+
     let resolved = ctx.resolve_const_path(&path, module, identifier_path.location)?;
+
     Ok(match resolved {
         AnyObjectKey::Type(key) => {
-            if let TypeAliasObj {
-                ty: InitState::Done(ty) | InitState::Progress(ty),
-                generics: InitState::Done(generics),
-                constants: _,
-            } = &mut ctx.objects.types.get_mut_unchecked(&key).data
-            {
-                let ty = *ty;
-                let mut new = AnyTypeKey::Named(ty);
-                let gen_args = match generic_arguments {
-                    Some(g) => g.inner.as_ref().clone(),
-                    None => Vec::new(),
-                };
-                let generics = ctx.generic_ctx.data.get_unchecked(generics).scope.clone();
-                for (idx, (_, constraint)) in generics.symbols.iter().enumerate() {
-                    let substitution = gen_args[idx].lower(ctx, module)?;
-                    let span = gen_args[idx].location;
-                    new = AnyTypeKey::Named(ty).substitute_named(
-                        substitution,
-                        constraint,
-                        &mut ctx.types,
-                        module,
-                        span,
-                    )?;
-                }
-                new
-            } else {
-                unreachable!("lamo")
+            let TypeAliasObj { ty, generics, .. } =
+                &mut ctx.objects.types.get_mut_unchecked(&key).data;
+
+            let ty = match ty {
+                InitState::Done(t) | InitState::Progress(t) => *t,
+                _ => unreachable!("type alias not initialized"),
+            };
+
+            let gen_args: Vec<_> = generic_arguments
+                .as_ref()
+                .map(|g| g.inner.as_ref().clone())
+                .unwrap_or_default();
+
+            let generics = ctx
+                .generic_ctx
+                .arena()
+                .get_unchecked(generics.get_done())
+                .values
+                .clone();
+
+            if gen_args.len() != generics.len() {
+                return Err(Diagnostic {
+                    inner: Errors::GenericArityMismatch {
+                        expected: generics.len(),
+                        found: gen_args.len(),
+                    },
+                    span: match generic_arguments {
+                        Some(args) => args.location,
+                        None => identifier_path.location,
+                    },
+                    module,
+                });
             }
+            let new = generics.iter().zip(gen_args).try_fold(
+                AnyTypeKey::Named(ty),
+                |acc, ((_, constraint), arg)| {
+                    let substitution = arg.lower(ctx, module)?;
+                    let span = arg.location;
+
+                    acc.substitute_named(substitution, constraint, &mut ctx.types, module, span)
+                },
+            )?;
+
+            new
         }
+
         _ => unreachable!("all paths are expected to end with a type alias"),
     })
 }

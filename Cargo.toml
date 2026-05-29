@@ -9,8 +9,8 @@ edition = "2024"
 [workspace.dependencies]
 arena = { git = "https://github.com/antosatko/arena" }
 ruparse = { git = "https://github.com/antosatko/ruparse" }
-# ruparse = { path = "../mylibs/ruparse" }
 smol_str = { version = "0.3.5" }
+arena-scope = { git = "https://github.com/antosatko/arena-scope" }
 
 [dependencies]
 clap = { version = "4.6.0", features = ["derive"] }

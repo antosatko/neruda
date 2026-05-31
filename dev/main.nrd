@@ -74,8 +74,8 @@ const DAAA: Arr = [1, 2, 3]
 
 type DrawSurface = DoubleBuffer<DrawBuffer>
 
-function nevimco(): i32 {
-    var a: i32 = 7
+function nevimco(in: i32): i32 {
+    var a = 7
     var b: m::Im<f32> = (m::PI, m::PI * 2)
-    return a * 8
+    return a * 8 * in
 }

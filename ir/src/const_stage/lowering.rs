@@ -26,27 +26,40 @@ impl Context {
                 (k.clone(), type_key)
             }));
 
-        for (key, module) in &self.ast {
-            let module_key = map.get(key).unwrap();
+        for (current_module_path, module) in &self.ast {
+            let module_key = map.get(current_module_path).unwrap();
             let ir_module = self.types.modules.get_mut_unchecked(module_key);
             for (obj_key, obj) in module.objects.iter_pairs() {
                 let (ident, key): (SmolStr, AnyObjectKey) = match obj.inner.as_ref() {
                     ast::Object::Import { ident, alias } => {
-                        let key: Vec<SmolStr> = ident
+                        let raw_path: Vec<SmolStr> = ident
                             .inner
                             .path
                             .iter()
                             .map(|a| a.inner.as_ref().clone())
                             .collect();
+
+                        let target_path = if raw_path.first().map(|s| s.as_str()) == Some("mod") {
+                            raw_path[1..].to_vec()
+                        } else {
+                            let mut path = current_module_path.clone();
+                            if !path.is_empty() {
+                                path.pop();
+                            }
+                            path.extend(raw_path);
+                            path
+                        };
+
                         let ident = match &alias.0 {
                             Some(name) => name.inner.inner.as_ref().clone(),
                             None => ident.inner.path.last().unwrap().inner.as_ref().clone(),
                         };
-                        let ty_key = match map.get(&key) {
+
+                        let ty_key = match map.get(&target_path) {
                             Some(k) => *k,
                             None => {
                                 todo!(
-                                    "lamo: {key:?}\n{:?}",
+                                    "lamo: {target_path:?}\n{:?}",
                                     map.keys().cloned().collect::<Vec<Vec<SmolStr>>>()
                                 )
                             }
@@ -556,7 +569,7 @@ impl ast::Expression {
         self_def: &Option<ConstValue>,
         expect: &Option<AnyTypeKey>,
     ) -> Result<ConstValue, Error> {
-        let mut location;
+        let location;
         let result = match self.const_reduce().as_ref() {
             ast::Expression::Value(value) => {
                 location = value.location;

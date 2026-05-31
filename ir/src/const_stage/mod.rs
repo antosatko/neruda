@@ -70,6 +70,10 @@ pub enum Errors {
         from: AnyTypeKey,
         to: AnyTypeKey,
     },
+    ArrayElementCountMismatch {
+        expected: (AnyTypeKey, usize),
+        got: (AnyTypeKey, Option<usize>),
+    },
 }
 
 #[derive(Debug)]

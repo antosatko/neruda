@@ -5,11 +5,15 @@ use std::{
 };
 
 use dashmap::DashMap;
-use ir::const_stage::Context;
+use ir::const_stage::{self, Context, Warning};
 use line_index::{LineIndex, TextSize};
 use parser::parse_directory;
 use ruparse::Parser;
-use tower_lsp::{Client, LanguageServer, jsonrpc::Result, lsp_types::*};
+use tower_lsp::{
+    Client, LanguageServer,
+    jsonrpc::Result,
+    lsp_types::{self, *},
+};
 
 use crate::index_file;
 
@@ -38,20 +42,20 @@ impl Backend {
     }
 
     fn file_text(&self, path: &Path) -> Option<String> {
-        let uri = Url::from_file_path(path).ok()?.to_string();
-
-        if let Some(open) = self.document_map.get(&uri) {
-            Some(open.clone())
-        } else {
-            std::fs::read_to_string(path).ok()
-        }
+        // Strictly read from disk for full project diagnostics
+        std::fs::read_to_string(path).ok()
     }
 
+    #[track_caller]
     fn range_from_span(&self, src: &str, index: usize, len: usize) -> Range {
         let line_index = LineIndex::new(src);
+        assert!(index <= src.len());
+        assert!(index + len <= src.len());
+
+        assert!(src.is_char_boundary(index));
+        assert!(src.is_char_boundary(index + len));
 
         let start = line_index.line_col(TextSize::new(index as u32));
-
         let end = line_index.line_col(TextSize::new((index + len) as u32));
 
         Range::new(
@@ -73,6 +77,30 @@ impl Backend {
             severity: Some(severity),
             source: Some("neruda".into()),
             message: message.into(),
+            ..Default::default()
+        }
+    }
+
+    fn diagnostic_warn(&self, src: &str, warn: &const_stage::Warning, ctx: &Context) -> Diagnostic {
+        let data = warn.inner.id_header_snippet_report(ctx);
+        Diagnostic {
+            range: self.range_from_span(src, warn.span.index, warn.span.len),
+            severity: Some(DiagnosticSeverity::WARNING),
+            source: Some("neruda".into()),
+            message: data.1,
+            code: Some(NumberOrString::String(data.0.to_string())),
+            ..Default::default()
+        }
+    }
+
+    fn diagnostic_err(&self, src: &str, warn: &const_stage::Error, ctx: &Context) -> Diagnostic {
+        let data = warn.inner.id_header_snippet_report(ctx);
+        Diagnostic {
+            range: self.range_from_span(src, warn.span.index, warn.span.len),
+            severity: Some(DiagnosticSeverity::ERROR),
+            source: Some("neruda".into()),
+            message: data.1,
+            code: Some(NumberOrString::String(data.0.to_string())),
             ..Default::default()
         }
     }
@@ -127,8 +155,6 @@ impl Backend {
             }
         }
 
-        return;
-
         /*
          * IR
          */
@@ -147,13 +173,10 @@ impl Backend {
                 if let Some(path) = &module.ast.path {
                     if let Some(src) = self.file_text(&path) {
                         if let Ok(uri) = Url::from_file_path(&path) {
-                            diagnostics.entry(uri).or_default().push(self.diagnostic(
-                                &src,
-                                err.span.index,
-                                err.span.len,
-                                DiagnosticSeverity::ERROR,
-                                format!("{:?}", err.inner),
-                            ));
+                            diagnostics
+                                .entry(uri)
+                                .or_default()
+                                .push(self.diagnostic_err(&src, &err, &ir_ctx));
                         }
                     }
                 }
@@ -182,13 +205,10 @@ impl Backend {
                 continue;
             };
 
-            diagnostics.entry(uri).or_default().push(self.diagnostic(
-                &src,
-                warn.span.index,
-                warn.span.len,
-                DiagnosticSeverity::WARNING,
-                format!("{:?}", warn.inner),
-            ));
+            diagnostics
+                .entry(uri)
+                .or_default()
+                .push(self.diagnostic_warn(&src, warn, &ir_ctx));
         }
 
         /*
@@ -256,8 +276,15 @@ impl LanguageServer for Backend {
 
         Ok(InitializeResult {
             capabilities: ServerCapabilities {
-                text_document_sync: Some(TextDocumentSyncCapability::Kind(
-                    TextDocumentSyncKind::FULL,
+                text_document_sync: Some(TextDocumentSyncCapability::Options(
+                    TextDocumentSyncOptions {
+                        open_close: Some(true),
+                        change: Some(TextDocumentSyncKind::FULL),
+                        save: Some(TextDocumentSyncSaveOptions::SaveOptions(SaveOptions {
+                            include_text: Some(true),
+                        })),
+                        ..Default::default()
+                    },
                 )),
 
                 semantic_tokens_provider: Some(
@@ -266,9 +293,7 @@ impl LanguageServer for Backend {
                             text_document_registration_options: TextDocumentRegistrationOptions {
                                 document_selector: Some(vec![DocumentFilter {
                                     language: Some("neruda".into()),
-
                                     scheme: Some("file".into()),
-
                                     pattern: Some("*.nrd".into()),
                                 }]),
                             },
@@ -276,12 +301,9 @@ impl LanguageServer for Backend {
                             semantic_tokens_options: SemanticTokensOptions {
                                 legend: SemanticTokensLegend {
                                     token_types: TOKEN_TYPES.to_vec(),
-
                                     token_modifiers: vec![],
                                 },
-
                                 full: Some(SemanticTokensFullOptions::Bool(true)),
-
                                 ..Default::default()
                             },
 
@@ -316,13 +338,19 @@ impl LanguageServer for Backend {
         let uri = params.text_document.uri;
 
         if let Some(change) = params.content_changes.into_iter().next() {
+            // Keep the document map updated for fast semantic token resolution
             self.document_map.insert(uri.to_string(), change.text);
-
-            self.validate_workspace().await
         }
     }
 
-    async fn did_save(&self, _: DidSaveTextDocumentParams) {
+    async fn did_save(&self, params: DidSaveTextDocumentParams) {
+        let uri = params.text_document.uri;
+
+        if let Some(change) = params.text {
+            self.document_map.insert(uri.to_string(), change);
+        }
+
+        // Full project diagnostic triggers on save and now correctly reads from disk
         self.validate_workspace().await
     }
 

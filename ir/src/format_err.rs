@@ -155,6 +155,30 @@ impl Errors {
                 ),
                 format!("Failed implicit cast"),
             ),
+            Errors::ArrayElementCountMismatch {
+                expected: (exp_type, exp_size),
+                got: (got_type, Some(got_size)),
+            } => (
+                "417",
+                format!(
+                    "Type '{}' expected to have {exp_size} element(s) to match type '{}', instead got {got_size}",
+                    got_type.stringify(&ctx.types),
+                    exp_type.stringify(&ctx.types),
+                ),
+                format!("Array element count mismatch"),
+            ),
+            Errors::ArrayElementCountMismatch {
+                expected: (exp_type, exp_size),
+                got: (got_type, None),
+            } => (
+                "418",
+                format!(
+                    "Unsized type '{}' expected to have {exp_size} element(s) to match type '{}'",
+                    got_type.stringify(&ctx.types),
+                    exp_type.stringify(&ctx.types),
+                ),
+                format!("Array element count mismatch"),
+            ),
         }
     }
 }

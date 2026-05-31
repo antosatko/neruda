@@ -116,9 +116,10 @@ impl ConstValue {
         target: AnyTypeKey,
     ) -> Result<ConstValue, Errors> {
         let typeof_self = self.type_of();
-        if typeof_self.check(&ctx.types, &target).is_ok() {
-            return Ok(self.clone());
-        }
+        let type_check_err = match typeof_self.check(&ctx.types, &target) {
+            Ok(_) => return Ok(self.clone()),
+            Err(e) => e,
+        };
         Ok(match (self, target) {
             (ConstValue::Structure { fields, ty }, target) => Err(Errors::FailedImplicitCast {
                 from: typeof_self,
@@ -130,18 +131,10 @@ impl ConstValue {
                         value: default,
                         size,
                     }) => ConstValue::Number(Number {
-                        value: value
-                            .implicit_cast(&default)
-                            .ok_or(Errors::FailedImplicitCast {
-                                from: typeof_self,
-                                to: target,
-                            })?,
+                        value: value.implicit_cast(&default).ok_or(type_check_err)?,
                         size,
                     }),
-                    _ => Err(Errors::FailedImplicitCast {
-                        from: typeof_self,
-                        to: target,
-                    })?,
+                    _ => Err(type_check_err)?,
                 }
             }
             (ConstValue::EnumVariant { parent, variant }, target) => {
@@ -166,30 +159,12 @@ impl ConstValue {
                     ),
                 }
             }
-            (ConstValue::String(smol_str), target) => Err(Errors::FailedImplicitCast {
-                from: self.type_of(),
-                to: target,
-            })?,
-            (ConstValue::Char(_), target) => Err(Errors::FailedImplicitCast {
-                from: self.type_of(),
-                to: target,
-            })?,
-            (ConstValue::Bool(_), target) => Err(Errors::FailedImplicitCast {
-                from: self.type_of(),
-                to: target,
-            })?,
-            (ConstValue::Array { elements, ty }, target) => Err(Errors::FailedImplicitCast {
-                from: self.type_of(),
-                to: target,
-            })?,
-            (ConstValue::Tuple { elements, ty }, target) => Err(Errors::FailedImplicitCast {
-                from: self.type_of(),
-                to: target,
-            })?,
-            (val, ty) => Err(Errors::FailedImplicitCast {
-                from: self.type_of(),
-                to: target,
-            })?,
+            (ConstValue::String(smol_str), target) => Err(type_check_err)?,
+            (ConstValue::Char(_), target) => Err(type_check_err)?,
+            (ConstValue::Bool(_), target) => Err(type_check_err)?,
+            (ConstValue::Array { elements, ty }, target) => Err(type_check_err)?,
+            (ConstValue::Tuple { elements, ty }, target) => Err(type_check_err)?,
+            (val, ty) => Err(type_check_err)?,
         })
     }
 }

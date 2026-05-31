@@ -505,35 +505,26 @@ impl MorphedType {
 impl AnyTypeKey {
     #[must_use]
     pub fn check(&self, types: &Types, expect: &Self) -> Result<(), Errors> {
-        // currently very redundant, may change in future idk
         let equals = match (expect, self) {
             (a, b) if a == b => return Ok(()),
             (AnyTypeKey::Array(exp), AnyTypeKey::Array(got)) => {
-                dbg!("Array to array comparison ignores size atm");
                 let exp_unwrap = types.arrays.get_unchecked(exp);
                 let got_unwrap = types.arrays.get_unchecked(got);
-                match (exp_unwrap, got_unwrap) {
-                    (
-                        ArrayType {
-                            element_type: exp_unwrap,
-                            size: None,
-                        },
-                        ArrayType {
-                            element_type: got_unwrap,
-                            size: _,
-                        },
-                    ) => return got_unwrap.check(types, &exp_unwrap),
-                    (
-                        ArrayType {
-                            element_type: exp_unwrap,
-                            size: Some(a),
-                        },
-                        ArrayType {
-                            element_type: got_unwrap,
-                            size: Some(b),
-                        },
-                    ) if a == b => return got_unwrap.check(types, &exp_unwrap),
-                    (_, _) => dbg!(false), // might wanna make this more descriptive
+                got_unwrap
+                    .element_type
+                    .check(types, &exp_unwrap.element_type)?;
+                match (exp_unwrap.size, got_unwrap.size) {
+                    (None, _) => true,
+                    (Some(exp), Some(got)) => (exp == got)
+                        .ok_or(Errors::ArrayElementCountMismatch {
+                            expected: (exp_unwrap.element_type, exp),
+                            got: (got_unwrap.element_type, Some(got)),
+                        })
+                        .map(|_| true)?,
+                    (Some(exp), got) => Err(Errors::ArrayElementCountMismatch {
+                        expected: (exp_unwrap.element_type, exp),
+                        got: (got_unwrap.element_type, got),
+                    })?,
                 }
             }
             (AnyTypeKey::Reference(exp), AnyTypeKey::Reference(got)) => {

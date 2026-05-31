@@ -3,9 +3,4 @@ path_suffixes = ["nrd"]
 line_comments = ["// "]
 language_servers = ["neruda-lsp"]
 grammar = "neruda"
-brackets = [
-    { start = "{", end = "}", close = true, newline = true },
-    { start = "[", end = "]", close = true, newline = true },
-    { start = "(", end = ")", close = true, newline = true }
-]
-matcher = { file_extensions = ["nrd"] } # Ensure this matches your files
+matcher = { file_extensions = ["nrd"] }

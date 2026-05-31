@@ -3,6 +3,8 @@ use std::borrow::Cow;
 use crate::ast::{
     ConstValue, Expression, Literal, Number, NumberValue, Operator, Span, UnaryOp, Value,
 };
+use crate::const_stage::Context;
+use crate::const_stage::types::{AnyTypeKey, PrimitiveType};
 use crate::const_stage::{Diagnostic, Error, Errors, types::ModuleKey};
 
 impl Expression {
@@ -104,6 +106,91 @@ impl Expression {
             new = replace;
         }
         Ok(new)
+    }
+}
+
+impl ConstValue {
+    pub fn implicit_cast(
+        &self,
+        ctx: &mut Context,
+        target: AnyTypeKey,
+    ) -> Result<ConstValue, Errors> {
+        let typeof_self = self.type_of();
+        if typeof_self.check(&ctx.types, &target).is_ok() {
+            return Ok(self.clone());
+        }
+        Ok(match (self, target) {
+            (ConstValue::Structure { fields, ty }, target) => Err(Errors::FailedImplicitCast {
+                from: typeof_self,
+                to: target,
+            })?,
+            (ConstValue::Number(Number { value, size }), AnyTypeKey::Primitive(ty)) => {
+                match ty.default() {
+                    ConstValue::Number(Number {
+                        value: default,
+                        size,
+                    }) => ConstValue::Number(Number {
+                        value: value
+                            .implicit_cast(&default)
+                            .ok_or(Errors::FailedImplicitCast {
+                                from: typeof_self,
+                                to: target,
+                            })?,
+                        size,
+                    }),
+                    _ => Err(Errors::FailedImplicitCast {
+                        from: typeof_self,
+                        to: target,
+                    })?,
+                }
+            }
+            (ConstValue::EnumVariant { parent, variant }, target) => {
+                match parent.unwrap_full(&ctx.types) {
+                    AnyTypeKey::Enum(key) => {
+                        match ctx
+                            .types
+                            .enums
+                            .get_unchecked(&key)
+                            .variants
+                            .iter()
+                            .find(|(ident, _)| ident == variant)
+                            .cloned()
+                        {
+                            Some((_, actual_value)) => actual_value.implicit_cast(ctx, target)?,
+                            None => unreachable!("variant {variant} not found"),
+                        }
+                    }
+                    _ => unreachable!(
+                        "concretized type '{}' must be enum",
+                        parent.stringify(&ctx.types)
+                    ),
+                }
+            }
+            (ConstValue::String(smol_str), target) => Err(Errors::FailedImplicitCast {
+                from: self.type_of(),
+                to: target,
+            })?,
+            (ConstValue::Char(_), target) => Err(Errors::FailedImplicitCast {
+                from: self.type_of(),
+                to: target,
+            })?,
+            (ConstValue::Bool(_), target) => Err(Errors::FailedImplicitCast {
+                from: self.type_of(),
+                to: target,
+            })?,
+            (ConstValue::Array { elements, ty }, target) => Err(Errors::FailedImplicitCast {
+                from: self.type_of(),
+                to: target,
+            })?,
+            (ConstValue::Tuple { elements, ty }, target) => Err(Errors::FailedImplicitCast {
+                from: self.type_of(),
+                to: target,
+            })?,
+            (val, ty) => Err(Errors::FailedImplicitCast {
+                from: self.type_of(),
+                to: target,
+            })?,
+        })
     }
 }
 

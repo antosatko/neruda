@@ -3,7 +3,7 @@ pub mod const_expr;
 use core::panic;
 use std::{
     borrow::Cow,
-    fmt::Display,
+    fmt::{Display, format},
     ops::{Add, Deref},
     path::PathBuf,
     ptr::write,
@@ -12,9 +12,12 @@ use std::{
 };
 
 use arena::{Arena, Key};
-use smol_str::SmolStr;
+use smol_str::{SmolStr, ToSmolStr};
 
-use crate::const_stage::types::PrimitiveType;
+use crate::const_stage::{
+    Context, Error, Errors,
+    types::{AnyTypeKey, EnumKey, ModuleKey, PrimitiveType, StructKey, Types},
+};
 
 #[derive(Debug, Clone)]
 pub enum LoweringWarning {
@@ -375,6 +378,8 @@ pub enum Operator {
 pub enum UnaryOp {
     Sub,
     Neg,
+    Ref,
+    Deref,
 }
 
 /* ===================== VALUES ===================== */
@@ -450,7 +455,10 @@ pub enum Literal {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ConstValue {
-    Structure(Vec<Span<(Span<SmolStr>, Span<ConstValue>)>>),
+    Structure {
+        fields: Vec<Span<(Span<SmolStr>, Span<ConstValue>)>>,
+        ty: AnyTypeKey,
+    },
 
     Number(Number),
 
@@ -458,9 +466,19 @@ pub enum ConstValue {
     Char(char),
 
     Bool(bool),
+    EnumVariant {
+        parent: AnyTypeKey,
+        variant: SmolStr,
+    },
 
-    Array(Vec<Span<ConstValue>>),
-    Tuple(Vec<Span<ConstValue>>),
+    Array {
+        elements: Vec<Span<ConstValue>>,
+        ty: AnyTypeKey,
+    },
+    Tuple {
+        elements: Vec<Span<ConstValue>>,
+        ty: AnyTypeKey,
+    },
 }
 
 /* ===================== NUMBERS ===================== */
@@ -738,51 +756,81 @@ impl std::fmt::Display for Type {
 }
 
 impl ConstValue {
-    pub fn stringify(&self) -> Cow<'static, str> {
+    pub fn stringify(&self) -> SmolStr {
         match self {
-            ConstValue::Structure(_) => todo!(),
-            ConstValue::Number(number) => Cow::Owned(match number.value {
-                NumberValue::Float(v) => format!("{v:.1}"),
-                NumberValue::Int(v) => v.to_string(),
-                NumberValue::Any(v) => v.to_string(),
-                NumberValue::Uint(v) => v.to_string(),
-            }),
-            ConstValue::String(smol_str) => Cow::Owned(smol_str.to_string()),
-            ConstValue::Char(v) => Cow::Owned(format!("'{v}'")),
-            ConstValue::Bool(true) => Cow::Borrowed("true"),
-            ConstValue::Bool(false) => Cow::Borrowed("false"),
-            ConstValue::Array(_) => todo!(),
-            ConstValue::Tuple(_) => todo!(),
+            ConstValue::Number(number) => match number.value {
+                NumberValue::Float(v) => format!("{v:.1}").to_smolstr(),
+                NumberValue::Int(v) => v.to_smolstr(),
+                NumberValue::Any(v) => v.to_smolstr(),
+                NumberValue::Uint(v) => v.to_smolstr(),
+            },
+            ConstValue::EnumVariant { parent: _, variant } => variant.clone(),
+            ConstValue::String(smol_str) => smol_str.clone(),
+            ConstValue::Char(v) => format!("'{v}'").to_smolstr(),
+            ConstValue::Bool(true) => "true".to_smolstr(),
+            ConstValue::Bool(false) => "false".to_smolstr(),
+            ConstValue::Array { elements, .. } => format!(
+                "[{}]",
+                elements
+                    .iter()
+                    .map(|v| v.stringify())
+                    .collect::<Vec<SmolStr>>()
+                    .join(", ")
+            )
+            .to_smolstr(),
+            ConstValue::Tuple { elements, .. } => format!(
+                "({})",
+                elements
+                    .iter()
+                    .map(|v| v.stringify())
+                    .collect::<Vec<SmolStr>>()
+                    .join(", ")
+            )
+            .to_smolstr(),
+            ConstValue::Structure { fields, .. } => format!(
+                "struct {} {} {}",
+                '{',
+                fields
+                    .iter()
+                    .map(|f| format!("{}: {}", f.0.deref(), f.1.stringify()))
+                    .collect::<Vec<String>>()
+                    .join("; "),
+                '}'
+            )
+            .to_smolstr(),
         }
     }
 
-    pub fn type_of(&self) -> PrimitiveType {
+    pub fn type_of(&self) -> AnyTypeKey {
         match self {
-            Self::Bool(_) => PrimitiveType::Bool,
-            Self::Char(_) => PrimitiveType::Char,
+            Self::Bool(_) => AnyTypeKey::Primitive(PrimitiveType::Bool),
+            Self::Char(_) => AnyTypeKey::Primitive(PrimitiveType::Char),
             Self::Number(Number {
                 value: NumberValue::Any(_),
                 size: _,
-            }) => PrimitiveType::I32,
+            }) => AnyTypeKey::Primitive(PrimitiveType::I32),
             Self::Number(Number {
                 value: NumberValue::Int(_),
                 size: _,
-            }) => PrimitiveType::I32,
+            }) => AnyTypeKey::Primitive(PrimitiveType::I32),
             Self::Number(Number {
                 value: NumberValue::Float(_),
                 size: _,
-            }) => PrimitiveType::F32,
+            }) => AnyTypeKey::Primitive(PrimitiveType::F32),
             Self::Number(Number {
                 value: NumberValue::Uint(_),
                 size: _,
-            }) => PrimitiveType::U32,
-            _ => todo!(),
+            }) => AnyTypeKey::Primitive(PrimitiveType::U32),
+            Self::Structure { ty, .. } => *ty,
+            Self::Array { ty, .. } => *ty,
+            Self::Tuple { ty, .. } => *ty,
+            Self::EnumVariant { parent, variant: _ } => *parent,
+            _ => todo!("{self:?}"),
         }
     }
 
-    pub fn autostep(&self) -> Self {
-        match self {
-            ConstValue::Structure(spans) => todo!(),
+    pub fn autostep(&self) -> Result<ConstValue, Errors> {
+        Ok(match self {
             ConstValue::Number(number) => match number.value {
                 NumberValue::Float(n) => ConstValue::Number(Number {
                     value: NumberValue::Float(n + 1.0),
@@ -801,14 +849,16 @@ impl ConstValue {
                     size: number.size,
                 }),
             },
-            ConstValue::String(smol_str) => todo!(),
+            ConstValue::String(_) => todo!(),
             ConstValue::Char(c) => {
                 ConstValue::Char((*c as u8).checked_add(1).expect("handle pls") as _)
             }
             ConstValue::Bool(_) => todo!(),
-            ConstValue::Array(spans) => todo!(),
-            ConstValue::Tuple(spans) => todo!(),
-        }
+            ConstValue::EnumVariant { parent, variant } => todo!(),
+            ConstValue::Array { ty, .. } => Err(Errors::UndefinedAutostep(*ty))?,
+            ConstValue::Tuple { ty, .. } => Err(Errors::UndefinedAutostep(*ty))?,
+            ConstValue::Structure { ty, .. } => Err(Errors::UndefinedAutostep(*ty))?,
+        })
     }
 }
 

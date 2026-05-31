@@ -95,8 +95,8 @@ impl Errors {
                 "407",
                 format!(
                     "Operator {op} can not be applied for types {}, {} in const context.",
-                    left.type_of().stringify(),
-                    right.type_of().stringify()
+                    left.type_of().stringify(&ctx.types),
+                    right.type_of().stringify(&ctx.types)
                 ),
                 format!("Not applicable"),
             ),
@@ -126,12 +126,34 @@ impl Errors {
             Errors::DuplicateIdentifier(ident) => (
                 "412",
                 format!("Identifier '{ident}' defined multiple times"),
-                format!("Duplicate Identifier"),
+                format!("Duplicate identifier"),
             ),
             Errors::GenericArityMismatch { expected, found } => (
                 "413",
                 format!("Expected {expected} generic argument(s), found {found}"),
                 format!("Generic arity mismatch"),
+            ),
+            Errors::FailedTypeInfer => (
+                "414",
+                format!("Could not automatically infer type"),
+                format!("Failed type infer"),
+            ),
+            Errors::UndefinedAutostep(ty) => (
+                "415",
+                format!(
+                    "Type '{}' does not implement autostep or is not constant",
+                    ty.stringify(&ctx.types)
+                ),
+                format!("Failed autostep"),
+            ),
+            Errors::FailedImplicitCast { from, to } => (
+                "416",
+                format!(
+                    "Could not implicitly cast from '{}' to '{}'",
+                    from.stringify(&ctx.types),
+                    to.stringify(&ctx.types),
+                ),
+                format!("Failed implicit cast"),
             ),
         }
     }

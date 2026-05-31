@@ -64,6 +64,12 @@ pub enum Errors {
         expected: usize,
         found: usize,
     },
+    FailedTypeInfer,
+    UndefinedAutostep(AnyTypeKey),
+    FailedImplicitCast {
+        from: AnyTypeKey,
+        to: AnyTypeKey,
+    },
 }
 
 #[derive(Debug)]

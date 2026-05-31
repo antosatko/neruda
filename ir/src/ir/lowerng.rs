@@ -5,11 +5,11 @@ use arena::Arena;
 use crate::{
     ast::{self, Body, Function, Span},
     const_stage::{
-        Context, Diagnostic, Error, Warnings,
+        Context, Diagnostic, Error, Errors, Warnings,
         objects::{FunctionObjKey, InitState},
-        types::ModuleKey,
+        types::{AnyTypeKey, ModuleKey},
     },
-    ir::{BlockCtx, FunctionIr, Variable},
+    ir::{BlockCtx, FunctionIr, Value, Variable},
 };
 
 impl Context {
@@ -32,6 +32,7 @@ impl Context {
 
         let mut ir = FunctionIr {
             instructions: Vec::new(),
+            values: Arena::default(),
             variables: Arena::default(),
         };
 
@@ -94,12 +95,26 @@ impl Context {
                             ty,
                             expression,
                         } => {
-                            let ty = match ty {
-                                Some(ty) => ty.lower(self, *module)?,
-                                None => todo!("type inference"),
+                            let ty = match (ty, expression) {
+                                (Some(ty), Some(expr)) => {
+                                    let ty = ty.lower(self, *module)?;
+                                    let val = expr.const_eval(self, *module, &None, &Some(ty))?;
+                                    ty
+                                }
+                                (None, Some(expr)) => {
+                                    let val = expr.const_eval(self, *module, &None, &None)?;
+                                    val.type_of()
+                                }
+                                (Some(ty), None) => ty.lower(self, *module)?,
+                                (None, None) => Err(Error {
+                                    inner: Errors::FailedTypeInfer,
+                                    module: *module,
+                                    span: st.location,
+                                })?,
                             };
                             let var = Variable {
                                 identifier: ident.clone(),
+                                value: ir.values.push(Value { ty }),
                                 ty,
                                 used: false,
                             };

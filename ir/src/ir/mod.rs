@@ -6,7 +6,7 @@ use smol_str::SmolStr;
 pub mod lowerng;
 
 use crate::{
-    ast::Span,
+    ast::{ConstValue, Operator, Span, UnaryOp},
     const_stage::{
         Error, Errors,
         types::{AnyTypeKey, ModuleKey},
@@ -23,7 +23,21 @@ pub struct VariableTag;
 pub struct Variable {
     pub identifier: Span<SmolStr>,
     pub ty: AnyTypeKey,
+    pub value: ValueKey,
     pub used: bool,
+}
+
+pub type ValueKey = Key<ValueTag>;
+pub type ValueArena = Arena<Value, ValueTag>;
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+pub struct ValueTag;
+#[derive(Debug)]
+pub struct Value {
+    pub ty: AnyTypeKey,
+}
+
+pub struct IrScopeCtx {
+    variables: HashMap<SmolStr, VariableKey>,
 }
 
 pub struct BlockCtx {
@@ -33,11 +47,32 @@ pub struct BlockCtx {
 #[derive(Debug)]
 pub struct FunctionIr {
     pub variables: VariableArena,
+    pub values: ValueArena,
     pub instructions: Vec<Instruction>,
 }
 
-#[derive(Debug)]
-pub enum Instruction {}
+#[derive(Debug, Clone)]
+pub enum Addr {
+    Var(VariableKey),
+}
+
+#[derive(Debug, Clone)]
+pub enum Instruction {
+    /// Pushes a constant value on stack
+    PushConst { src: ConstValue },
+    /// Pops two values on stack, applies operator and pushes result
+    BinOp {
+        op: Operator,
+        lsrc: ValueKey,
+        rsrc: ValueKey,
+    },
+    /// Pops value on stack, applies unary operator and pushes result
+    UnaryOp { op: UnaryOp, src: ValueKey },
+    /// Pops value from stack and stores it in address
+    Store { dst: Addr },
+    /// Loads value from address and pushes it on stack
+    Load { src: Addr },
+}
 
 impl BlockCtx {
     pub fn push_scope(&mut self) {

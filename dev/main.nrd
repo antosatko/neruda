@@ -52,15 +52,15 @@ const BYTE: u32 = 8
 
 type _128_BYTES = [u8; Bits::Eight]
 type Bits = enum (2 * self): u32 {
-    Zero; One = 1; Two; Three; Four; Five; Six; Seven; Eight
+    Zero = 0; One = 1; Two; Three; Four; Five; Six; Seven; Eight
 }
 
 
 const WIDTH: u32 = 1920
 const HEIGHT: u32 = 1080
 type DrawBuffer = [u32; WIDTH * HEIGHT]
-type BufferType = enum {
-    Front
+type BufferType = enum (self + 1): u32 {
+    Front = 0
     Back
     Count
 }
@@ -69,11 +69,13 @@ type DoubleBuffer<T> = struct {
     current: BufferType = BufferType::Front
 }
 
-type DrawSurface = DoubleBuffer<DrawBuffer>
+type Arr = [i32]
+const DAAA: Arr = [1, 2, 3]
 
+type DrawSurface = DoubleBuffer<DrawBuffer>
 
 function nevimco(): i32 {
     var a: i32 = 7
-    var b: m::Im<DrawSurface> = struct m::Im<DrawSurface> {}
+    var b: m::Im<f32> = (m::PI, m::PI * 2)
     return a * 8
 }

@@ -137,6 +137,7 @@ fn main() {
                     traits,
                     enums,
                     references,
+                    morphs,
                 } = &ir_ctx.types;
                 println!("function types:");
                 for t in functions.iter() {
@@ -152,7 +153,7 @@ fn main() {
                 }
                 println!("enum types:");
                 for t in enums.iter() {
-                    println!("\t- {}", t.stringify());
+                    println!("\t- {}", t.stringify(&ir_ctx.types));
                 }
                 println!("array types:");
                 for t in arrays.iter() {
@@ -173,6 +174,10 @@ fn main() {
                 println!("module refs:");
                 for t in modules.iter() {
                     println!("\t- {}", t.stringify());
+                }
+                println!("polymorphs:");
+                for t in morphs.iter() {
+                    println!("\t- {}", t.stringify(&ir_ctx.types));
                 }
                 println!("named types:");
                 for t in named.iter() {

@@ -8,7 +8,7 @@ impl Context {
 
         if let Some(generics) = generics {
             for generic in generics.deref() {
-                let mut constraints = Vec::new();
+                let mut generics = Vec::new();
 
                 for constr_path in &generic.constraints {
                     let module = self.types.modules.get_mut_unchecked(mod_key);
@@ -18,6 +18,7 @@ impl Context {
                         .get(constr_path.path.first().as_ref().unwrap().inner.as_ref())
                         .unwrap()
                         .clone();
+                    dbg!("resolve traits like a normal person");
 
                     let trt_key = match obj_key {
                         AnyObjectKey::Trait(k) => k,
@@ -38,17 +39,23 @@ impl Context {
                         }
                     };
 
-                    constraints.push(ty);
+                    generics.push(ty);
                 }
 
-                let constraint = if constraints.is_empty() {
-                    self.auto_types.any_conr
-                } else {
-                    self.types.constraints.push(ConstraintType { constraints })
+                let constraint = self.types.constraints.push_unique(ConstraintType {
+                    constraints: generics,
+                });
+
+                let ident = generic.identifier.deref();
+
+                let generic = GenericType {
+                    ident: ident.clone(),
+                    constraint,
                 };
 
-                self.generic_ctx
-                    .insert(generic.identifier.inner.as_ref().clone(), constraint);
+                let gen_key = self.types.generics.push(generic);
+
+                self.generic_ctx.insert(ident.clone(), gen_key);
             }
         }
 
@@ -66,8 +73,8 @@ use crate::{
     const_stage::{
         Context, Diagnostic, Error, Errors,
         objects::{AnyObjectKey, InitState, TraitObj},
-        types::{ConstraintKey, ConstraintType, ModuleKey},
+        types::{ConstraintType, GenericKey, GenericType, ModuleKey},
     },
 };
 
-pub type GContext = ScopeTree<SmolStr, ConstraintKey>;
+pub type GContext = ScopeTree<SmolStr, GenericKey>;

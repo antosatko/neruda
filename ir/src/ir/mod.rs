@@ -23,18 +23,18 @@ pub struct VariableTag;
 pub struct Variable {
     pub identifier: Span<SmolStr>,
     pub ty: AnyTypeKey,
-    pub value: ValueKey,
+    pub value: Value,
     pub used: bool,
 }
 
-pub type ValueKey = Key<ValueTag>;
+/*pub type ValueKey = Key<ValueTag>;
 pub type ValueArena = Arena<Value, ValueTag>;
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct ValueTag;
 #[derive(Debug)]
 pub struct Value {
     pub ty: AnyTypeKey,
-}
+}*/
 
 pub struct IrScopeCtx {
     variables: HashMap<SmolStr, VariableKey>,
@@ -47,7 +47,7 @@ pub struct BlockCtx {
 #[derive(Debug)]
 pub struct FunctionIr {
     pub variables: VariableArena,
-    pub values: ValueArena,
+    //pub values: ValueArena,
     pub instructions: Vec<Instruction>,
 }
 
@@ -57,17 +57,23 @@ pub enum Addr {
 }
 
 #[derive(Debug, Clone)]
+pub enum Value {
+    Const(ConstValue),
+    Runtime(AnyTypeKey),
+}
+
+#[derive(Debug, Clone)]
 pub enum Instruction {
     /// Pushes a constant value on stack
     PushConst { src: ConstValue },
     /// Pops two values on stack, applies operator and pushes result
     BinOp {
         op: Operator,
-        lsrc: ValueKey,
-        rsrc: ValueKey,
+        lsrc: Value,
+        rsrc: Value,
     },
     /// Pops value on stack, applies unary operator and pushes result
-    UnaryOp { op: UnaryOp, src: ValueKey },
+    UnaryOp { op: UnaryOp, src: Value },
     /// Pops value from stack and stores it in address
     Store { dst: Addr },
     /// Loads value from address and pushes it on stack

@@ -14,6 +14,7 @@ const KEYWORDS: &[&'static str] = &[
     "init",
     "struct",
     "component",
+    "resource",
     "var",
     "function",
     "return",
@@ -36,7 +37,7 @@ const KEYWORDS: &[&'static str] = &[
     "for",
 ];
 
-const KEYWORDS_NON_BLOCKING: &[&'static str] = &["where", "systems", "resources", "on", "import"];
+const KEYWORDS_NON_BLOCKING: &[&'static str] = &["where", "systems", "on", "import"];
 
 mod grammar_errs;
 
@@ -1172,21 +1173,6 @@ pub fn gen_parser<'src>() -> Parser<'static> {
         .variables([list_var("systems")])
         .build();
 
-    let resources = parser
-        .grammar
-        .new_node("resources")
-        .rules([
-            is(keyword("resources")).commit(),
-            is(token("{")),
-            loop_().then([is_one_of([
-                option(value).set("resources"),
-                option(token("}")).return_node(),
-            ])
-            .hint("A list of simple values")]),
-        ])
-        .variables([list_var("resources")])
-        .build();
-
     let scheduler_init = parser
         .grammar
         .new_node("scheduler initialization")
@@ -1202,15 +1188,13 @@ pub fn gen_parser<'src>() -> Parser<'static> {
             is(keyword("scheduler")).commit().start(),
             is(ident).set(IDENTIFIER),
             is(token("{")),
-            maybe(resources).set("resources"),
             maybe(systems).set("systems"),
             maybe(scheduler_init).set("initialization"),
             is(token("}"))
-                .hint("Scheduler must at most contain resources and systems in this order"),
+                .hint("Scheduler must at most contain systems and initialization in this order"),
         ])
         .variables([
             IDENTIFIER_VAR,
-            node_var("resources"),
             node_var("systems"),
             node_var("initialization"),
         ])
@@ -1368,6 +1352,29 @@ pub fn gen_parser<'src>() -> Parser<'static> {
         .variables([IDENTIFIER_VAR, node_var("type")])
         .build();
 
+    let resource = parser
+        .grammar
+        .new_node("resource")
+        .has(docstr, "docs")
+        .rules([
+            is(keyword("resource")).commit().start(),
+            is(ident).set(IDENTIFIER),
+            maybe(token("?")).set("optional"),
+            maybe(token(":")).then([is(type_)
+                .set("type")
+                .hint("Expected type literal after ':'")]),
+            maybe(token("=")).then([is(expression)
+                .set("default expression")
+                .hint("Expected expression after '='")]),
+        ])
+        .variables([
+            IDENTIFIER_VAR,
+            node_var("optional"),
+            node_var("type"),
+            node_var("default expression"),
+        ])
+        .build();
+
     let type_kw = parser
         .grammar
         .new_node("type definition")
@@ -1391,6 +1398,7 @@ pub fn gen_parser<'src>() -> Parser<'static> {
         .new_enum("top level statement")
         .options([
             scheduler, function, system, component, type_kw, import, const_kw, trait_kw, impl_kw,
+            resource,
         ])
         .build();
 

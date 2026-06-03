@@ -67,7 +67,7 @@ pub struct Span<T> {
     pub location: SpanIndex,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct SpanIndex {
     pub index: usize,
     pub len: usize,
@@ -135,7 +135,6 @@ pub struct Module {
 pub enum Object {
     Scheduler {
         ident: Span<SmolStr>,
-        resources: Option<Span<Vec<Span<Value>>>>,
         systems: Option<Span<Vec<Span<SystemInclusion>>>>,
         init: Option<(Span<Body>, Keyword)>,
         docs: Vec<Span<SmolStr>>,
@@ -196,6 +195,14 @@ pub enum Object {
         for_kw: Keyword,
         generic_parameters: Option<Span<Vec<Span<GenericParameter>>>>,
         methods: Vec<Span<Function>>,
+    },
+
+    Resource {
+        ident: Span<SmolStr>,
+        docs: Vec<Span<SmolStr>>,
+        ty: Option<Span<Type>>,
+        default_expression: Option<Span<Expression>>,
+        is_optional: Option<Keyword>,
     },
 }
 

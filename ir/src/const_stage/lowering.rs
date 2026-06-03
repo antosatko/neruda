@@ -8,11 +8,12 @@ use smol_str::SmolStr;
 use crate::ast::{self, ConstValue, Number, NumberValue, Span, SpanIndex};
 use crate::const_stage::objects::{
     AnyObject, AnyObjectKey, ComponentObj, ComponentObjKey, ConstObj, ConstObjKey, FunctionObj,
-    FunctionObjKey, ImportObj, InitState, Module, TraitObj, TypeAliasObj, TypeAliasObjKey,
+    FunctionObjKey, ImportObj, InitState, Module, ResourceObj, ResourceObjKey, TraitObj,
+    TypeAliasObj, TypeAliasObjKey,
 };
 use crate::const_stage::types::{
-    AnyTypeKey, ArrayType, EnumType, FunctionType, ModuleKey, ModuleTag, PrimitiveType, RefType,
-    StructType, TraitType, TupleType,
+    AnyTypeKey, ArrayType, EnumType, FunctionType, ModuleKey, ModuleTag, PolymorphType,
+    PrimitiveType, RefType, StructType, TraitType, TupleType,
 };
 use crate::const_stage::{Context, Diagnostic, Error, Errors};
 
@@ -72,6 +73,25 @@ impl Context {
                             .insert(ident, AnyObjectKey::Import(key));
                         continue;
                     }
+                    ast::Object::Resource {
+                        ident,
+                        docs: _,
+                        ty: _,
+                        default_expression: _,
+                        is_optional,
+                    } => (
+                        ident.deref().clone(),
+                        AnyObjectKey::Resource(self.objects.resources.push(AnyObject {
+                            data: ResourceObj {
+                                default: InitState::Uninitialized,
+                                optional: is_optional.is_some(),
+                                ty: InitState::Uninitialized,
+                            },
+                            identifier: ident.deref().clone(),
+                            ast_object: obj_key,
+                            module: *module_key,
+                        })),
+                    ),
                     ast::Object::Scheduler { .. } => continue,
                     ast::Object::Function(ast::Function { ident, .. }) => (
                         ident.inner.as_ref().clone(),
@@ -184,7 +204,95 @@ impl Context {
         for function_key in function_keys {
             self.lower_function_with_key(function_key)?;
         }
+
+        let resource_keys: Vec<ResourceObjKey> = self.objects.resources.iter_keys().collect();
+        for resource_key in resource_keys {
+            self.lower_resource_with_key(resource_key)?;
+        }
         Ok(())
+    }
+
+    #[track_caller]
+    pub fn lower_object_const_stage(&mut self, key: AnyObjectKey) -> Result<(), Error> {
+        match key {
+            AnyObjectKey::Import(_) => {
+                unreachable!("imports are not part of const stage, this is a bug in the compiler")
+            }
+            AnyObjectKey::Const(key) => self.lower_const_with_key(key).map(|_| ()),
+            AnyObjectKey::Type(key) => self.lower_type_alias_with_key(key).map(|_| ()),
+            AnyObjectKey::Trait(key) => todo!(),
+            AnyObjectKey::Component(key) => self.lower_component_with_key(key),
+            AnyObjectKey::Function(key) => self.lower_function_with_key(key),
+            AnyObjectKey::Resource(key) => self.lower_resource_with_key(key),
+        }
+    }
+
+    fn lower_resource_with_key(
+        &mut self,
+        resource_key: ResourceObjKey,
+    ) -> Result<(), Diagnostic<Errors>> {
+        let obj = self.objects.resources.get_unchecked(&resource_key);
+        let mod_key = obj.module;
+        let module = self.types.modules.get_unchecked(&mod_key);
+        Ok(
+            match self
+                .ast
+                .get(&module.path)
+                .unwrap()
+                .objects
+                .get_unchecked(&obj.ast_object)
+                .clone()
+                .deref()
+            {
+                ast::Object::Resource {
+                    ident,
+                    docs,
+                    ty,
+                    default_expression,
+                    is_optional,
+                } => {
+                    let identifier = ident.deref().clone();
+                    let (ty, default) = match (ty, default_expression) {
+                        (Some(ty), Some(expr)) => {
+                            let ty = ty.lower(self, mod_key)?;
+                            let default = expr.const_eval(self, mod_key, &None, &Some(ty))?;
+                            (ty, Some(default))
+                        }
+                        (Some(ty), None) => {
+                            let type_lowered = ty.lower(self, mod_key)?;
+                            let default = match is_optional {
+                                Some(_) => None,
+                                None => {
+                                    Some(type_lowered.const_default(self).map_err(|e| Error {
+                                        inner: e,
+                                        module: mod_key,
+                                        span: ty.location,
+                                    })?)
+                                }
+                            };
+                            (type_lowered, default)
+                        }
+                        (None, Some(default)) => {
+                            let default = default.const_eval(self, mod_key, &None, &None)?;
+                            let ty = default.type_of();
+                            (ty, Some(default))
+                        }
+                        (None, None) => match is_optional {
+                            Some(_) => (AnyTypeKey::Primitive(PrimitiveType::Void), None),
+                            None => Err(Error {
+                                inner: Errors::ExpectedOptionalResource { ident: identifier },
+                                module: mod_key,
+                                span: ident.location,
+                            })?,
+                        },
+                    };
+                    let res = self.objects.resources.get_mut_unchecked(&resource_key);
+                    res.data.default = InitState::Done(default);
+                    res.data.ty = InitState::Done(ty);
+                }
+                _ => unreachable!(),
+            },
+        )
     }
 
     fn lower_function_with_key(
@@ -326,6 +434,9 @@ impl Context {
         type_key: Key<super::objects::TypeAliasObjTag>,
     ) -> Result<&mut AnyObject<TypeAliasObj>, Diagnostic<Errors>> {
         let this = self.objects.types.get_unchecked(&type_key);
+        if this.data.generics.is_done() && this.data.ty.is_done() {
+            return Ok(self.objects.types.get_mut_unchecked(&type_key));
+        }
         let ast_key = this.ast_object;
         let mod_key = this.module;
         let module_path = &self.types.modules.get_unchecked(&mod_key).path;
@@ -401,6 +512,19 @@ impl Context {
                         }
                         _ => (),
                     }
+                    let introduced_scope = self.generic_ctx.node(&self.generic_ctx.current());
+                    let key = if !introduced_scope.values.is_empty() {
+                        let parameters =
+                            introduced_scope.values.iter().map(|(_, ty)| *ty).collect();
+                        let this_type = PolymorphType {
+                            inner: key,
+                            parameters,
+                        };
+                        let this_key = self.types.polymorphs.push_unique(this_type);
+                        AnyTypeKey::Polymorph(this_key)
+                    } else {
+                        key
+                    };
                     self.types.named.get_mut_unchecked(&named_key).repr = key;
                     let obj = self.objects.types.get_mut_unchecked(&type_key);
                     obj.data.ty.mark_done();
@@ -506,7 +630,10 @@ impl Context {
                 module: mod_key,
                 inner: Errors::EvalModule(path.iter().map(|v| v.deref().clone()).collect(), module),
             }),
-            PathNode::Object(key) => Ok(key),
+            PathNode::Object(key) => {
+                self.lower_object_const_stage(key)?;
+                Ok(key)
+            }
         }
     }
 
@@ -764,7 +891,7 @@ impl ast::Type {
                     if let Some(ty) = PrimitiveType::from_str(&ident.inner) {
                         AnyTypeKey::Primitive(ty)
                     } else if let Some(ty) = ctx.generic_ctx.get(ident) {
-                        AnyTypeKey::Constraint(*ty)
+                        AnyTypeKey::Generic(*ty)
                     } else {
                         resolve_type_path(ctx, module, identifier_path, generic_arguments)?
                     }
@@ -809,7 +936,11 @@ impl ast::Type {
                     Some((ident, expr)) => {
                         let value = match expr {
                             Some(e) => e.const_eval(ctx, module, &None, &Some(repr))?,
-                            None => todo!("forgot to fix autostep for anytype"),
+                            None => repr.const_default(ctx).map_err(|e| Error {
+                                inner: e,
+                                module: module,
+                                span: ident.location,
+                            })?,
                         };
                         variants.push((ident.inner.as_ref().clone(), value.clone()));
                         Some(value)
@@ -840,7 +971,7 @@ impl ast::Type {
                                 None => last_value.autostep().map_err(|e| Error {
                                     inner: e,
                                     module: module,
-                                    span: self.literal.location,
+                                    span: ident.location,
                                 })?,
                             },
                         };
@@ -925,7 +1056,7 @@ fn resolve_type_path(
 
             let ty = match ty {
                 InitState::Done(t) | InitState::Progress(t) => *t,
-                _ => unreachable!("type alias not initialized"),
+                _ => unreachable!("type alias not encountered during init"),
             };
 
             let gen_args: Vec<_> = generic_arguments
@@ -967,12 +1098,13 @@ fn resolve_type_path(
                 .map(|arg| arg.location)
                 .unwrap_or(identifier_path.location);
 
-            let new = AnyTypeKey::Named(ty).substitute_named_iter(
-                substitutions,
-                &mut ctx.types,
-                module,
-                span,
-            )?;
+            let new = AnyTypeKey::Named(ty)
+                .substitute_many(&mut ctx.types, &substitutions)
+                .map_err(|e| Error {
+                    inner: e,
+                    module,
+                    span,
+                })?;
 
             new
         }

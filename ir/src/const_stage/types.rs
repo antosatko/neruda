@@ -1,11 +1,11 @@
-use std::{borrow::Cow, collections::HashMap};
+use std::borrow::Cow;
 
 use arena::{Arena, Key};
 use smol_str::{SmolStr, ToSmolStr};
 
 use crate::{
-    ast::{ConstValue, Number, NumberValue, SpanIndex},
-    const_stage::{Error, Errors, objects::Module},
+    ast::{ConstValue, Number, NumberValue},
+    const_stage::{Errors, objects::Module},
 };
 
 pub type FunctionArena = Arena<FunctionType, FunctionTag>;
@@ -22,7 +22,7 @@ pub type ArrayArena = Arena<ArrayType, ArrayTag>;
 pub type ArrayKey = Key<ArrayTag>;
 #[derive(PartialEq, Debug, Copy, Clone, Hash)]
 pub struct ArrayTag;
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Clone)]
 pub struct ArrayType {
     pub element_type: AnyTypeKey,
     pub size: Option<usize>,
@@ -32,7 +32,7 @@ pub type TupleArena = Arena<TupleType, TupleTag>;
 pub type TupleKey = Key<TupleTag>;
 #[derive(PartialEq, Debug, Copy, Clone, Hash)]
 pub struct TupleTag;
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Clone)]
 pub struct TupleType {
     pub parameters: Vec<AnyTypeKey>,
 }
@@ -41,7 +41,7 @@ pub type TraitArena = Arena<TraitType, TraitTag>;
 pub type TraitKey = Key<TraitTag>;
 #[derive(PartialEq, Debug, Copy, Clone, Hash)]
 pub struct TraitTag;
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Clone)]
 pub struct TraitType {
     pub ident: SmolStr,
 }
@@ -50,7 +50,7 @@ pub type StructArena = Arena<StructType, StructTag>;
 pub type StructKey = Key<StructTag>;
 #[derive(PartialEq, Debug, Copy, Clone, Hash)]
 pub struct StructTag;
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Clone)]
 pub struct StructType {
     pub parameters: Vec<(SmolStr, AnyTypeKey, Option<ConstValue>)>,
 }
@@ -59,7 +59,7 @@ pub type EnumArena = Arena<EnumType, EnumTag>;
 pub type EnumKey = Key<EnumTag>;
 #[derive(PartialEq, Debug, Copy, Clone, Hash)]
 pub struct EnumTag;
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Clone)]
 pub struct EnumType {
     pub repr: AnyTypeKey,
     pub variants: Vec<(SmolStr, ConstValue)>,
@@ -69,7 +69,7 @@ pub struct EnumType {
 pub struct ConstraintTag;
 pub type ConstraintArena = Arena<ConstraintType, ConstraintTag>;
 pub type ConstraintKey = Key<ConstraintTag>;
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Clone)]
 pub struct ConstraintType {
     pub constraints: Vec<TraitKey>,
 }
@@ -78,9 +78,9 @@ pub struct ConstraintType {
 pub struct MorphedTag;
 pub type MorphedArena = Arena<MorphedType, MorphedTag>;
 pub type MorphedKey = Key<MorphedTag>;
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Clone)]
 pub struct MorphedType {
-    pub parent: AnyTypeKey,
+    pub parent: PolymorphKey,
     pub this: AnyTypeKey,
     pub arguments: Vec<AnyTypeKey>,
 }
@@ -89,7 +89,7 @@ pub struct MorphedType {
 pub struct NamedTypeTag;
 pub type NamedTypeArena = Arena<NamedTypeType, NamedTypeTag>;
 pub type NamedTypeKey = Key<NamedTypeTag>;
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Clone)]
 pub struct NamedTypeType {
     pub name: SmolStr,
     pub repr: AnyTypeKey,
@@ -97,11 +97,21 @@ pub struct NamedTypeType {
 
 pub type GenericArena = Arena<GenericType, GenericTag>;
 pub type GenericKey = Key<GenericTag>;
-#[derive(PartialEq, Debug, Copy, Clone, Hash)]
+#[derive(PartialEq, Debug, Copy, Clone, Hash, Eq)]
 pub struct GenericTag;
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Clone)]
 pub struct GenericType {
-    pub generic_parameters: Vec<(SmolStr, ConstraintKey)>,
+    pub constraint: ConstraintKey,
+    pub ident: SmolStr,
+}
+
+pub type PolymorphArena = Arena<PolymorphType, PolymorphTag>;
+pub type PolymorphKey = Key<PolymorphTag>;
+#[derive(PartialEq, Debug, Copy, Clone, Hash)]
+pub struct PolymorphTag;
+#[derive(PartialEq, Debug, Clone)]
+pub struct PolymorphType {
+    pub parameters: Vec<GenericKey>,
     pub inner: AnyTypeKey,
 }
 
@@ -109,7 +119,7 @@ pub type RefArena = Arena<RefType, RefTag>;
 pub type RefKey = Key<RefTag>;
 #[derive(PartialEq, Debug, Copy, Clone, Hash)]
 pub struct RefTag;
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Clone)]
 pub struct RefType {
     pub inner: AnyTypeKey,
 }
@@ -147,7 +157,6 @@ pub enum PrimitiveType {
 #[derive(PartialEq, Debug, Copy, Clone, Hash)]
 pub enum AnyTypeKey {
     Primitive(PrimitiveType),
-    Constraint(ConstraintKey),
     Function(FunctionKey),
     Array(ArrayKey),
     Tuple(TupleKey),
@@ -157,6 +166,8 @@ pub enum AnyTypeKey {
     Reference(RefKey),
     Named(NamedTypeKey),
     ModuleRef(ModuleKey),
+    Polymorph(PolymorphKey),
+    Generic(GenericKey),
     Morphed(MorphedKey),
     AnonymousStruct,
 }
@@ -165,6 +176,8 @@ pub enum AnyTypeKey {
 pub struct Types {
     pub functions: FunctionArena,
     pub constraints: ConstraintArena,
+    pub generics: GenericArena,
+    pub polymorphs: PolymorphArena,
     pub morphs: MorphedArena,
     pub structures: StructArena,
     pub enums: EnumArena,
@@ -492,13 +505,45 @@ impl MorphedType {
     pub fn stringify(&self, types: &Types) -> String {
         format!(
             "{}<{}>",
-            self.parent.stringify(types),
+            self.this.stringify(types),
             self.arguments
                 .iter()
                 .map(|ty| ty.stringify(types).to_smolstr())
                 .collect::<Vec<SmolStr>>()
                 .join(", ")
         )
+    }
+}
+
+impl PolymorphType {
+    pub fn stringify(&self, types: &Types) -> String {
+        format!(
+            "<{}>{}",
+            self.parameters
+                .iter()
+                .map(|ty| types
+                    .generics
+                    .get_unchecked(ty)
+                    .stringify(types)
+                    .to_smolstr())
+                .collect::<Vec<SmolStr>>()
+                .join(", "),
+            self.inner.stringify(types),
+        )
+    }
+}
+
+impl GenericType {
+    pub fn stringify(&self, types: &Types) -> String {
+        match types
+            .constraints
+            .get_unchecked(&self.constraint)
+            .stringify(types)
+            .as_str()
+        {
+            "" => format!("{}", self.ident),
+            constraints => format!("{}: {}", self.ident, constraints),
+        }
     }
 }
 
@@ -562,262 +607,89 @@ impl AnyTypeKey {
         this
     }
 
-    fn substitute_named_many(
+    pub fn substitute_many(
         &self,
-        substitutions: &HashMap<ConstraintKey, AnyTypeKey>,
         types: &mut Types,
-        module: ModuleKey,
-        span: SpanIndex,
-    ) -> Result<AnyTypeKey, Error> {
-        let this = match self {
+        substitutions: &Vec<(GenericKey, AnyTypeKey)>,
+    ) -> Result<AnyTypeKey, Errors> {
+        Ok(match *self {
+            AnyTypeKey::Primitive(_) | AnyTypeKey::Enum(_) => *self,
+            AnyTypeKey::Generic(key) => match substitutions.iter().find(|(k, _)| k.eq(&key)) {
+                Some((_, s)) => dbg!(*s), // TODO: add constraint checks etc
+                None => *self,
+            },
             AnyTypeKey::Function(key) => {
-                let FunctionType {
-                    returns,
-                    parameters,
-                } = types.functions.get_unchecked(key).clone();
-
-                let new_returns =
-                    returns.substitute_named_many(substitutions, types, module, span)?;
-
-                let mut new_parameters = Vec::with_capacity(parameters.len());
-                for p in parameters {
-                    new_parameters.push(p.substitute_named_many(
-                        substitutions,
-                        types,
-                        module,
-                        span,
-                    )?);
+                let mut this = types.functions.get_unchecked(&key).clone();
+                for param in &mut this.parameters {
+                    *param = param.substitute_many(types, substitutions)?;
                 }
-
-                AnyTypeKey::Function(types.functions.push_unique(FunctionType {
-                    parameters: new_parameters,
-                    returns: new_returns,
-                }))
-            }
-
-            AnyTypeKey::Array(key) => {
-                let ArrayType { element_type, size } = *types.arrays.get_unchecked(key);
-
-                let new_inner =
-                    element_type.substitute_named_many(substitutions, types, module, span)?;
-
-                AnyTypeKey::Array(types.arrays.push_unique(ArrayType {
-                    size,
-                    element_type: new_inner,
-                }))
-            }
-
-            AnyTypeKey::Tuple(key) => {
-                let ty = types.tuples.get_unchecked(key);
-
-                let parameters = ty
-                    .parameters
-                    .iter()
-                    .map(|ty| match ty {
-                        AnyTypeKey::Constraint(cons) => {
-                            substitutions.get(cons).copied().unwrap_or(*ty)
-                        }
-                        _ => *ty,
-                    })
-                    .collect();
-
-                AnyTypeKey::Tuple(types.tuples.push_unique(TupleType { parameters }))
-            }
-
-            AnyTypeKey::Reference(key) => {
-                let resolved = types
-                    .references
-                    .get_unchecked(key)
-                    .inner
-                    .clone()
-                    .substitute_named_many(substitutions, types, module, span)?;
-
-                AnyTypeKey::Reference(types.references.push_unique(RefType { inner: resolved }))
-            }
-
-            AnyTypeKey::Struct(key) => {
-                let original = types.structures.get_unchecked(key);
-
-                let mut parameters = Vec::with_capacity(original.parameters.len());
-
-                for (ident, ty, default) in original.parameters.clone().iter() {
-                    let substituted = ty
-                        .substitute_named_many(substitutions, types, module, span)
-                        .unwrap_or(*ty);
-
-                    parameters.push((ident.clone(), substituted, default.clone()));
-                }
-
-                AnyTypeKey::Struct(types.structures.push_unique(StructType { parameters }))
-            }
-
-            AnyTypeKey::Named(key) => types
-                .named
-                .get_unchecked(key)
-                .repr
-                .clone()
-                .substitute_named_many(substitutions, types, module, span)?,
-
-            AnyTypeKey::ModuleRef(_)
-            | AnyTypeKey::Trait(_)
-            | AnyTypeKey::Primitive(_)
-            | AnyTypeKey::Constraint(_)
-            | AnyTypeKey::Morphed(_)
-            | AnyTypeKey::AnonymousStruct
-            | AnyTypeKey::Enum(_) => Err(crate::const_stage::Diagnostic {
-                span,
-                module,
-                inner: Errors::CouldNotSubstituteType(*self),
-            })?,
-        };
-        Ok(this)
-    }
-
-    pub fn substitute_named_iter<I>(
-        &self,
-        substitutions: I,
-        types: &mut Types,
-        module: ModuleKey,
-        span: SpanIndex,
-    ) -> Result<AnyTypeKey, Error>
-    where
-        I: IntoIterator<Item = (ConstraintKey, AnyTypeKey)>,
-    {
-        let ordered: Vec<(_, _)> = substitutions.into_iter().collect();
-        if ordered.is_empty() {
-            return Ok(*self);
-        }
-
-        let map: HashMap<_, _> = ordered.iter().cloned().collect();
-
-        let this = self.substitute_named_many(&map, types, module, span)?;
-
-        let morph = MorphedType {
-            parent: *self,
-            this,
-            arguments: ordered.iter().map(|(_, ty)| *ty).collect(),
-        };
-        let key = types.morphs.push_unique(morph);
-        Ok(AnyTypeKey::Morphed(key))
-    }
-
-    pub fn substitute_named(
-        &self,
-        substitution: AnyTypeKey,
-        cons: &ConstraintKey,
-        types: &mut Types,
-        module: ModuleKey,
-        span: SpanIndex,
-    ) -> Result<AnyTypeKey, Error> {
-        match self {
-            AnyTypeKey::Function(key) => {
-                let FunctionType {
-                    returns,
-                    parameters,
-                } = types.functions.get_unchecked(key).clone();
-                let new_returns =
-                    returns.substitute_named(substitution, cons, types, module, span)?;
-                let mut new_parameters = Vec::with_capacity(parameters.len());
-                for p in parameters {
-                    new_parameters.push(p.substitute_named(
-                        substitution,
-                        cons,
-                        types,
-                        module,
-                        span,
-                    )?);
-                }
-                let new = FunctionType {
-                    parameters: new_parameters,
-                    returns: new_returns,
-                };
-                Ok(AnyTypeKey::Function(types.functions.push_unique(new)))
+                this.returns = this.returns.substitute_many(types, substitutions)?;
+                let ty_key = types.functions.push_unique(this);
+                AnyTypeKey::Function(ty_key)
             }
             AnyTypeKey::Array(key) => {
-                let ArrayType { element_type, size } = *types.arrays.get_unchecked(key);
-                let new_inner =
-                    element_type.substitute_named(substitution, cons, types, module, span)?;
-                let new = ArrayType {
-                    size,
-                    element_type: new_inner,
-                };
-                Ok(AnyTypeKey::Array(types.arrays.push_unique(new)))
+                let mut this = types.arrays.get_unchecked(&key).clone();
+                this.element_type = this.element_type.substitute_many(types, substitutions)?;
+                let ty_key = types.arrays.push_unique(this);
+                AnyTypeKey::Array(ty_key)
             }
             AnyTypeKey::Tuple(key) => {
-                let ty = types.tuples.get_unchecked(key);
-                let result = ty
-                    .parameters
-                    .iter()
-                    .map(|ty| match ty {
-                        AnyTypeKey::Constraint(key) => {
-                            if key == cons {
-                                substitution
-                            } else {
-                                *ty
-                            }
-                        }
-                        _ => *ty,
-                    })
-                    .collect();
-
-                let new = TupleType { parameters: result };
-
-                Ok(AnyTypeKey::Tuple(types.tuples.push_unique(new)))
-            }
-            AnyTypeKey::Reference(key) => {
-                let resolved = types
-                    .references
-                    .get_unchecked(key)
-                    .inner
-                    .clone()
-                    .substitute_named(substitution, cons, types, module, span)?;
-                Ok(AnyTypeKey::Reference(
-                    types.references.push_unique(RefType { inner: resolved }),
-                ))
+                let mut this = types.tuples.get_unchecked(&key).clone();
+                for param in &mut this.parameters {
+                    *param = param.substitute_many(types, substitutions)?;
+                }
+                let ty_key = types.tuples.push_unique(this);
+                AnyTypeKey::Tuple(ty_key)
             }
             AnyTypeKey::Struct(key) => {
-                let original = types.structures.get_unchecked(key);
-                let mut parameters = Vec::with_capacity(original.parameters.len());
-                for i in 0..original.parameters.len() {
-                    let (ident, ty, default) =
-                        types.structures.get_unchecked(key).parameters[i].clone();
-                    let s = ty
-                        .substitute_named(substitution, cons, types, module, span)
-                        .unwrap_or(ty);
-                    parameters.push((ident, s, default));
+                let mut this = types.structures.get_unchecked(&key).clone();
+                for (_, ty, _) in &mut this.parameters {
+                    *ty = ty.substitute_many(types, substitutions)?;
                 }
-                Ok(AnyTypeKey::Struct(
-                    types.structures.push_unique(StructType { parameters }),
-                ))
+                let this_key = types.structures.push_unique(this);
+                AnyTypeKey::Struct(this_key)
             }
-            AnyTypeKey::Named(key) => types
-                .named
-                .get_unchecked(key)
-                .repr
-                .clone()
-                .substitute_named(substitution, cons, types, module, span),
-            AnyTypeKey::ModuleRef(_)
-            | AnyTypeKey::Trait(_)
-            | AnyTypeKey::Primitive(_)
-            | AnyTypeKey::Constraint(_)
-            | AnyTypeKey::Morphed(_)
-            | AnyTypeKey::AnonymousStruct
-            | AnyTypeKey::Enum(_) => {
-                return Err(crate::const_stage::Diagnostic {
-                    span,
-                    module,
-                    inner: Errors::CouldNotSubstituteType(*self),
-                });
+
+            AnyTypeKey::Named(key) => {
+                let mut this = types.named.get_unchecked(&key).clone();
+                this.repr = this.repr.substitute_many(types, substitutions)?;
+                let this_key = types.named.push_unique(this);
+                AnyTypeKey::Named(this_key)
             }
-        }
+
+            AnyTypeKey::Morphed(key) => {
+                let this = types.morphs.get_unchecked(&key).this;
+                this.substitute_many(types, substitutions)?
+            }
+            AnyTypeKey::Reference(key) => {
+                let mut this = types.references.get_unchecked(&key).clone();
+                this.inner = this.inner.substitute_many(types, substitutions)?;
+                let this_key = types.references.push_unique(this);
+                AnyTypeKey::Reference(this_key)
+            }
+            AnyTypeKey::Polymorph(key) => {
+                let this = types.polymorphs.get_unchecked(&key);
+
+                let inner = this.inner.clone().substitute_many(types, substitutions)?;
+
+                let morphed = MorphedType {
+                    arguments: substitutions.iter().map(|(_, ty)| *ty).collect(),
+                    parent: key,
+                    this: inner,
+                };
+
+                let morphed_key = types.morphs.push_unique(morphed);
+                AnyTypeKey::Morphed(morphed_key)
+            }
+            AnyTypeKey::AnonymousStruct | AnyTypeKey::ModuleRef(_) | AnyTypeKey::Trait(_) => {
+                Err(Errors::CouldNotSubstituteType(*self))?
+            }
+        })
     }
 
     pub fn stringify(&self, types: &Types) -> Cow<'static, str> {
         match self {
             AnyTypeKey::Primitive(primitive_type) => Cow::Borrowed(primitive_type.stringify()),
-            AnyTypeKey::Constraint(key) => {
-                Cow::Owned(types.constraints.get_unchecked(key).stringify(types))
-            }
             AnyTypeKey::Function(key) => {
                 Cow::Owned(types.functions.get_unchecked(key).stringify(types))
             }
@@ -831,6 +703,12 @@ impl AnyTypeKey {
             }
             AnyTypeKey::Morphed(key) => {
                 Cow::Owned(types.morphs.get_unchecked(key).stringify(types))
+            }
+            AnyTypeKey::Polymorph(key) => {
+                Cow::Owned(types.polymorphs.get_unchecked(key).stringify(types))
+            }
+            AnyTypeKey::Generic(key) => {
+                Cow::Owned(types.generics.get_unchecked(key).stringify(types))
             }
             AnyTypeKey::AnonymousStruct => Cow::Borrowed("{ ... }"),
             AnyTypeKey::Enum(key) => Cow::Owned(types.enums.get_unchecked(key).stringify(types)),

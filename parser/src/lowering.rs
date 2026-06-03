@@ -43,17 +43,8 @@ pub fn module_named(
                 let ident = expect_ident(src, s, &mut diagnostics);
                 let docs = docstrings(src, s);
 
-                let mut resources = None;
                 let mut systems = None;
                 let mut init = None;
-
-                if let Some(res) = s.try_get_node("resources").as_ref() {
-                    let mut resources_vec = Vec::new();
-                    for r in res.get_list("resources") {
-                        resources_vec.push(value(src, r, &mut diagnostics)?);
-                    }
-                    resources = Some(span(resources_vec, res));
-                }
 
                 if let Some(sys) = s.try_get_node("systems").as_ref() {
                     let mut systems_vec = Vec::new();
@@ -73,7 +64,6 @@ pub fn module_named(
 
                 let obj = Object::Scheduler {
                     ident: ident.clone(),
-                    resources,
                     systems,
                     init,
                     docs,
@@ -230,6 +220,34 @@ pub fn module_named(
                         }
                     }
                     name => s.ice(&format!("This trait implementation does not exist: {name}")),
+                };
+                module.objects.push(span(obj, s));
+            }
+
+            "resource" => {
+                let ident = expect_ident(src, s.expect_node("identifier"), &mut diagnostics);
+
+                let ty = match s.try_get_node("type") {
+                    Some(t) => Some(ty(src, t, &mut diagnostics)?),
+                    None => None,
+                };
+
+                let default_expression = match s.try_get_node("default expression") {
+                    Some(e) => Some(expression(src, e, &mut diagnostics)?),
+                    None => None,
+                };
+
+                let is_optional = s
+                    .try_get_node("optional")
+                    .as_ref()
+                    .map(|n| Keyword(span((), &n)));
+
+                let obj = Object::Resource {
+                    ident,
+                    docs: docstrings(src, s),
+                    ty,
+                    default_expression,
+                    is_optional,
                 };
                 module.objects.push(span(obj, s));
             }

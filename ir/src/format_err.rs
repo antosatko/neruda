@@ -179,6 +179,19 @@ impl Errors {
                 ),
                 format!("Array element count mismatch"),
             ),
+            Errors::UndefinedDefault(ty) => (
+                "419",
+                format!(
+                    "Could not construct a default value for type '{}'",
+                    ty.stringify(&ctx.types)
+                ),
+                format!("Undefined default value"),
+            ),
+            Errors::ExpectedOptionalResource { ident } => (
+                "420",
+                format!("Resource flag '{ident}' expected to be nullable",),
+                format!("Expected nullable resource"),
+            ),
         }
     }
 }

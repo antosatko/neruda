@@ -1,10 +1,6 @@
 import math as m
 
 scheduler main {
-    resources {
-        UnitCount(0)
-    }
-
     systems {
         count_units
         cap_velocity
@@ -17,8 +13,14 @@ scheduler main {
     init => print("hello")
 }
 
+type BBA = struct {
+    a: i32
+}
+
+resource UnitCount = 0
+resource implementuj_konecne_anonymstruct: BBA = struct BBA { b: 54 }
+
 type StopAll
-type UnitCount = u32
 
 component Position = f32x2
 component Velocity = f32x2
@@ -44,35 +46,6 @@ system orbit(
 => satellite.V += 1000 / (primary.get(satellite.C).P - satellite.P).pow(2)
 // generic components
 system add<T: AddEq, U>(e: mut T + U) => e.T += e.U
-
-
-function im2tuple<T>(v: &m::Im<T>): (T, T) => (v[0], v[1])
-type IPV4_ADDR = [bool; BYTE * 4]
-const BYTE: u32 = 8
-
-type _128_BYTES = [u8; Bits::Eight]
-type Bits = enum (2 * self): u32 {
-    Zero = 0; One = 1; Two; Three; Four; Five; Six; Seven; Eight
-}
-
-
-const WIDTH: u32 = 1920
-const HEIGHT: u32 = 1080
-type DrawBuffer = [u32; WIDTH * HEIGHT]
-type BufferType = enum (self + 1): u32 {
-    Front = 0
-    Back
-    Count
-}
-type DoubleBuffer<T> = struct {
-    data: [T; BufferType::Count]
-    current: BufferType = BufferType::Front
-}
-
-type Arr = [i32]
-const DAAA: Arr = [1, 2, 3]
-
-type DrawSurface = DoubleBuffer<DrawBuffer>
 
 function nevimco(in: i32): i32 {
     var a = 7

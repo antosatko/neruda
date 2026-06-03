@@ -198,6 +198,21 @@ impl IndexedWalk for ir::ast::Span<Object> {
                     spans.extend(generics.iter().map(|g| g.span(Types::Type, line_index)));
                 }
             }
+            Object::Resource {
+                ident,
+                docs,
+                ty,
+                default_expression,
+                is_optional,
+            } => {
+                spans.push(self.span_word(Types::Keyword, line_index, "resource"));
+                if let Some(ty) = ty {
+                    ty.index(line_index, spans);
+                }
+                if let Some(e) = default_expression {
+                    e.index(line_index, spans);
+                }
+            }
             Object::TraitImpl {
                 ty,
                 trt,
@@ -233,7 +248,6 @@ impl IndexedWalk for ir::ast::Span<Object> {
             }
             Object::Scheduler {
                 ident,
-                resources,
                 systems,
                 init,
                 docs: _,
@@ -241,10 +255,6 @@ impl IndexedWalk for ir::ast::Span<Object> {
                 spans.push(self.span_word(Types::Keyword, line_index, "scheduler"));
                 spans.push(ident.span(Types::Ident, line_index));
 
-                if let Some(resources) = resources {
-                    spans.push(resources.span_word(Types::Keyword, line_index, "resources"));
-                    resources.iter().for_each(|r| r.index(line_index, spans));
-                }
                 if let Some(systems) = systems {
                     spans.push(systems.span_word(Types::Keyword, line_index, "systems"));
                     for generic in systems.iter().filter_map(|g| g.generics.as_ref()) {

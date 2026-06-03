@@ -1,10 +1,12 @@
 use std::borrow::Cow;
+use std::iter::repeat_with;
+use std::ops::Deref;
 
 use crate::ast::{
-    ConstValue, Expression, Literal, Number, NumberValue, Operator, Span, UnaryOp, Value,
+    ConstValue, Expression, Literal, Number, NumberValue, Operator, Span, SpanIndex, UnaryOp, Value,
 };
 use crate::const_stage::Context;
-use crate::const_stage::types::{AnyTypeKey, PrimitiveType};
+use crate::const_stage::types::AnyTypeKey;
 use crate::const_stage::{Diagnostic, Error, Errors, types::ModuleKey};
 
 impl Expression {
@@ -190,6 +192,76 @@ impl NumberValue {
             (Self::Int(_), Self::Int(_)) => self.clone(),
             _ => None?,
         })
+    }
+}
+
+impl AnyTypeKey {
+    pub fn const_default(&self, ctx: &mut Context) -> Result<ConstValue, Errors> {
+        match self {
+            AnyTypeKey::Primitive(primitive_type) => Ok(primitive_type.default()),
+            AnyTypeKey::Array(key) => {
+                let this = ctx.types.arrays.get_unchecked(key);
+                let elem_type = this.element_type;
+                let size = this.size.ok_or(Errors::UndefinedDefault(elem_type))?;
+                let val = elem_type.const_default(ctx)?;
+                let value = ConstValue::Array {
+                    elements: repeat_with(|| Span::new(val.clone(), SpanIndex::default()))
+                        .take(size)
+                        .collect(),
+                    ty: *self,
+                };
+                Ok(value)
+            }
+            AnyTypeKey::Tuple(key) => {
+                let this = ctx.types.tuples.get_unchecked(key);
+                let mut elements = Vec::with_capacity(this.parameters.len());
+                for elem in this.parameters.clone() {
+                    elements.push(Span::new(elem.const_default(ctx)?, SpanIndex::default()));
+                }
+                let value = ConstValue::Tuple {
+                    elements,
+                    ty: *self,
+                };
+                Ok(value)
+            }
+            AnyTypeKey::Struct(key) => {
+                let this = ctx.types.structures.get_unchecked(key);
+                let mut fields = Vec::with_capacity(this.parameters.len());
+                let sp_idx = SpanIndex::default();
+                for (ident, ty, default) in this.parameters.clone() {
+                    let val = match default {
+                        Some(val) => val,
+                        None => ty.const_default(ctx)?,
+                    };
+                    fields.push(Span::new(
+                        (Span::new(ident, sp_idx), Span::new(val, sp_idx)),
+                        sp_idx,
+                    ));
+                }
+                let value = ConstValue::Structure { fields, ty: *self };
+                Ok(value)
+            }
+            AnyTypeKey::Named(key) => ctx
+                .types
+                .named
+                .get_unchecked(key)
+                .repr
+                .clone()
+                .const_default(ctx),
+            AnyTypeKey::Morphed(key) => {
+                let this = ctx.types.morphs.get_unchecked(key);
+                this.this.clone().const_default(ctx)
+            }
+            AnyTypeKey::Trait(_) => Err(Errors::UndefinedDefault(*self)),
+            AnyTypeKey::Enum(_) => Err(Errors::UndefinedDefault(*self)),
+            AnyTypeKey::Reference(_) => Err(Errors::UndefinedDefault(*self)),
+            AnyTypeKey::ModuleRef(_) => Err(Errors::UndefinedDefault(*self)),
+            AnyTypeKey::Function(_) => Err(Errors::UndefinedDefault(*self)),
+            // AnyTypeKey::Constraint(_) => Err(Errors::UndefinedDefault(*self)),
+            AnyTypeKey::AnonymousStruct => Err(Errors::UndefinedDefault(*self)),
+            AnyTypeKey::Polymorph(_) => Err(Errors::UndefinedDefault(*self)),
+            AnyTypeKey::Generic(_) => Err(Errors::UndefinedDefault(*self)),
+        }
     }
 }
 

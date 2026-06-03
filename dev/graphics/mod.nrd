@@ -1,0 +1,20 @@
+import mod::dev::algo
+
+type DrawBuffer = algo::Vec<u32>
+
+type BufferType = enum (self + 1): u32 {
+    Front
+    Back
+    Count
+}
+
+type zkouzka = enum: algo::Vec<i32> {
+
+}
+
+type DoubleBuffer<T> = struct {
+    data: [T; BufferType::Count]
+    current: BufferType = BufferType::Front
+}
+
+type DrawSurface = DoubleBuffer<DrawBuffer>

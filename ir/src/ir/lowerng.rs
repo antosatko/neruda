@@ -3,11 +3,11 @@ use std::ops::Deref;
 use arena::Arena;
 
 use crate::{
-    ast::{self, Body, Function, Span},
+    ast::{self, Body, Expression, Function, Span},
     const_stage::{
         Context, Diagnostic, Error, Errors, Warnings,
         objects::{FunctionObjKey, InitState},
-        types::{AnyTypeKey, ModuleKey},
+        types::ModuleKey,
     },
     ir::{BlockCtx, FunctionIr, Value, Variable},
 };
@@ -32,7 +32,7 @@ impl Context {
 
         let mut ir = FunctionIr {
             instructions: Vec::new(),
-            values: Arena::default(),
+            //values: Arena::default(),
             variables: Arena::default(),
         };
 
@@ -95,17 +95,34 @@ impl Context {
                             ty,
                             expression,
                         } => {
-                            let ty = match (ty, expression) {
+                            let (value, ty) = match (ty, expression) {
                                 (Some(ty), Some(expr)) => {
                                     let ty = ty.lower(self, *module)?;
-                                    let val = expr.const_eval(self, *module, &None, &Some(ty))?;
-                                    ty
+                                    let val = match expr.const_eval(self, *module, &None, &Some(ty))
+                                    {
+                                        Ok(val) => Value::Const(val),
+                                        Err(err) => Err(err)?,
+                                    };
+                                    (val, ty)
                                 }
                                 (None, Some(expr)) => {
-                                    let val = expr.const_eval(self, *module, &None, &None)?;
-                                    val.type_of()
+                                    let (ty, val) =
+                                        match expr.const_eval(self, *module, &None, &None) {
+                                            Ok(val) => (val.type_of(), Value::Const(val)),
+                                            Err(err) => Err(err)?,
+                                        };
+                                    (val, ty)
                                 }
-                                (Some(ty), None) => ty.lower(self, *module)?,
+                                (Some(ty), None) => {
+                                    let ty_low = ty.lower(self, *module)?;
+                                    let default =
+                                        ty_low.const_default(self).map_err(|e| Error {
+                                            inner: e,
+                                            module: *module,
+                                            span: ty.location,
+                                        })?;
+                                    (Value::Const(default), ty_low)
+                                }
                                 (None, None) => Err(Error {
                                     inner: Errors::FailedTypeInfer,
                                     module: *module,
@@ -114,7 +131,7 @@ impl Context {
                             };
                             let var = Variable {
                                 identifier: ident.clone(),
-                                value: ir.values.push(Value { ty }),
+                                value,
                                 ty,
                                 used: false,
                             };
@@ -133,5 +150,13 @@ impl Context {
             Body::Statement(st) => {}
         }
         Ok(())
+    }
+
+    fn lower_expression(
+        &mut self,
+        ir: &mut FunctionIr,
+        expr: &Span<Expression>,
+        module: &ModuleKey,
+    ) -> () {
     }
 }

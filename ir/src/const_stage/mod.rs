@@ -66,6 +66,7 @@ pub enum Errors {
     },
     FailedTypeInfer,
     UndefinedAutostep(AnyTypeKey),
+    UndefinedDefault(AnyTypeKey),
     FailedImplicitCast {
         from: AnyTypeKey,
         to: AnyTypeKey,
@@ -73,6 +74,9 @@ pub enum Errors {
     ArrayElementCountMismatch {
         expected: (AnyTypeKey, usize),
         got: (AnyTypeKey, Option<usize>),
+    },
+    ExpectedOptionalResource {
+        ident: SmolStr,
     },
 }
 

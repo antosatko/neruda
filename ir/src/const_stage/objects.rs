@@ -78,6 +78,17 @@ pub struct ComponentObj {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ResourceObjTag;
+pub type ResourceObjKey = Key<ResourceObjTag>;
+pub type ResourceObjArena = Arena<AnyObject<ResourceObj>, ResourceObjTag>;
+#[derive(Debug)]
+pub struct ResourceObj {
+    pub ty: InitState<AnyTypeKey, ()>,
+    pub optional: bool,
+    pub default: InitState<Option<ConstValue>, ()>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct FunctionObjTag;
 pub type FunctionObjKey = Key<FunctionObjTag>;
 pub type FunctionObjArena = Arena<AnyObject<FunctionObj>, FunctionObjTag>;
@@ -98,6 +109,7 @@ pub struct Objects {
     pub traits: TraitObjArena,
     pub components: ComponentObjArena,
     pub functions: FunctionObjArena,
+    pub resources: ResourceObjArena,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -108,6 +120,7 @@ pub enum AnyObjectKey {
     Trait(TraitObjKey),
     Component(ComponentObjKey),
     Function(FunctionObjKey),
+    Resource(ResourceObjKey),
 }
 
 #[derive(Debug)]
@@ -213,6 +226,7 @@ impl AnyObjectKey {
             AnyObjectKey::Trait(key) => &ctx.objects.traits.get_unchecked(key).identifier,
             AnyObjectKey::Component(key) => &ctx.objects.components.get_unchecked(key).identifier,
             AnyObjectKey::Function(key) => &ctx.objects.functions.get_unchecked(key).identifier,
+            AnyObjectKey::Resource(key) => &ctx.objects.resources.get_unchecked(key).identifier,
         }
     }
 }

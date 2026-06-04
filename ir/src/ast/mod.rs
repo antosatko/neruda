@@ -516,12 +516,12 @@ pub enum LoweringError {
 }
 
 pub fn numeric_literal(s: &str) -> Result<Number, LoweringError> {
-    let (s, radix) = if s.starts_with("0x") {
-        (&s[2..], 16)
-    } else if s.starts_with("0b") {
-        (&s[2..], 2)
-    } else if s.starts_with("0o") {
-        (&s[2..], 8)
+    let (s, radix) = if let Some(s) = s.strip_prefix("0x") {
+        (s, 16)
+    } else if let Some(s) = s.strip_prefix("0b") {
+        (s, 2)
+    } else if let Some(s) = s.strip_prefix("0o") {
+        (s, 8)
     } else {
         (s, 10)
     };
@@ -687,12 +687,10 @@ impl std::fmt::Display for Type {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.literal.inner.deref() {
             TypeLiteral::Path(identifier_path, generics) => {
-                let mut n = 0;
-                for txt in identifier_path.path.iter().map(|a| &a.inner) {
+                for (n, txt) in identifier_path.path.iter().map(|a| &a.inner).enumerate() {
                     if n > 0 {
                         write!(f, "::")?;
                     }
-                    n += 1;
                     write!(f, "{}", txt)?;
                 }
                 if let Some(generics) = generics {
@@ -708,7 +706,7 @@ impl std::fmt::Display for Type {
                 }
             }
             TypeLiteral::Struct(parameters) => {
-                write!(f, "struct {}", "{ ")?;
+                write!(f, "struct {{")?;
                 for Parameter {
                     ident,
                     ty,
@@ -721,7 +719,7 @@ impl std::fmt::Display for Type {
                         write!(f, "= ...; ")?;
                     }
                 }
-                write!(f, "{}", "}")?;
+                write!(f, "}}")?;
             }
             TypeLiteral::Array(ty, len) => {
                 write!(f, "[{}", ty.inner)?;
@@ -739,20 +737,20 @@ impl std::fmt::Display for Type {
             }
             TypeLiteral::Enum(repr, step, variants) => {
                 write!(f, "enum")?;
-                if let Some(_) = step {
-                    write!(f, "({})", "...")?;
+                if step.is_some() {
+                    write!(f, "(...)")?;
                 }
                 if let Some(repr) = repr {
                     write!(f, ": {}", repr.inner)?;
                 }
-                write!(f, " {}", "{")?;
+                write!(f, " {{")?;
                 for (ident, expr) in variants {
                     write!(f, " {}", ident.inner)?;
                     if expr.is_some() {
                         write!(f, " = [...]")?;
                     }
                 }
-                write!(f, " {}", '}')?;
+                write!(f, " }}")?;
             }
         }
         Ok(())
@@ -872,6 +870,11 @@ impl Body {
             Body::Block(spans) => spans.len(),
             Body::Statement(_) => 1,
         }
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 }
 

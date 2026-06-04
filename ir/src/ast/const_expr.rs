@@ -1,5 +1,6 @@
 use std::borrow::Cow;
 use std::iter::repeat_with;
+use std::ops::Deref;
 
 use crate::ast::{
     ConstValue, Expression, Literal, Number, NumberValue, Operator, Span, SpanIndex, UnaryOp, Value,
@@ -52,14 +53,14 @@ impl Expression {
                     Ok(value) => value,
                     Err(value) => return value,
                 };
-                return Cow::Owned(Expression::Value(Span::new(
+                Cow::Owned(Expression::Value(Span::new(
                     Value {
                         literal: Span::new(new, v.location),
                         postfix: Vec::with_capacity(0),
                         unary: Vec::with_capacity(0),
                     },
                     v.location,
-                )));
+                )))
             }
         }
     }
@@ -89,7 +90,7 @@ impl Expression {
                         size,
                     }),
                 ) => Literal::Number(Number {
-                    value: NumberValue::Int(-(n as i128)),
+                    value: NumberValue::Int(-n),
                     size,
                 }),
                 (
@@ -178,11 +179,11 @@ impl ConstValue {
                     ),
                 }
             }
-            (ConstValue::String(smol_str), target) => Err(type_check_err)?,
-            (ConstValue::Bool(_), target) => Err(type_check_err)?,
-            (ConstValue::Array { elements, ty }, target) => Err(type_check_err)?,
-            (ConstValue::Tuple { elements, ty }, target) => Err(type_check_err)?,
-            (val, ty) => Err(type_check_err)?,
+            (ConstValue::String(_), _) => Err(type_check_err)?,
+            (ConstValue::Bool(_), _) => Err(type_check_err)?,
+            (ConstValue::Array { .. }, _) => Err(type_check_err)?,
+            (ConstValue::Tuple { .. }, _) => Err(type_check_err)?,
+            (_, _) => Err(type_check_err)?,
         })
     }
 }
@@ -299,7 +300,7 @@ impl Span<Operator> {
                             span: self.location,
                             module,
                             inner: Errors::CanNotApplyConst {
-                                op: self.inner.as_ref().clone(),
+                                op: *self.deref(),
                                 left: left.clone(),
                                 right: right.clone(),
                             },
@@ -310,7 +311,7 @@ impl Span<Operator> {
                     span: self.location,
                     module,
                     inner: Errors::CanNotApplyConst {
-                        op: self.inner.as_ref().clone(),
+                        op: *self.deref(),
                         left: left.clone(),
                         right: right.clone(),
                     },
@@ -324,7 +325,7 @@ impl Span<Operator> {
                             span: self.location,
                             module,
                             inner: Errors::CanNotApplyConst {
-                                op: self.inner.as_ref().clone(),
+                                op: *self.deref(),
                                 left: left.clone(),
                                 right: right.clone(),
                             },
@@ -335,7 +336,7 @@ impl Span<Operator> {
                     span: self.location,
                     module,
                     inner: Errors::CanNotApplyConst {
-                        op: self.inner.as_ref().clone(),
+                        op: *self.deref(),
                         left: left.clone(),
                         right: right.clone(),
                     },
@@ -346,7 +347,7 @@ impl Span<Operator> {
                 span: self.location,
                 module,
                 inner: Errors::CanNotApplyConst {
-                    op: self.inner.as_ref().clone(),
+                    op: *self.deref(),
                     left: left.clone(),
                     right: right.clone(),
                 },

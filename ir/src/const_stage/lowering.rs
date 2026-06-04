@@ -220,17 +220,17 @@ impl Context {
             }
             AnyObjectKey::Const(key) => self.lower_const_with_key(key).map(|_| ()),
             AnyObjectKey::Type(key) => self.lower_type_alias_with_key(key).map(|_| ()),
-            AnyObjectKey::Trait(key) => todo!(),
-            AnyObjectKey::Component(key) => self.lower_component_with_key(key),
-            AnyObjectKey::Function(key) => self.lower_function_with_key(key),
-            AnyObjectKey::Resource(key) => self.lower_resource_with_key(key),
+            AnyObjectKey::Trait(_) => todo!(),
+            AnyObjectKey::Component(key) => self.lower_component_with_key(key).map(|_| ()),
+            AnyObjectKey::Function(key) => self.lower_function_with_key(key).map(|_| ()),
+            AnyObjectKey::Resource(key) => self.lower_resource_with_key(key).map(|_| ()),
         }
     }
 
     fn lower_resource_with_key(
         &mut self,
         resource_key: ResourceObjKey,
-    ) -> Result<(), Diagnostic<Errors>> {
+    ) -> Result<&mut AnyObject<ResourceObj>, Diagnostic<Errors>> {
         let obj = self.objects.resources.get_unchecked(&resource_key);
         let mod_key = obj.module;
         let module = self.types.modules.get_unchecked(&mod_key);
@@ -289,6 +289,8 @@ impl Context {
                     let res = self.objects.resources.get_mut_unchecked(&resource_key);
                     res.data.default = InitState::Done(default);
                     res.data.ty = InitState::Done(ty);
+
+                    res
                 }
                 _ => unreachable!(),
             },
@@ -298,7 +300,7 @@ impl Context {
     fn lower_function_with_key(
         &mut self,
         function_key: Key<super::objects::FunctionObjTag>,
-    ) -> Result<(), Diagnostic<Errors>> {
+    ) -> Result<&mut AnyObject<FunctionObj>, Diagnostic<Errors>> {
         let obj = self.objects.functions.get_unchecked(&function_key);
         let mod_key = obj.module;
         let module = self.types.modules.get_unchecked(&mod_key);
@@ -338,18 +340,15 @@ impl Context {
                     fun.data.params = params;
 
                     let type_of = FunctionType {
-                        parameters: fun
-                            .data
-                            .params
-                            .iter()
-                            .map(|(_, ty)| *ty.get_done())
-                            .collect(),
+                        parameters: fun.data.params.values().map(|ty| *ty.get_done()).collect(),
                         returns: *fun.data.return_type.get_done(),
                     };
                     let type_of = AnyTypeKey::Function(self.types.functions.push_unique(type_of));
                     fun.data.type_of = InitState::Done(type_of);
 
                     self.generic_ctx.pop();
+
+                    fun
                 }
                 _ => unreachable!(),
             },
@@ -359,7 +358,7 @@ impl Context {
     fn lower_component_with_key(
         &mut self,
         component_key: Key<super::objects::ComponentObjTag>,
-    ) -> Result<(), Diagnostic<Errors>> {
+    ) -> Result<&mut AnyObject<ComponentObj>, Diagnostic<Errors>> {
         let this = self.objects.components.get_unchecked(&component_key);
         let ast_key = this.ast_object;
         let mod_key = this.module;
@@ -384,6 +383,10 @@ impl Context {
                 };
                 let obj = self.objects.components.get_mut_unchecked(&component_key);
                 obj.data.ty = InitState::Done(ty);
+
+                obj
+            } else {
+                unreachable!("It is a component you silly")
             },
         )
     }
@@ -858,7 +861,7 @@ impl ast::Type {
                             Some(e) => e.const_eval(ctx, module, &None, &Some(repr))?,
                             None => repr.const_default(ctx).map_err(|e| Error {
                                 inner: e,
-                                module: module,
+                                module,
                                 span: ident.location,
                             })?,
                         };
@@ -878,7 +881,7 @@ impl ast::Type {
 
                                 ty.check(&ctx.types, &repr).map_err(|e| Error {
                                     inner: e,
-                                    module: module,
+                                    module,
                                     span: expr.location,
                                 })?;
 
@@ -890,7 +893,7 @@ impl ast::Type {
                                 }
                                 None => last_value.autostep().map_err(|e| Error {
                                     inner: e,
-                                    module: module,
+                                    module,
                                     span: ident.location,
                                 })?,
                             },
@@ -935,7 +938,7 @@ impl ast::Type {
                 };
                 let key = ctx.types.arrays.push_unique(ArrayType {
                     element_type: ty,
-                    size: size,
+                    size,
                 });
                 AnyTypeKey::Array(key)
             }

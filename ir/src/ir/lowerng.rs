@@ -47,14 +47,9 @@ impl Context {
             .clone()
             .deref()
         {
-            ast::Object::Function(Function {
-                ident,
-                generics,
-                parameters,
-                return_type,
-                body,
-                docs,
-            }) => self.lower_block(&mut ir, &mut block_ctx, body, &mod_key)?,
+            ast::Object::Function(Function { body, .. }) => {
+                self.lower_block(&mut ir, &mut block_ctx, body, &mod_key)?
+            }
             _ => unreachable!(),
         }
         ir.instructions.shrink_to_fit();
@@ -139,7 +134,7 @@ impl Context {
                             let key = ir.variables.push(var);
                             block_ctx.declare_var(ident, module, key)?;
                         }
-                        ast::Statement::Return { expression } => {
+                        ast::Statement::Return { .. } => {
                             return Ok(());
                         }
                         _ => todo!("{:?}", st),
@@ -147,7 +142,7 @@ impl Context {
                 }
                 block_ctx.pop_scope();
             }
-            Body::Statement(st) => {}
+            Body::Statement(_) => {}
         }
         Ok(())
     }
@@ -158,5 +153,6 @@ impl Context {
         expr: &Span<Expression>,
         module: &ModuleKey,
     ) -> () {
+        todo!()
     }
 }

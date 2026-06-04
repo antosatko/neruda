@@ -66,7 +66,7 @@ where
     for entry in walkdir::WalkDir::new(path)
         .into_iter()
         .filter_map(|e| e.ok())
-        .filter(|e| e.path().to_str().map_or(false, |s| s.ends_with(".nrd")))
+        .filter(|e| e.path().to_str().is_some_and(|s| s.ends_with(".nrd")))
     {
         let content = fs::read_to_string(entry.path()).map_err(AnyParseErr::Io)?;
         let pathbuf = entry.clone().into_path();

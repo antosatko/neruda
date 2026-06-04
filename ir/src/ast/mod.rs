@@ -2,12 +2,9 @@ pub mod const_expr;
 
 use core::panic;
 use std::{
-    borrow::Cow,
-    fmt::{Display, format},
+    fmt::Display,
     ops::{Add, Deref},
     path::PathBuf,
-    ptr::write,
-    rc::Rc,
     sync::Arc,
 };
 
@@ -15,8 +12,8 @@ use arena::{Arena, Key};
 use smol_str::{SmolStr, ToSmolStr};
 
 use crate::const_stage::{
-    Context, Error, Errors,
-    types::{AnyTypeKey, EnumKey, ModuleKey, PrimitiveType, StructKey, Types},
+    Errors,
+    types::{AnyTypeKey, PrimitiveType},
 };
 
 #[derive(Debug, Clone)]
@@ -856,15 +853,15 @@ impl ConstValue {
                     size: number.size,
                 }),
             },
-            ConstValue::String(_) => todo!(),
             ConstValue::Char(c) => {
                 ConstValue::Char((*c as u8).checked_add(1).expect("handle pls") as _)
             }
-            ConstValue::Bool(_) => todo!(),
-            ConstValue::EnumVariant { parent, variant } => todo!(),
-            ConstValue::Array { ty, .. } => Err(Errors::UndefinedAutostep(*ty))?,
-            ConstValue::Tuple { ty, .. } => Err(Errors::UndefinedAutostep(*ty))?,
-            ConstValue::Structure { ty, .. } => Err(Errors::UndefinedAutostep(*ty))?,
+            ConstValue::EnumVariant { .. }
+            | ConstValue::Array { .. }
+            | ConstValue::Tuple { .. }
+            | ConstValue::Structure { .. }
+            | ConstValue::String(_)
+            | ConstValue::Bool(_) => Err(Errors::UndefinedAutostep(self.type_of()))?,
         })
     }
 }

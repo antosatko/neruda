@@ -1,6 +1,5 @@
 use std::borrow::Cow;
 use std::iter::repeat_with;
-use std::ops::Deref;
 
 use crate::ast::{
     ConstValue, Expression, Literal, Number, NumberValue, Operator, Span, SpanIndex, UnaryOp, Value,
@@ -123,7 +122,7 @@ impl ConstValue {
             Err(e) => e,
         };
         Ok(match (self, target) {
-            (ConstValue::Structure { fields, ty }, target) => Err(Errors::FailedImplicitCast {
+            (ConstValue::Structure { .. }, target) => Err(Errors::FailedImplicitCast {
                 from: typeof_self,
                 to: target,
             })?,
@@ -131,14 +130,32 @@ impl ConstValue {
                 match ty.default() {
                     ConstValue::Number(Number {
                         value: default,
-                        size,
+                        size: _,
                     }) => ConstValue::Number(Number {
                         value: value.implicit_cast(&default).ok_or(type_check_err)?,
-                        size,
+                        size: *size,
+                    }),
+                    ConstValue::Char(_) => ConstValue::Char(match value {
+                        NumberValue::Uint(n) => *n as u8 as char,
+                        NumberValue::Int(n) => *n as u8 as char,
+                        NumberValue::Any(n) => *n as u8 as char,
+                        NumberValue::Float(_) => Err(type_check_err)?,
                     }),
                     _ => Err(type_check_err)?,
                 }
             }
+            (ConstValue::Char(c), AnyTypeKey::Primitive(target)) => match target.default() {
+                ConstValue::Number(Number { value, size }) => ConstValue::Number(Number {
+                    value: match value {
+                        NumberValue::Float(_) => NumberValue::Float(*c as u8 as _),
+                        NumberValue::Uint(_) => NumberValue::Uint(*c as u8 as _),
+                        NumberValue::Int(_) => NumberValue::Int(*c as u8 as _),
+                        NumberValue::Any(_) => NumberValue::Any(*c as u8 as _),
+                    },
+                    size,
+                }),
+                _ => Err(type_check_err)?,
+            },
             (ConstValue::EnumVariant { parent, variant }, target) => {
                 match parent.unwrap_full(&ctx.types) {
                     AnyTypeKey::Enum(key) => {
@@ -162,7 +179,6 @@ impl ConstValue {
                 }
             }
             (ConstValue::String(smol_str), target) => Err(type_check_err)?,
-            (ConstValue::Char(_), target) => Err(type_check_err)?,
             (ConstValue::Bool(_), target) => Err(type_check_err)?,
             (ConstValue::Array { elements, ty }, target) => Err(type_check_err)?,
             (ConstValue::Tuple { elements, ty }, target) => Err(type_check_err)?,

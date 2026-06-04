@@ -18,7 +18,9 @@ type BBA = struct {
 }
 
 resource UnitCount = 0
-resource implementuj_konecne_anonymstruct: BBA = struct BBA { b: 54 }
+resource implementuj_konecne_anonymstruct: BBA = struct BBA { a: 54 }
+
+const ble: char = 255
 
 type StopAll
 

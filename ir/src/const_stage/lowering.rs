@@ -246,7 +246,7 @@ impl Context {
             {
                 ast::Object::Resource {
                     ident,
-                    docs,
+                    docs: _,
                     ty,
                     default_expression,
                     is_optional,
@@ -349,7 +349,7 @@ impl Context {
                     let type_of = AnyTypeKey::Function(self.types.functions.push_unique(type_of));
                     fun.data.type_of = InitState::Done(type_of);
 
-                    let g_scope = self.generic_ctx.pop();
+                    self.generic_ctx.pop();
                 }
                 _ => unreachable!(),
             },
@@ -537,36 +537,6 @@ impl Context {
         )
     }
 
-    fn lower_const(
-        &mut self,
-        mod_key: Key<ModuleTag>,
-        obj_key: &ConstObjKey,
-        ty: &ast::Span<ast::Type>,
-        expression: &ast::Span<ast::Expression>,
-        self_def: &Option<ConstValue>,
-    ) -> Result<(), Error> {
-        let type_key = ty.lower(self, mod_key)?;
-        let obj = self.objects.constants.get_mut_unchecked(obj_key);
-        obj.data.ty = InitState::Done(type_key);
-        let mut v = match expression.const_eval(self, mod_key, self_def, &Some(type_key)) {
-            Ok(v) => v,
-            Err(e) => Err(e)?,
-        };
-        if !self.type_check_const_value(&mut v, &type_key) {
-            return Err(Diagnostic {
-                span: expression.location,
-                module: mod_key,
-                inner: Errors::TypeMismatch {
-                    expected: type_key,
-                    got: v.type_of(),
-                },
-            });
-        }
-        let obj = self.objects.constants.get_mut_unchecked(obj_key);
-        obj.data.value = InitState::Done(v);
-        Ok(())
-    }
-
     pub fn resolve_const_path(
         &mut self,
         path: &[Span<SmolStr>],
@@ -634,56 +604,6 @@ impl Context {
                 self.lower_object_const_stage(key)?;
                 Ok(key)
             }
-        }
-    }
-
-    fn type_check_const_value(&self, value: &mut ConstValue, ty: &AnyTypeKey) -> bool {
-        match (ty, value) {
-            (AnyTypeKey::Primitive(PrimitiveType::Char), ConstValue::Char(_)) => true,
-
-            (AnyTypeKey::Primitive(prim), ConstValue::Number(Number { size, value })) => {
-                match value {
-                    NumberValue::Any(_) => match size {
-                        None => prim.is_numeric(),
-                        Some(s) => prim.number_size() == Some(*s),
-                    },
-
-                    NumberValue::Float(_) => match prim.float_size() {
-                        Some(expected) => match size {
-                            None => {
-                                *size = Some(expected);
-                                true
-                            }
-                            Some(actual) => *actual == expected,
-                        },
-                        None => false,
-                    },
-
-                    NumberValue::Int(_) => match prim.int_size() {
-                        Some(expected) => match size {
-                            None => {
-                                *size = Some(expected);
-                                true
-                            }
-                            Some(actual) => *actual == expected,
-                        },
-                        None => false,
-                    },
-
-                    NumberValue::Uint(_) => match prim.uint_size() {
-                        Some(expected) => match size {
-                            None => {
-                                *size = Some(expected);
-                                true
-                            }
-                            Some(actual) => *actual == expected,
-                        },
-                        None => false,
-                    },
-                }
-            }
-
-            _ => false,
         }
     }
 }

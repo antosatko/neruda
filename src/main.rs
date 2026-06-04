@@ -192,13 +192,13 @@ fn main() {
             }
             {
                 let Objects {
-                    imports,
-                    constants,
-                    types,
-                    traits,
-                    components,
+                    imports: _,
+                    constants: _,
+                    types: _,
+                    traits: _,
+                    components: _,
                     functions,
-                    resources,
+                    resources: _,
                 } = &ir_ctx.objects;
                 for fun in functions.iter() {
                     println!("Function: {}", fun.identifier);

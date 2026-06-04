@@ -95,8 +95,14 @@ impl Errors {
                 "407",
                 format!(
                     "Operator {op} can not be applied for types {}, {} in const context.",
-                    left.type_of().stringify(&ctx.types),
-                    right.type_of().stringify(&ctx.types)
+                    match left.type_of() {
+                        Ok(ty) => ty.stringify(&ctx.types),
+                        Err(_) => "Unknown".into(),
+                    },
+                    match right.type_of() {
+                        Ok(ty) => ty.stringify(&ctx.types),
+                        Err(_) => "Unknown".into(),
+                    },
                 ),
                 format!("Not applicable"),
             ),

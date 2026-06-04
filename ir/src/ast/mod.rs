@@ -461,7 +461,7 @@ pub enum Literal {
 pub enum ConstValue {
     Structure {
         fields: Vec<Span<(Span<SmolStr>, Span<ConstValue>)>>,
-        ty: AnyTypeKey,
+        ty: Option<AnyTypeKey>,
     },
 
     Number(Number),
@@ -803,8 +803,8 @@ impl ConstValue {
         }
     }
 
-    pub fn type_of(&self) -> AnyTypeKey {
-        match self {
+    pub fn type_of(&self) -> Result<AnyTypeKey, Errors> {
+        Ok(match self {
             Self::Bool(_) => AnyTypeKey::Primitive(PrimitiveType::Bool),
             Self::Char(_) => AnyTypeKey::Primitive(PrimitiveType::Char),
             Self::Number(Number {
@@ -823,12 +823,12 @@ impl ConstValue {
                 value: NumberValue::Uint(_),
                 size: _,
             }) => AnyTypeKey::Primitive(PrimitiveType::U32),
-            Self::Structure { ty, .. } => *ty,
+            Self::Structure { ty: Some(ty), .. } => *ty,
             Self::Array { ty, .. } => *ty,
             Self::Tuple { ty, .. } => *ty,
             Self::EnumVariant { parent, variant: _ } => *parent,
-            _ => todo!("{self:?}"),
-        }
+            _ => Err(Errors::FailedTypeInfer)?,
+        })
     }
 
     pub fn autostep(&self) -> Result<ConstValue, Errors> {
@@ -859,7 +859,7 @@ impl ConstValue {
             | ConstValue::Tuple { .. }
             | ConstValue::Structure { .. }
             | ConstValue::String(_)
-            | ConstValue::Bool(_) => Err(Errors::UndefinedAutostep(self.type_of()))?,
+            | ConstValue::Bool(_) => Err(Errors::UndefinedAutostep(self.type_of()?))?,
         })
     }
 }

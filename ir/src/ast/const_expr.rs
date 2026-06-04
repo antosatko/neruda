@@ -116,57 +116,55 @@ impl Expression {
 impl ConstValue {
     pub fn implicit_cast(&self, ctx: &Context, target: AnyTypeKey) -> Result<ConstValue, Errors> {
         let typeof_self = self.type_of();
-        let type_check_err = match typeof_self.check(&ctx.types, &target) {
-            Ok(_) => return Ok(self.clone()),
-            Err(e) => e,
-        };
-        Ok(match (self, target) {
-            (
-                ConstValue::Structure {
-                    ty: AnyTypeKey::AnonymousStruct,
-                    fields,
-                },
-                target,
-            ) => {
-                let target = target.unwrap_full(&ctx.types);
-                let target_struct = match &target {
-                    AnyTypeKey::Struct(t) => ctx.types.structures.get_unchecked(t),
-                    _ => Err(Errors::FailedImplicitCast {
-                        from: typeof_self,
-                        to: target,
-                    })?,
-                };
-                let mut new_fields = Vec::new();
-                for (t_ident, t_type, t_default) in &target_struct.parameters {
-                    let field = match fields.iter().find(|f| f.0.deref() == t_ident) {
-                        Some(f) => {
-                            let v = f.1.deref().implicit_cast(ctx, *t_type)?;
-                            Span::new(
-                                (f.0.clone(), Span::new(v, f.1.location)),
-                                SpanIndex::default(),
-                            )
-                        }
-                        None => match t_default {
-                            Some(default) => Span::new(
-                                (
-                                    Span::new(t_ident.clone(), SpanIndex::default()),
-                                    Span::new(default.clone(), SpanIndex::default()),
-                                ),
-                                SpanIndex::default(),
-                            ),
-                            None => Err(Errors::FailedImplicitCast {
-                                from: typeof_self,
+        let type_check_err = match self.type_of() {
+            Ok(typeof_self) => match typeof_self.check(&ctx.types, &target) {
+                Ok(_) => return Ok(self.clone()),
+                Err(e) => e,
+            },
+            Err(type_check_err) => {
+                return match (self, target) {
+                    (ConstValue::Structure { ty: None, fields }, target) => {
+                        let target = target.unwrap_full(&ctx.types);
+                        let target_struct = match &target {
+                            AnyTypeKey::Struct(t) => ctx.types.structures.get_unchecked(t),
+                            _ => Err(Errors::FailedImplicitCast {
+                                from: typeof_self?,
                                 to: target,
                             })?,
-                        },
-                    };
-                    new_fields.push(field);
-                }
-                ConstValue::Structure {
-                    fields: new_fields,
-                    ty: target,
-                }
+                        };
+                        let mut new_fields = Vec::new();
+                        for (t_ident, t_type, t_default) in &target_struct.parameters {
+                            let field = match fields.iter().find(|f| f.0.deref() == t_ident) {
+                                Some(f) => {
+                                    let v = f.1.deref().implicit_cast(ctx, *t_type)?;
+                                    Span::new(
+                                        (f.0.clone(), Span::new(v, f.1.location)),
+                                        SpanIndex::default(),
+                                    )
+                                }
+                                None => match t_default {
+                                    Some(default) => Span::new(
+                                        (
+                                            Span::new(t_ident.clone(), SpanIndex::default()),
+                                            Span::new(default.clone(), SpanIndex::default()),
+                                        ),
+                                        SpanIndex::default(),
+                                    ),
+                                    None => return Err(type_check_err),
+                                },
+                            };
+                            new_fields.push(field);
+                        }
+                        Ok(ConstValue::Structure {
+                            fields: new_fields,
+                            ty: Some(target),
+                        })
+                    }
+                    _ => unreachable!(),
+                };
             }
+        };
+        Ok(match (self, target) {
             (ConstValue::Number(Number { value, size }), AnyTypeKey::Primitive(ty)) => {
                 match ty.default() {
                     ConstValue::Number(Number {
@@ -295,7 +293,10 @@ impl AnyTypeKey {
                         sp_idx,
                     ));
                 }
-                let value = ConstValue::Structure { fields, ty: *self };
+                let value = ConstValue::Structure {
+                    fields,
+                    ty: Some(*self),
+                };
                 Ok(value)
             }
             AnyTypeKey::Named(key) => ctx
@@ -315,7 +316,7 @@ impl AnyTypeKey {
             AnyTypeKey::ModuleRef(_) => Err(Errors::UndefinedDefault(*self)),
             AnyTypeKey::Function(_) => Err(Errors::UndefinedDefault(*self)),
             // AnyTypeKey::Constraint(_) => Err(Errors::UndefinedDefault(*self)),
-            AnyTypeKey::AnonymousStruct => Err(Errors::UndefinedDefault(*self)),
+            //AnyTypeKey::AnonymousStruct => Err(Errors::UndefinedDefault(*self)),
             AnyTypeKey::Polymorph(_) => Err(Errors::UndefinedDefault(*self)),
             AnyTypeKey::Generic(_) => Err(Errors::UndefinedDefault(*self)),
         }

@@ -169,7 +169,7 @@ pub enum AnyTypeKey {
     Polymorph(PolymorphKey),
     Generic(GenericKey),
     Morphed(MorphedKey),
-    AnonymousStruct,
+    //AnonymousStruct,
 }
 
 #[derive(Default)]
@@ -681,7 +681,8 @@ impl AnyTypeKey {
                 let morphed_key = types.morphs.push_unique(morphed);
                 AnyTypeKey::Morphed(morphed_key)
             }
-            AnyTypeKey::AnonymousStruct | AnyTypeKey::ModuleRef(_) | AnyTypeKey::Trait(_) => {
+            /* AnyTypeKey::AnonymousStruct */
+            AnyTypeKey::ModuleRef(_) | AnyTypeKey::Trait(_) => {
                 Err(Errors::CouldNotSubstituteType(*self))?
             }
         })
@@ -710,7 +711,7 @@ impl AnyTypeKey {
             AnyTypeKey::Generic(key) => {
                 Cow::Owned(types.generics.get_unchecked(key).stringify(types))
             }
-            AnyTypeKey::AnonymousStruct => Cow::Borrowed("{ ... }"),
+            //AnyTypeKey::AnonymousStruct => Cow::Borrowed("{ ... }"),
             AnyTypeKey::Enum(key) => Cow::Owned(types.enums.get_unchecked(key).stringify(types)),
             AnyTypeKey::Trait(key) => Cow::Owned(types.traits.get_unchecked(key).stringify()),
             AnyTypeKey::ModuleRef(key) => Cow::Owned(types.modules.get_unchecked(key).stringify()),

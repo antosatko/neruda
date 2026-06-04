@@ -273,9 +273,13 @@ impl Context {
                             (type_lowered, default)
                         }
                         (None, Some(default)) => {
-                            let default = default.const_eval(self, mod_key, &None, &None)?;
-                            let ty = default.type_of();
-                            (ty, Some(default))
+                            let default_val = default.const_eval(self, mod_key, &None, &None)?;
+                            let ty = default_val.type_of().map_err(|e| Error {
+                                inner: e,
+                                module: mod_key,
+                                span: default.location,
+                            })?;
+                            (ty, Some(default_val))
                         }
                         (None, None) => match is_optional {
                             Some(_) => (AnyTypeKey::Primitive(PrimitiveType::Void), None),
@@ -705,18 +709,23 @@ impl ast::Expression {
                             ));
                         }
                         let ty = match ty {
-                            Some(ty) => resolve_type_path(ctx, mod_key, &ty.path, &ty.generics)?,
-                            None => AnyTypeKey::AnonymousStruct,
+                            Some(ty) => {
+                                Some(resolve_type_path(ctx, mod_key, &ty.path, &ty.generics)?)
+                            }
+                            None => None,
                         };
                         let initial = ConstValue::Structure {
                             fields: const_fields,
-                            ty: AnyTypeKey::AnonymousStruct,
+                            ty,
                         };
-                        initial.implicit_cast(ctx, ty).map_err(|e| Error {
-                            inner: e,
-                            module: mod_key,
-                            span: location,
-                        })?
+                        match ty {
+                            Some(ty) => initial.implicit_cast(ctx, ty).map_err(|e| Error {
+                                inner: e,
+                                module: mod_key,
+                                span: location,
+                            })?,
+                            None => initial,
+                        }
                     }
                     ast::Literal::Number(number) => ConstValue::Number(number.clone()),
                     ast::Literal::String(smol_str) => ConstValue::String(smol_str.clone()),
@@ -726,7 +735,11 @@ impl ast::Expression {
                         let mut inner_ty = None;
                         for expr in exprs {
                             let v = expr.const_eval(ctx, mod_key, self_def, &inner_ty)?;
-                            let typeof_v = v.type_of();
+                            let typeof_v = v.type_of().map_err(|e| Error {
+                                inner: e,
+                                module: mod_key,
+                                span: expr.location,
+                            })?;
                             match &inner_ty {
                                 Some(ty) => {
                                     typeof_v.check(&ctx.types, ty).map_err(|e| Error {
@@ -765,7 +778,11 @@ impl ast::Expression {
                         }
                         let mut types = Vec::with_capacity(values.len());
                         for v in &values {
-                            types.push(v.type_of());
+                            types.push(v.type_of().map_err(|e| Error {
+                                inner: e,
+                                module: mod_key,
+                                span: v.location,
+                            })?);
                         }
                         let ty = TupleType { parameters: types };
                         let ty = AnyTypeKey::Tuple(ctx.types.tuples.push_unique(ty));
@@ -783,7 +800,11 @@ impl ast::Expression {
                 };
                 location = span;
                 let left_val = l.const_eval(ctx, mod_key, self_def, &None)?;
-                let typeof_l = left_val.type_of();
+                let typeof_l = left_val.type_of().map_err(|e| Error {
+                    inner: e,
+                    module: mod_key,
+                    span: l.location,
+                })?;
                 let right_val = r.const_eval(ctx, mod_key, self_def, &Some(typeof_l))?;
                 match op.const_apply(&left_val, &right_val, mod_key) {
                     Ok(v) => v,
@@ -882,7 +903,11 @@ impl ast::Type {
                                 let value =
                                     expr.const_eval(ctx, module, &Some(last_value), &Some(repr))?;
 
-                                let ty = value.type_of();
+                                let ty = value.type_of().map_err(|e| Error {
+                                    inner: e,
+                                    module: module,
+                                    span: expr.location,
+                                })?;
 
                                 ty.check(&ctx.types, &repr).map_err(|e| Error {
                                     inner: e,

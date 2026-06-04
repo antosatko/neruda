@@ -103,7 +103,14 @@ impl Context {
                                 (None, Some(expr)) => {
                                     let (ty, val) =
                                         match expr.const_eval(self, *module, &None, &None) {
-                                            Ok(val) => (val.type_of(), Value::Const(val)),
+                                            Ok(val) => (
+                                                val.type_of().map_err(|e| Error {
+                                                    inner: e,
+                                                    module: *module,
+                                                    span: expr.location,
+                                                })?,
+                                                Value::Const(val),
+                                            ),
                                             Err(err) => Err(err)?,
                                         };
                                     (val, ty)

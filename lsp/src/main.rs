@@ -56,7 +56,7 @@ pub enum Types {
 
 pub enum IndexErr<'a> {
     Lex(PreprocessorError),
-    Parse(ParseError<'a>),
+    Parse(Box<ParseError<'a>>),
     Lowering(ir::ast::Span<LoweringError>),
 }
 
@@ -81,7 +81,7 @@ where
 
     let ast = match parser.parse(&tokens, src) {
         Ok(m) => m,
-        Err(e) => return Err(IndexErr::Parse(e)),
+        Err(e) => return Err(IndexErr::Parse(Box::new(e))),
     };
 
     let ModuleOk {

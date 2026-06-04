@@ -8,13 +8,20 @@ type BufferType = enum (self + 1): u32 {
     Count
 }
 
-type zkouzka = enum: algo::Vec<i32> {
-
-}
-
 type DoubleBuffer<T> = struct {
     data: [T; BufferType::Count]
     current: BufferType = BufferType::Front
 }
 
 type DrawSurface = DoubleBuffer<DrawBuffer>
+
+type Vector2 = struct {
+    x: f32 = 0.0
+    y: f32 = 0.0
+}
+
+type Vector3 = struct {
+    x: f32 = 0.0
+    y: f32 = 0.0
+    z: f32 = 0.0
+}

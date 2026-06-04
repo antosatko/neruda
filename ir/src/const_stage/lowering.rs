@@ -708,10 +708,15 @@ impl ast::Expression {
                             Some(ty) => resolve_type_path(ctx, mod_key, &ty.path, &ty.generics)?,
                             None => AnyTypeKey::AnonymousStruct,
                         };
-                        ConstValue::Structure {
+                        let initial = ConstValue::Structure {
                             fields: const_fields,
-                            ty,
-                        }
+                            ty: AnyTypeKey::AnonymousStruct,
+                        };
+                        initial.implicit_cast(ctx, ty).map_err(|e| Error {
+                            inner: e,
+                            module: mod_key,
+                            span: location,
+                        })?
                     }
                     ast::Literal::Number(number) => ConstValue::Number(number.clone()),
                     ast::Literal::String(smol_str) => ConstValue::String(smol_str.clone()),

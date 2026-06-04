@@ -21,7 +21,7 @@ pub mod lowering;
 #[derive(Debug)]
 pub enum AnyParseErr<'parser> {
     Preprocessor(PreprocessorError),
-    Parse(ParseError<'parser>),
+    Parse(Box<ParseError<'parser>>),
     Io(std::io::Error),
     NonUtf8FileName(OsString),
     ModuleRoot,
@@ -44,7 +44,10 @@ pub fn parse_source<'a>(
         .lex_utf8(src)
         .map_err(AnyParseErr::Preprocessor)?;
 
-    let ast = parser.parse(&tokens, src).map_err(AnyParseErr::Parse)?;
+    let ast = parser
+        .parse(&tokens, src)
+        .map_err(Box::new)
+        .map_err(AnyParseErr::Parse)?;
 
     lowering::module_named(name, src, ast.entry, path).map_err(AnyParseErr::Lowering)
 }

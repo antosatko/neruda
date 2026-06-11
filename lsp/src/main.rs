@@ -10,7 +10,7 @@ use parser::{
     lowering::{ModuleOk, module_named},
 };
 use ruparse::{Parser, lexer::PreprocessorError, parser::ParseError};
-use std::path::PathBuf;
+use std::{ops::Deref, path::PathBuf};
 use tower_lsp::{LspService, Server};
 
 use crate::server::Backend;
@@ -246,28 +246,6 @@ impl IndexedWalk for ir::ast::Span<Object> {
                     spans.extend(generics.iter().map(|g| g.span(Types::Type, line_index)));
                 }
             }
-            Object::Scheduler {
-                ident,
-                systems,
-                init,
-                docs: _,
-            } => {
-                spans.push(self.span_word(Types::Keyword, line_index, "scheduler"));
-                spans.push(ident.span(Types::Ident, line_index));
-
-                if let Some(systems) = systems {
-                    spans.push(systems.span_word(Types::Keyword, line_index, "systems"));
-                    for generic in systems.iter().filter_map(|g| g.generics.as_ref()) {
-                        for ty in generic.inner.as_ref() {
-                            ty.index(line_index, spans);
-                        }
-                    }
-                }
-                if let Some(init) = init {
-                    spans.push(init.1.0.span_word(Types::Keyword, line_index, "init"));
-                    init.0.index(line_index, spans);
-                }
-            }
             Object::Trait {
                 docs: _,
                 ident,
@@ -299,9 +277,13 @@ impl IndexedWalk for ir::ast::Span<Object> {
                 return_type,
                 body,
                 docs: _,
+                invoke,
             }) => {
                 spans.push(self.span_word(Types::Keyword, line_index, "function"));
                 spans.push(ident.span(Types::Ident, line_index));
+                if let Some(invoke) = invoke {
+                    spans.push(invoke.0.span_word(Types::Keyword, line_index, "invoke"));
+                }
 
                 parameters.iter().for_each(|p| p.index(line_index, spans));
                 if let Some(ret) = return_type {
@@ -481,6 +463,16 @@ impl IndexedWalk for ir::ast::Span<Statement> {
                     e.index(line_index, spans);
                 }
             }
+
+            Statement::Invoke { invocations } => {
+                spans.push(self.span_word(Types::Keyword, line_index, "invoke"));
+                for invocation in invocations {
+                    invocation.0.path.index(line_index, spans);
+                    for arg in &invocation.1 {
+                        arg.index(line_index, spans);
+                    }
+                }
+            }
             Statement::If {
                 condition,
                 then_block,
@@ -644,7 +636,7 @@ impl IndexedWalk for ir::ast::Span<Postfix> {
             Postfix::Field(ident) => spans.push(ident.span(Types::Ident, line_index)),
             Postfix::Call(args) => args.iter().for_each(|a| a.index(line_index, spans)),
             Postfix::Index(expr) => expr.index(line_index, spans),
-            Postfix::Refs(_) | Postfix::Derefs(_) => {
+            Postfix::Ref | Postfix::Deref => {
                 spans.push(self.span(Types::Operator, line_index));
             }
         }

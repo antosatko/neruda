@@ -130,13 +130,6 @@ pub struct Module {
 
 #[derive(Debug, Clone)]
 pub enum Object {
-    Scheduler {
-        ident: Span<SmolStr>,
-        systems: Option<Span<Vec<Span<SystemInclusion>>>>,
-        init: Option<(Span<Body>, Keyword)>,
-        docs: Vec<Span<SmolStr>>,
-    },
-
     Function(Function),
 
     Component {
@@ -211,6 +204,7 @@ pub struct Function {
     pub return_type: Option<Span<Type>>,
     pub body: Span<Body>,
     pub docs: Vec<Span<SmolStr>>,
+    pub invoke: Option<Keyword>,
 }
 
 #[derive(Debug, Clone)]
@@ -314,6 +308,10 @@ pub enum Statement {
         condition: Span<Expression>,
         body: Span<Body>,
     },
+
+    Invoke {
+        invocations: Vec<Span<(Span<IdentifierLiteral>, Vec<Span<Expression>>)>>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -400,8 +398,8 @@ pub enum Postfix {
     Field(Span<SmolStr>),
     Call(Vec<Span<Expression>>),
     Index(Span<Expression>),
-    Refs(usize),
-    Derefs(usize),
+    Ref,
+    Deref,
 }
 
 /* ===================== TYPES ===================== */

@@ -9,8 +9,8 @@ const IDENTIFIER: VarKind<'static> = local("identifier");
 const IDENTIFIER_VAR: (&'static str, VariableKind) = ("identifier", VariableKind::Node);
 
 const KEYWORDS: &[&'static str] = &[
-    "scheduler",
     "system",
+    "invoke",
     "init",
     "struct",
     "component",
@@ -37,7 +37,7 @@ const KEYWORDS: &[&'static str] = &[
     "for",
 ];
 
-const KEYWORDS_NON_BLOCKING: &[&'static str] = &["where", "systems", "on", "import"];
+const KEYWORDS_NON_BLOCKING: &[&'static str] = &["where", "on", "import"];
 
 mod grammar_errs;
 
@@ -588,18 +588,14 @@ pub fn gen_parser<'src>() -> Parser<'static> {
     let ref_tokens = parser
         .grammar
         .new_enum("ref token")
-        .options([token("&"), token("&&"), token("*")])
+        .options([token("&"), token("*")])
         .build();
 
     let refs = parser
         .grammar
         .new_node("ref cast")
-        .rules([
-            is(token(".")),
-            is(ref_tokens).set("refs").commit(),
-            while_(ref_tokens).set("refs"),
-        ])
-        .variables([list_var("refs")])
+        .rules([is(token(".")), is(ref_tokens).set("ref token").commit()])
+        .variables([node_var("ref token")])
         .build();
 
     let value_tails = parser
@@ -1050,8 +1046,33 @@ pub fn gen_parser<'src>() -> Parser<'static> {
         .variables([node_var("expression"), node_var("code body")])
         .build();
 
+    let invocation = parser
+        .grammar
+        .new_node("invocation")
+        .rules([
+            is(ident_path_literal).set(IDENTIFIER).commit(),
+            is(call).set("arguments"),
+            is(end_stmt),
+        ])
+        .variables([node_var("arguments"), IDENTIFIER_VAR])
+        .build();
+
+    let invoke_st = parser
+        .grammar
+        .new_node("invoke")
+        .rules([
+            is(keyword("invoke")).commit(),
+            is(token("{")),
+            loop_().then([is_one_of([
+                option(invocation).set("invocations"),
+                option(token("}")).return_node(),
+            ])
+            .hint("Potentially unclosed code body")]),
+        ])
+        .variables([list_var("invocations")])
+        .build();
+
     // references
-    let _ = code_body;
     let _statements = parser
         .grammar
         .new_enum("statement")
@@ -1063,6 +1084,7 @@ pub fn gen_parser<'src>() -> Parser<'static> {
             loop_st,
             if_st,
             while_st,
+            invoke_st,
             expression_st,
         ])
         .build();
@@ -1072,6 +1094,7 @@ pub fn gen_parser<'src>() -> Parser<'static> {
         .new_node("function")
         .has(docstr, "docs")
         .rules([
+            maybe(keyword("invoke")).set("invoke"),
             is(keyword("function")).commit().start(),
             is(ident).set(IDENTIFIER),
             maybe(generic_params).set("generic parameters"),
@@ -1088,6 +1111,7 @@ pub fn gen_parser<'src>() -> Parser<'static> {
             node_var("parameters"),
             node_var("return type"),
             node_var("code body"),
+            node_var("invoke"),
         ])
         .build();
 
@@ -1148,55 +1172,6 @@ pub fn gen_parser<'src>() -> Parser<'static> {
             node_var("type"),
             node_var("generic parameters"),
             list_var("methods"),
-        ])
-        .build();
-
-    let system_include = parser
-        .grammar
-        .new_node("system inclusion")
-        .rules([
-            is(ident_path).set(IDENTIFIER).commit(),
-            maybe(generic_impl).set("generics"),
-        ])
-        .variables([IDENTIFIER_VAR, node_var("generics")])
-        .build();
-
-    let systems = parser
-        .grammar
-        .new_node("systems")
-        .rules([
-            is(keyword("systems")).commit(),
-            is(token("{")),
-            while_(system_include).set("systems"),
-            is(token("}")),
-        ])
-        .variables([list_var("systems")])
-        .build();
-
-    let scheduler_init = parser
-        .grammar
-        .new_node("scheduler initialization")
-        .rules([is(keyword("init")).commit(), is(code_body).set("body")])
-        .variables([node_var("body")])
-        .build();
-
-    let scheduler = parser
-        .grammar
-        .new_node("scheduler")
-        .has(docstr, "docs")
-        .rules([
-            is(keyword("scheduler")).commit().start(),
-            is(ident).set(IDENTIFIER),
-            is(token("{")),
-            maybe(systems).set("systems"),
-            maybe(scheduler_init).set("initialization"),
-            is(token("}"))
-                .hint("Scheduler must at most contain systems and initialization in this order"),
-        ])
-        .variables([
-            IDENTIFIER_VAR,
-            node_var("systems"),
-            node_var("initialization"),
         ])
         .build();
 
@@ -1397,8 +1372,7 @@ pub fn gen_parser<'src>() -> Parser<'static> {
         .grammar
         .new_enum("top level statement")
         .options([
-            scheduler, function, system, component, type_kw, import, const_kw, trait_kw, impl_kw,
-            resource,
+            function, system, component, type_kw, import, const_kw, trait_kw, impl_kw, resource,
         ])
         .build();
 

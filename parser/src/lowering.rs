@@ -10,9 +10,9 @@ use smol_str::SmolStr;
 use ir::ast::{
     ActionClause, Alias, Associativity, Body, Clauses, Diagnostics, Else, ElseIf, ExprItem,
     Expression, Function, GenericParameter, IdentifierLiteral, IdentifierPath, Keyword, Literal,
-    LoweringError, LoweringWarning, Module, Mutability, Object, Operator, Parameter,
-    RestrictionClause, SelectClause, Span, SpanIndex, Statement, SystemInclusion, Type,
-    TypeLiteral, UnaryOp, Value, char_literal, numeric_literal, string_literal,
+    LoweringError, LoweringWarning, Module, Mutability, Object, Operator, Parameter, Postfix,
+    RestrictionClause, SelectClause, Span, SpanIndex, Statement, Type, TypeLiteral, UnaryOp, Value,
+    char_literal, numeric_literal, string_literal,
 };
 
 #[derive(Debug, Clone)]
@@ -39,39 +39,6 @@ pub fn module_named(
 
     for s in node.get_list("top level statements") {
         match s.get_name() {
-            "scheduler" => {
-                let ident = expect_ident(src, s, &mut diagnostics);
-                let docs = docstrings(src, s);
-
-                let mut systems = None;
-                let mut init = None;
-
-                if let Some(sys) = s.try_get_node("systems").as_ref() {
-                    let mut systems_vec = Vec::new();
-                    for s in sys.get_list("systems") {
-                        let path = ident_path(src, s.expect_node("identifier"));
-                        let generics =
-                            generic_arguments(src, s.try_get_node("generics"), &mut diagnostics)?;
-                        systems_vec.push(span(SystemInclusion { path, generics }, s));
-                    }
-                    systems = Some(span(systems_vec, sys));
-                }
-
-                if let Some(init_node) = s.try_get_node("initialization").as_ref() {
-                    let body = body(src, init_node.expect_node("body"), &mut diagnostics)?;
-                    init = Some((body, Keyword(span((), init_node))));
-                }
-
-                let obj = Object::Scheduler {
-                    ident: ident.clone(),
-                    systems,
-                    init,
-                    docs,
-                };
-
-                module.objects.push(span(obj, s));
-            }
-
             "function" => {
                 let obj = function(src, s, &mut diagnostics)?;
                 module.objects.push(span(Object::Function(obj), s));
@@ -276,6 +243,10 @@ fn function(
     let body = body(src, s.expect_node("code body"), diagnostics)?;
     let docs = docstrings(src, s);
     let generics = generic_params(src, s.try_get_node("generic parameters"), diagnostics);
+    let invoke = s
+        .try_get_node("invoke")
+        .as_ref()
+        .map(|n| Keyword(span((), &n)));
     let obj = Function {
         ident: ident.clone(),
         parameters: params,
@@ -283,6 +254,7 @@ fn function(
         body,
         docs,
         generics,
+        invoke,
     };
     Ok(obj)
 }
@@ -532,6 +504,28 @@ fn block(
                     },
                     stmt_node,
                 )
+            }
+
+            "invoke" => {
+                let invocations_list = stmt_node.get_list("invocations");
+                let mut invocations = Vec::with_capacity(invocations_list.len());
+
+                for invocation in invocations_list {
+                    let ident = span(
+                        identifier_path_literal(
+                            src,
+                            invocation.expect_node("identifier"),
+                            diagnostics,
+                        )?,
+                        invocation,
+                    );
+                    let arguments =
+                        arguments(src, invocation.expect_node("arguments"), diagnostics)?;
+
+                    invocations.push(span((ident, arguments), invocation));
+                }
+
+                span(Statement::Invoke { invocations }, stmt_node)
             }
 
             other => stmt_node.ice(&format!("Unhandled statement type: {}", other)),
@@ -792,6 +786,49 @@ fn identifier_path_literal(
     Ok(identifier_path_literal)
 }
 
+fn postfix(
+    src: &str,
+    nodes: &[Nodes<'_>],
+    diagnostics: &mut Diagnostics,
+) -> Result<Vec<Span<Postfix>>, Span<LoweringError>> {
+    let mut result = Vec::with_capacity(nodes.len());
+    for node in nodes {
+        let variant = match node.get_name() {
+            "field access" => Postfix::Field(expect_ident(src, node, diagnostics)),
+            "function call" => {
+                let arguments = arguments(src, node, diagnostics)?;
+                Postfix::Call(arguments)
+            }
+            "indexing" => Postfix::Index(expression(src, node.expect_node("index"), diagnostics)?),
+            "ref cast" => {
+                let token = node.expect_node("ref token");
+                match token.expect_token().kind {
+                    TokenKinds::Token("&") => Postfix::Ref,
+                    TokenKinds::Token("*") => Postfix::Deref,
+                    _ => unreachable!(),
+                }
+            }
+            _ => unreachable!(""),
+        };
+        result.push(span(variant, node));
+    }
+
+    Ok(result)
+}
+
+fn arguments(
+    src: &str,
+    node: &Nodes<'_>,
+    diagnostics: &mut Diagnostics,
+) -> Result<Vec<Span<Expression>>, Span<LoweringError>> {
+    let arguments_ast = node.get_list("expressions");
+    let mut arguments = Vec::with_capacity(arguments_ast.len());
+    for arg in arguments_ast {
+        arguments.push(expression(src, arg, diagnostics)?);
+    }
+    Ok(arguments)
+}
+
 fn value(
     src: &str,
     node: &Nodes,
@@ -806,11 +843,12 @@ fn value(
             _ => unreachable!("ya"),
         }
     }
+    let postfix = postfix(src, node.get_list("tail"), diagnostics)?;
     Ok(span(
         Value {
             literal,
             unary,
-            postfix: Vec::new(),
+            postfix,
         },
         node,
     ))

@@ -1,15 +1,17 @@
 use std::ops::Deref;
 
 use arena::Arena;
+use arena_scope::{ScopeTree, stack::Stack};
+use smol_str::SmolStr;
 
 use crate::{
     ast::{self, Body, Expression, Function, Span},
     const_stage::{
         Context, Diagnostic, Error, Errors, Warnings,
-        objects::{FunctionObjKey, InitState},
-        types::ModuleKey,
+        objects::{AnyObjectKey, ConstObjKey, FunctionObjKey, InitState},
+        types::{AnyTypeKey, ModuleKey, PrimitiveType},
     },
-    ir::{BlockCtx, FunctionIr, Value, Variable},
+    ir::{Addr, BlockCtx, FunctionIr, Instruction, Value, Variable, VariableKey},
 };
 
 impl Context {
@@ -29,14 +31,19 @@ impl Context {
         }
         let mod_key = fun.module;
         let module = self.types.modules.get_unchecked(&mod_key);
+        let mut instructions: Stack<Vec<Instruction>> = Default::default();
+        let instructions_entry = instructions.push(Vec::new());
 
         let mut ir = FunctionIr {
-            instructions: Vec::new(),
-            //values: Arena::default(),
+            instructions,
+            instructions_entry,
             variables: Arena::default(),
         };
 
-        let mut block_ctx = BlockCtx { scopes: Vec::new() };
+        let mut block_ctx = BlockCtx {
+            variables: Default::default(),
+            source: *key,
+        };
 
         match self
             .ast
@@ -52,7 +59,6 @@ impl Context {
             }
             _ => unreachable!(),
         }
-        ir.instructions.shrink_to_fit();
         ir.variables.shrink();
 
         for (var_key, var) in ir.variables.iter_pairs() {
@@ -82,7 +88,7 @@ impl Context {
     ) -> Result<(), Error> {
         match block.deref() {
             Body::Block(block) => {
-                block_ctx.push_scope();
+                block_ctx.variables.push();
                 for st in block {
                     match st.deref() {
                         ast::Statement::Var {
@@ -93,23 +99,20 @@ impl Context {
                             let (value, ty) = match (ty, expression) {
                                 (Some(ty), Some(expr)) => {
                                     let ty = ty.lower(self, *module)?;
-                                    let val = match expr.const_eval(self, *module, &None, &Some(ty))
-                                    {
-                                        Ok(val) => Value::Const(val),
-                                        Err(err) => Err(err)?,
-                                    };
+                                    let val =
+                                        self.lower_expression(ir, block_ctx, expr, &Some(ty))?;
                                     (val, ty)
                                 }
                                 (None, Some(expr)) => {
                                     let (ty, val) =
-                                        match expr.const_eval(self, *module, &None, &None) {
+                                        match self.lower_expression(ir, block_ctx, expr, &None) {
                                             Ok(val) => (
-                                                val.type_of().map_err(|e| Error {
+                                                val.type_of(self, ir).map_err(|e| Error {
                                                     inner: e,
                                                     module: *module,
                                                     span: expr.location,
                                                 })?,
-                                                Value::Const(val),
+                                                val,
                                             ),
                                             Err(err) => Err(err)?,
                                         };
@@ -139,15 +142,38 @@ impl Context {
                             };
 
                             let key = ir.variables.push(var);
-                            block_ctx.declare_var(ident, module, key)?;
+                            block_ctx.variables.insert(ident.deref().clone(), key);
                         }
-                        ast::Statement::Return { .. } => {
+                        ast::Statement::Return { expression } => {
+                            let returns = self
+                                .objects
+                                .functions
+                                .get_unchecked(&block_ctx.source)
+                                .data
+                                .return_type
+                                .get_done();
+                            match expression {
+                                Some(expr) => {
+                                    self.lower_expression(ir, block_ctx, expr, &Some(*returns))?
+                                }
+                                None => match returns {
+                                    AnyTypeKey::Primitive(PrimitiveType::Void) => return Ok(()),
+                                    _ => Err(Error {
+                                        inner: Errors::ExpectedReturnExpression(block_ctx.source),
+                                        module: *module,
+                                        span: st.location,
+                                    })?,
+                                },
+                            };
+                            return Ok(());
+                        }
+                        ast::Statement::Invoke { .. } => {
                             return Ok(());
                         }
                         _ => todo!("{:?}", st),
                     }
                 }
-                block_ctx.pop_scope();
+                block_ctx.variables.pop();
             }
             Body::Statement(_) => {}
         }
@@ -157,9 +183,126 @@ impl Context {
     fn lower_expression(
         &mut self,
         ir: &mut FunctionIr,
+        block_ctx: &mut BlockCtx,
         expr: &Span<Expression>,
-        module: &ModuleKey,
-    ) -> () {
-        todo!()
+        expect: &Option<AnyTypeKey>,
+    ) -> Result<Value, Error> {
+        let module = self
+            .objects
+            .functions
+            .get_unchecked(&block_ctx.source)
+            .module;
+        match expr.const_eval(self, module, &None, expect) {
+            Ok(const_val) => return Ok(Value::Const(const_val)),
+            Err(_) => (),
+        }
+        match expr.deref() {
+            Expression::Binary { l, r, op } => {
+                let left_value = self.lower_expression(ir, block_ctx, l, &None)?;
+                let right_value = self.lower_expression(ir, block_ctx, r, &None)?;
+                self.load_value(ir, block_ctx, left_value, expect)?;
+                let ty = self.load_value(ir, block_ctx, right_value, expect)?;
+                Ok(Value::Runtime(ty))
+            }
+            Expression::Value(val) => {
+                let mut addr = match val.literal.deref() {
+                    ast::Literal::Identifier(ident) => {
+                        let path = &ident.path.deref().path;
+                        match self.resolve_const_path(&path, module, ident.path.location) {
+                            Ok(AnyObjectKey::Const(key)) => Addr::Const(key),
+                            Ok(AnyObjectKey::Function(key)) => Addr::Function(key),
+                            Ok(any) => Err(Error {
+                                inner: Errors::ObjectInaccessibleInBlock(any),
+                                module,
+                                span: ident.path.location,
+                            })?,
+                            Err(e) => {
+                                if path.len() == 1 {
+                                    let ident = path.first().unwrap();
+                                    match block_ctx.variables.get(ident) {
+                                        Some(v) => Addr::Var(*v),
+                                        None => Err(Error {
+                                            inner: Errors::VariableNotFound(ident.deref().clone()),
+                                            module,
+                                            span: ident.location,
+                                        })?,
+                                    }
+                                } else {
+                                    return Err(e);
+                                }
+                            }
+                        }
+                    }
+                    _ => todo!(),
+                };
+                dbg!(&addr);
+                Ok(Value::Addr(addr))
+            }
+        }
+    }
+
+    pub fn load_value(
+        &mut self,
+        ir: &mut FunctionIr,
+        block_ctx: &mut BlockCtx,
+        value: Value,
+        expect: &Option<AnyTypeKey>,
+    ) -> Result<AnyTypeKey, Error> {
+        match value {
+            Value::Const(const_value) => Ok(const_value.type_of().unwrap()),
+            Value::Runtime(ty) => Ok(ty),
+            Value::Addr(addr) => self.load_addr(ir, block_ctx, addr, expect),
+        }
+    }
+
+    pub fn load_addr(
+        &mut self,
+        ir: &mut FunctionIr,
+        block_ctx: &mut BlockCtx,
+        addr: Addr,
+        expect: &Option<AnyTypeKey>,
+    ) -> Result<AnyTypeKey, Error> {
+        match addr {
+            Addr::Var(key) => {
+                let instr = ir.instructions.get_mut_unchecked();
+                instr.push(Instruction::PushVar { src: key });
+                let var = ir.variables.get_mut_unchecked(&key);
+                var.used = true;
+                let ty = var.ty;
+                Ok(ty)
+            }
+            Addr::Function(key) => todo!(),
+            Addr::Const(key) => {
+                let obj = self.objects.constants.get_unchecked(&key);
+                ir.instructions
+                    .get_mut_unchecked()
+                    .push(Instruction::PushConst {
+                        src: obj.data.value.get_done().clone(),
+                    });
+                Ok(*obj.data.ty.get_done())
+            }
+        }
+    }
+}
+
+impl Value {
+    pub fn type_of(&self, ctx: &Context, ir: &FunctionIr) -> Result<AnyTypeKey, Errors> {
+        match self {
+            Self::Const(val) => val.type_of(),
+            Self::Runtime(ty) => Ok(*ty),
+            Self::Addr(addr) => match addr {
+                Addr::Var(key) => Ok(ir.variables.get_unchecked(key).ty),
+                Addr::Function(key) => Ok(*ctx
+                    .objects
+                    .functions
+                    .get_unchecked(key)
+                    .data
+                    .type_of
+                    .get_done()),
+                Addr::Const(key) => {
+                    Ok(*ctx.objects.constants.get_unchecked(key).data.ty.get_done())
+                }
+            },
+        }
     }
 }

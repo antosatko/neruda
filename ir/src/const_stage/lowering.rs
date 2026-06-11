@@ -92,7 +92,6 @@ impl Context {
                             module: *module_key,
                         })),
                     ),
-                    ast::Object::Scheduler { .. } => continue,
                     ast::Object::Function(ast::Function { ident, .. }) => (
                         ident.inner.as_ref().clone(),
                         self.objects
@@ -325,6 +324,7 @@ impl Context {
                     return_type,
                     body: _,
                     docs: _,
+                    invoke: _,
                 }) => {
                     self.push_generic_scope(generics, &mod_key)?;
                     let return_type = match return_type {

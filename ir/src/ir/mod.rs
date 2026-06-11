@@ -1,6 +1,8 @@
-use std::{collections::HashMap, ops::Deref};
-
 use arena::{Arena, Key};
+use arena_scope::{
+    ScopeTree,
+    stack::{Stack, StackKey},
+};
 use smol_str::SmolStr;
 
 pub mod lowerng;
@@ -8,8 +10,8 @@ pub mod lowerng;
 use crate::{
     ast::{ConstValue, Operator, Span, UnaryOp},
     const_stage::{
-        Error, Errors,
-        types::{AnyTypeKey, ModuleKey},
+        objects::{ConstObjKey, FunctionObjKey},
+        types::AnyTypeKey,
     },
 };
 
@@ -27,39 +29,33 @@ pub struct Variable {
     pub used: bool,
 }
 
-/*pub type ValueKey = Key<ValueTag>;
-pub type ValueArena = Arena<Value, ValueTag>;
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-pub struct ValueTag;
 #[derive(Debug)]
-pub struct Value {
-    pub ty: AnyTypeKey,
-}*/
-
-pub struct IrScopeCtx {
-    variables: HashMap<SmolStr, VariableKey>,
-}
-
 pub struct BlockCtx {
-    pub scopes: Vec<HashMap<SmolStr, VariableKey>>,
+    pub variables: VariableCtx,
+    pub source: FunctionObjKey,
 }
+
+pub type VariableCtx = ScopeTree<SmolStr, VariableKey>;
 
 #[derive(Debug)]
 pub struct FunctionIr {
     pub variables: VariableArena,
-    //pub values: ValueArena,
-    pub instructions: Vec<Instruction>,
+    pub instructions: Stack<Vec<Instruction>>,
+    pub instructions_entry: StackKey,
 }
 
 #[derive(Debug, Clone)]
 pub enum Addr {
     Var(VariableKey),
+    Function(FunctionObjKey),
+    Const(ConstObjKey),
 }
 
 #[derive(Debug, Clone)]
 pub enum Value {
     Const(ConstValue),
     Runtime(AnyTypeKey),
+    Addr(Addr),
 }
 
 #[derive(Debug, Clone)]
@@ -67,54 +63,16 @@ pub enum Instruction {
     /// Pushes a constant value on stack
     PushConst { src: ConstValue },
     /// Pops two values on stack, applies operator and pushes result
-    BinOp {
-        op: Operator,
-        lsrc: Value,
-        rsrc: Value,
-    },
+    BinOp { op: Operator },
     /// Pops value on stack, applies unary operator and pushes result
-    UnaryOp { op: UnaryOp, src: Value },
-    /// Pops value from stack and stores it in address
-    Store { dst: Addr },
-    /// Loads value from address and pushes it on stack
-    Load { src: Addr },
-}
-
-impl BlockCtx {
-    pub fn push_scope(&mut self) {
-        self.scopes.push(HashMap::new());
-    }
-
-    pub fn pop_scope(&mut self) {
-        self.scopes.pop();
-    }
-
-    pub fn find_var(&self, ident: &str) -> Option<VariableKey> {
-        self.scopes
-            .iter()
-            .rev()
-            .find_map(|s| s.get(ident).map(|v| *v))
-    }
-
-    pub fn declare_var(
-        &mut self,
-        ident: &Span<SmolStr>,
-        module: &ModuleKey,
-        key: VariableKey,
-    ) -> Result<(), Error> {
-        if ERR_VAR_SHADOWING && self.find_var(&ident).is_some() {
-            return Err(Error {
-                inner: Errors::DuplicateIdentifier(ident.deref().clone()),
-                module: *module,
-                span: ident.location,
-            });
-        }
-        match self.scopes.last_mut() {
-            Some(scope) => {
-                scope.insert(ident.deref().clone(), key);
-                Ok(())
-            }
-            None => unreachable!("Scope expected to exist for variable declaration"),
-        }
-    }
+    UnaryOp { op: UnaryOp },
+    /// Pops value from stack and stores it in variable
+    StoreVar { dst: VariableKey },
+    /// Loads value from variable and pushes it on stack
+    PushVar { src: VariableKey },
+    /// Calls a function, expects arguments to be pushed to the stack in the same order as defined in signature
+    /// Pushes result to the stack
+    Call { fun: FunctionObjKey },
+    /// Returns from a function
+    Return,
 }

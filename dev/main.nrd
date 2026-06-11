@@ -1,19 +1,6 @@
 import math as m
 import graphics as g
 
-scheduler main {
-    systems {
-        count_units
-        cap_velocity
-        apply_velocity
-        // equivalent to `apply_velocity`
-        // add<Position, Velocity>
-        on_stop_all
-    }
-
-    init => print("hello")
-}
-
 resource UnitCount = 0
 resource AvgUnitDirection = struct g::Vector2 { }
 
@@ -22,6 +9,16 @@ type StopAll
 component Position = f32x2
 component Velocity = f32x2
 component Orbiting = entity
+
+invoke function main() {
+    invoke {
+        apply_velocity()
+        on_stop_all()
+        cap_velocity()
+        count_units()
+        orbit()
+    }
+}
 
 
 // Select
@@ -41,11 +38,9 @@ system orbit(
     foreign primary: Position as P
 )
 => satellite.V += 1000 / (primary.get(satellite.C).P - satellite.P).pow(2)
-// generic components
-system add<T: AddEq, U>(e: mut T + U) => e.T += e.U
 
 function nevimco(in: i32): i32 {
     var a = 7
     var b: m::Im<f32> = (m::PI, m::PI * 2)
-    return a * 8 * in
+    return a * 8
 }

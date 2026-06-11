@@ -198,6 +198,33 @@ impl Errors {
                 format!("Resource flag '{ident}' expected to be nullable",),
                 format!("Expected nullable resource"),
             ),
+            Errors::VariableNotFound(ident) => (
+                "421",
+                format!("Variable '{ident}' not found",),
+                format!("Variable not found"),
+            ),
+            Errors::ObjectInaccessibleInBlock(obj) => (
+                "422",
+                format!(
+                    "Object '{}' is not accessible in a block context",
+                    obj.ident(ctx)
+                ),
+                format!("Object inaccessible"),
+            ),
+            Errors::ExpectedReturnExpression(fun) => (
+                "423",
+                format!(
+                    "Expected an expression due to the return type {}",
+                    ctx.objects
+                        .functions
+                        .get_unchecked(fun)
+                        .data
+                        .return_type
+                        .get_done()
+                        .stringify(&ctx.types)
+                ),
+                format!("Expected expression"),
+            ),
         }
     }
 }

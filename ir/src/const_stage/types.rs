@@ -5,7 +5,10 @@ use smol_str::{SmolStr, ToSmolStr};
 
 use crate::{
     ast::{ConstValue, Number, NumberValue},
-    const_stage::{Errors, objects::Module},
+    const_stage::{
+        Errors,
+        objects::{AnyObject, Module, Objects},
+    },
 };
 
 pub type FunctionArena = Arena<FunctionType, FunctionTag>;
@@ -169,7 +172,6 @@ pub enum AnyTypeKey {
     Polymorph(PolymorphKey),
     Generic(GenericKey),
     Morphed(MorphedKey),
-    //AnonymousStruct,
 }
 
 #[derive(Default)]

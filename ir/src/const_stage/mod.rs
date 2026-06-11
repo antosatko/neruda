@@ -11,7 +11,7 @@ use crate::{
     ast::{self, ConstValue, Operator, SpanIndex},
     const_stage::{
         objects::{AnyObjectKey, FunctionObjKey, Objects},
-        types::{AnyTypeKey, AutoTypes, ModuleKey},
+        types::{AnyTypeKey, AutoTypes, FunctionKey, ModuleKey},
     },
     generics::GContext,
     ir::VariableKey,
@@ -78,6 +78,9 @@ pub enum Errors {
     ExpectedOptionalResource {
         ident: SmolStr,
     },
+    VariableNotFound(SmolStr),
+    ObjectInaccessibleInBlock(AnyObjectKey),
+    ExpectedReturnExpression(FunctionObjKey),
 }
 
 #[derive(Debug)]
@@ -100,10 +103,11 @@ pub struct Context {
 impl Context {
     pub fn from_ast(ast: HashMap<Vec<SmolStr>, Arc<ast::Module>>) -> Result<Self, (Self, Error)> {
         let mut types = Types::default();
+        let objects = Default::default();
         let auto_types = AutoTypes::new(&mut types);
         let mut this = Self {
             types,
-            objects: Default::default(),
+            objects,
             auto_types,
             diagnostics: Diagnostics::default(),
             ast,

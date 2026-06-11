@@ -160,6 +160,9 @@ pub enum Object {
         alias: Alias,
     },
 
+    Using {
+        selector: Span<PathSelector>,
+    },
     Const {
         docs: Vec<Span<SmolStr>>,
         ident: Span<SmolStr>,
@@ -253,6 +256,19 @@ pub struct ActionClause {
 #[derive(Debug, Clone)]
 pub struct RestrictionClause {
     pub expression: Span<Expression>,
+}
+
+#[derive(Debug, Clone)]
+pub struct PathSelector {
+    pub path: IdentifierPath,
+    pub ends_on: Option<Span<PathSelectorEndOptions>>,
+}
+
+#[derive(Debug, Clone)]
+pub enum PathSelectorEndOptions {
+    All,
+    Set(Vec<Span<PathSelector>>),
+    Alias(Span<Span<SmolStr>>),
 }
 
 /* ===================== BLOCK / STATEMENTS ===================== */

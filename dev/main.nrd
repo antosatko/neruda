@@ -1,8 +1,10 @@
 import math as m
 import graphics as g
 
+using g::Vector2 as Vec2
+
 resource UnitCount = 0
-resource AvgUnitDirection = struct g::Vector2 { }
+resource AvgUnitDirection = struct Vec2 { }
 
 type StopAll
 

@@ -5,7 +5,7 @@ use std::sync::Arc;
 use arena::Key;
 use smol_str::SmolStr;
 
-use crate::ast::{self, ConstValue, Number, NumberValue, Span, SpanIndex};
+use crate::ast::{self, ConstValue, Number, NumberValue, PathSelectorEndOptions, Span, SpanIndex};
 use crate::const_stage::objects::{
     AnyObject, AnyObjectKey, ComponentObj, ComponentObjKey, ConstObj, ConstObjKey, FunctionObj,
     FunctionObjKey, ImportObj, InitState, Module, ResourceObj, ResourceObjKey, TraitObj,
@@ -32,6 +32,7 @@ impl Context {
             let ir_module = self.types.modules.get_mut_unchecked(module_key);
             for (obj_key, obj) in module.objects.iter_pairs() {
                 let (ident, key): (SmolStr, AnyObjectKey) = match obj.inner.as_ref() {
+                    ast::Object::Using { .. } => continue,
                     ast::Object::Import { ident, alias } => {
                         let raw_path: Vec<SmolStr> = ident
                             .inner
@@ -47,8 +48,19 @@ impl Context {
                             if !path.is_empty() {
                                 path.pop();
                             }
-                            path.extend(raw_path);
+                            path.extend_from_slice(&raw_path);
                             path
+                        };
+
+                        let ty_key = match map.get(&target_path) {
+                            Some(k) => *k,
+                            None => {
+                                return Err(Error {
+                                    inner: Errors::ObjectNotFound(raw_path),
+                                    module: *module_key,
+                                    span: ident.location,
+                                });
+                            }
                         };
 
                         let ident = match &alias.0 {
@@ -56,15 +68,6 @@ impl Context {
                             None => ident.inner.path.last().unwrap().inner.as_ref().clone(),
                         };
 
-                        let ty_key = match map.get(&target_path) {
-                            Some(k) => *k,
-                            None => {
-                                todo!(
-                                    "lamo: {target_path:?}\n{:?}",
-                                    map.keys().cloned().collect::<Vec<Vec<SmolStr>>>()
-                                )
-                            }
-                        };
                         let obj = ImportObj { module: ty_key };
                         let obj = AnyObject::new(ident.clone(), obj, obj_key, *module_key);
                         let key = self.objects.imports.push(obj);
@@ -180,7 +183,102 @@ impl Context {
                 ir_module.symbol_map.insert(ident, key);
             }
         }
+
+        self.module_map = map;
         Ok(())
+    }
+
+    pub(crate) fn lower_using_stage(&mut self) -> Result<(), Error> {
+        for (current_module_path, module_key) in &self.module_map {
+            let ast_module = self.ast.get(current_module_path).unwrap();
+
+            for (obj_key, obj) in ast_module.objects.iter_pairs() {
+                match obj.inner.as_ref() {
+                    ast::Object::Using { selector } => {
+                        match self.resolve_selector_target(*module_key, selector)? {
+                            (PathNode::Module(key), ident) => {
+                                match &selector.ends_on.as_ref().map(|o| o.deref()) {
+                                    Some(PathSelectorEndOptions::All) => {
+                                        todo!("symbol propagation things")
+                                    }
+                                    Some(PathSelectorEndOptions::Set(set)) => todo!(),
+                                    Some(PathSelectorEndOptions::Alias(alias)) => {
+                                        let ident = alias.deref().deref().clone();
+                                        let import = self.objects.imports.push(AnyObject {
+                                            data: ImportObj { module: key },
+                                            identifier: ident.clone(),
+                                            ast_object: obj_key,
+                                            module: *module_key,
+                                        });
+                                        self.types
+                                            .modules
+                                            .get_mut_unchecked(module_key)
+                                            .symbol_map
+                                            .insert(ident, AnyObjectKey::Import(import))
+                                    }
+                                    None => {
+                                        let import = self.objects.imports.push(AnyObject {
+                                            data: ImportObj { module: key },
+                                            identifier: ident.deref().clone(),
+                                            ast_object: obj_key,
+                                            module: *module_key,
+                                        });
+                                        self.types
+                                            .modules
+                                            .get_mut_unchecked(module_key)
+                                            .symbol_map
+                                            .insert(
+                                                ident.deref().clone(),
+                                                AnyObjectKey::Import(import),
+                                            )
+                                    }
+                                }
+                            }
+                            (PathNode::Object(key), ident) => {
+                                match &selector.ends_on.as_ref().map(|o| o.deref()) {
+                                    Some(PathSelectorEndOptions::All) => {
+                                        todo!("symbol propagation things")
+                                    }
+                                    Some(PathSelectorEndOptions::Set(set)) => todo!(),
+                                    Some(PathSelectorEndOptions::Alias(alias)) => self
+                                        .types
+                                        .modules
+                                        .get_mut_unchecked(&module_key)
+                                        .symbol_map
+                                        .insert(alias.deref().deref().clone(), key),
+                                    None => self
+                                        .types
+                                        .modules
+                                        .get_mut_unchecked(&module_key)
+                                        .symbol_map
+                                        .insert(ident.deref().clone(), key),
+                                }
+                            }
+                        };
+                    }
+                    _ => continue,
+                };
+            }
+        }
+        Ok(())
+    }
+
+    fn resolve_selector_target(
+        &self,
+        module_key: Key<ModuleTag>,
+        selector: &Span<ast::PathSelector>,
+    ) -> Result<(PathNode, Span<SmolStr>), Diagnostic<Errors>> {
+        let mut stop = (
+            PathNode::Module(module_key),
+            Span::new(Default::default(), SpanIndex::default()),
+        );
+        for next in &selector.path.path {
+            stop = (
+                self.resolve_next_static_stop_of_path(next, &stop.0, &module_key)?,
+                next.clone(),
+            );
+        }
+        Ok(stop)
     }
 
     pub fn lower_const_stage(&mut self) -> Result<(), Error> {
@@ -544,16 +642,65 @@ impl Context {
         )
     }
 
+    pub fn resolve_first_static_stop_of_path(
+        &self,
+        stop: &Span<SmolStr>,
+        mod_key: ModuleKey,
+    ) -> Result<PathNode, Error> {
+        match self.generic_ctx.get(stop.deref()) {
+            Some(_) => todo!("toznam"),
+            None => (),
+        }
+        let current = PathNode::Module(mod_key);
+        self.resolve_next_static_stop_of_path(stop, &current, &mod_key)
+    }
+
+    pub fn resolve_next_static_stop_of_path(
+        &self,
+        next: &Span<SmolStr>,
+        current: &PathNode,
+        module: &ModuleKey,
+    ) -> Result<PathNode, Error> {
+        match current {
+            PathNode::Module(key) => {
+                let module = self.types.modules.get_unchecked(key);
+                match module.symbol_map.get(next.deref()) {
+                    Some(AnyObjectKey::Import(obj_key)) => {
+                        return Ok(PathNode::Module(
+                            self.objects.imports.get_unchecked(obj_key).data.module,
+                        ));
+                    }
+                    Some(any_key) => return Ok(PathNode::Object(*any_key)),
+                    _ => Err(Error {
+                        inner: Errors::ObjectNotFound(vec![next.deref().clone()]),
+                        module: *key,
+                        span: next.location,
+                    })?,
+                }
+            }
+            PathNode::Object(key) => match key {
+                AnyObjectKey::Type(type_key) => {
+                    let type_obj = self.objects.types.get_unchecked(type_key);
+                    match type_obj.data.constants.get(next.deref()) {
+                        Some(v) => return Ok(PathNode::Object(AnyObjectKey::Const(*v))),
+                        _ => Err(Error {
+                            inner: Errors::ObjectNotFound(vec![next.deref().clone()]),
+                            module: *module,
+                            span: next.location,
+                        })?,
+                    }
+                }
+                _ => todo!(),
+            },
+        }
+    }
+
     pub fn resolve_const_path(
         &mut self,
         path: &[Span<SmolStr>],
         mod_key: ModuleKey,
         span: SpanIndex,
     ) -> Result<AnyObjectKey, Error> {
-        enum PathNode {
-            Module(ModuleKey),
-            Object(AnyObjectKey),
-        }
         if path.len() == 1 {
             match self.generic_ctx.get(&path[0]) {
                 Some(_) => todo!("toznam"),
@@ -615,6 +762,11 @@ impl Context {
     }
 }
 
+pub enum PathNode {
+    Module(ModuleKey),
+    Object(AnyObjectKey),
+}
+
 impl ast::Expression {
     pub fn const_eval(
         &self,
@@ -660,9 +812,11 @@ impl ast::Expression {
                                     ConstObj {
                                         value: InitState::Progress(_),
                                         ty: _,
-                                    } => {
-                                        panic!("we do not like circles around here")
-                                    }
+                                    } => Err(Error {
+                                        inner: Errors::SelfReferencial,
+                                        module: mod_key,
+                                        span: identifier_path.path.location,
+                                    })?,
                                     ConstObj { .. } => {
                                         let obj = ctx.lower_const_with_key(obj_key)?;
                                         match &obj.data {

@@ -10,9 +10,9 @@ use smol_str::SmolStr;
 use ir::ast::{
     ActionClause, Alias, Associativity, Body, Clauses, Diagnostics, Else, ElseIf, ExprItem,
     Expression, Function, GenericParameter, IdentifierLiteral, IdentifierPath, Keyword, Literal,
-    LoweringError, LoweringWarning, Module, Mutability, Object, Operator, Parameter, Postfix,
-    RestrictionClause, SelectClause, Span, SpanIndex, Statement, Type, TypeLiteral, UnaryOp, Value,
-    char_literal, numeric_literal, string_literal,
+    LoweringError, LoweringWarning, Module, Mutability, Object, Operator, Parameter, PathSelector,
+    PathSelectorEndOptions, Postfix, RestrictionClause, SelectClause, Span, SpanIndex, Statement,
+    Type, TypeLiteral, UnaryOp, Value, char_literal, numeric_literal, string_literal,
 };
 
 #[derive(Debug, Clone)]
@@ -219,6 +219,13 @@ pub fn module_named(
                 module.objects.push(span(obj, s));
             }
 
+            "using" => {
+                let selector = get_selector(src, &mut diagnostics, s.expect_node("selector"));
+
+                let obj = Object::Using { selector };
+                module.objects.push(span(obj, s));
+            }
+
             other => s.ice(&format!("Unhandled top-level item: {}", other)),
         }
     }
@@ -227,6 +234,43 @@ pub fn module_named(
         module,
         diagnostics,
     })
+}
+
+fn get_selector(
+    src: &str,
+    diagnostics: &mut Diagnostics,
+    selector: &Nodes<'_>,
+) -> Span<PathSelector> {
+    let ends_on = match selector.try_get_node("ends on") {
+        Some(eo) => Some(span(
+            match eo.is_token() {
+                true => PathSelectorEndOptions::All,
+                _ => match eo.get_name() {
+                    "path set" => PathSelectorEndOptions::Set(
+                        eo.get_list("selectors")
+                            .iter()
+                            .map(|s| get_selector(src, diagnostics, s))
+                            .collect(),
+                    ),
+                    "alias" => {
+                        PathSelectorEndOptions::Alias(span(expect_ident(src, eo, diagnostics), eo))
+                    }
+                    _ => todo!(),
+                },
+            },
+            eo,
+        )),
+        None => None,
+    };
+    let path = IdentifierPath {
+        path: selector
+            .get_list("path")
+            .iter()
+            .map(|i| expect_ident(src, i, diagnostics))
+            .collect(),
+    };
+    let selector = span(PathSelector { ends_on, path }, selector);
+    selector
 }
 
 fn function(

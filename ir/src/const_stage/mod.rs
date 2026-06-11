@@ -81,6 +81,7 @@ pub enum Errors {
     VariableNotFound(SmolStr),
     ObjectInaccessibleInBlock(AnyObjectKey),
     ExpectedReturnExpression(FunctionObjKey),
+    SelfReferencial,
 }
 
 #[derive(Debug)]
@@ -98,6 +99,7 @@ pub struct Context {
     pub ast: HashMap<Vec<SmolStr>, Arc<ast::Module>>,
     pub diagnostics: Diagnostics,
     pub generic_ctx: GContext,
+    pub module_map: HashMap<Vec<SmolStr>, ModuleKey>,
 }
 
 impl Context {
@@ -112,9 +114,14 @@ impl Context {
             diagnostics: Diagnostics::default(),
             ast,
             generic_ctx: ScopeTree::default(),
+            module_map: HashMap::with_capacity(0),
         };
 
         if let Err(e) = this.lower_import_stage() {
+            return Err((this, e));
+        }
+
+        if let Err(e) = this.lower_using_stage() {
             return Err((this, e));
         }
 

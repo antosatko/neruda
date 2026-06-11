@@ -35,6 +35,7 @@ const KEYWORDS: &[&'static str] = &[
     "trait",
     "impl",
     "for",
+    "using",
 ];
 
 const KEYWORDS_NON_BLOCKING: &[&'static str] = &["where", "on", "import"];
@@ -631,6 +632,48 @@ pub fn gen_parser<'src>() -> Parser<'static> {
             is(end_stmt),
         ])
         .variables([IDENTIFIER_VAR, node_var("alias")])
+        .build();
+
+    let path_set_selector = parser
+        .grammar
+        .new_node("path set")
+        .rules([
+            is(token("{")).commit(),
+            is(node("path selector")).set("selectors"),
+            while_(end_stmt).then([is_one_of([
+                option(node("path selector")).set("selectors"),
+                option(token("}")).return_node(),
+            ])
+            .hint("do you see?")]),
+        ])
+        .variables([list_var("selectors")])
+        .build();
+
+    let many_path_selector = parser
+        .grammar
+        .new_node("path selector")
+        .rules([
+            is(ident).set("path").commit(),
+            while_(token("::")).then([is_one_of([
+                option(token("*")).set("ends on").return_node(),
+                option(path_set_selector).set("ends on").return_node(),
+                option(ident)
+                    .set("path")
+                    .then([maybe(alias).set("ends on").return_node()]),
+            ])]),
+        ])
+        .variables([list_var("path"), node_var("ends on")])
+        .build();
+
+    let using = parser
+        .grammar
+        .new_node("using")
+        .rules([
+            is(keyword("using")).commit(),
+            is(many_path_selector).set("selector"),
+            is(end_stmt),
+        ])
+        .variables([node_var("selector")])
         .build();
 
     let value = parser
@@ -1373,6 +1416,7 @@ pub fn gen_parser<'src>() -> Parser<'static> {
         .new_enum("top level statement")
         .options([
             function, system, component, type_kw, import, const_kw, trait_kw, impl_kw, resource,
+            using,
         ])
         .build();
 

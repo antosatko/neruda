@@ -1,6 +1,8 @@
 import mod::dev::algo
 
-type DrawBuffer = algo::Vec<u32>
+using algo::Vec
+
+type DrawBuffer = Vec<u32>
 
 type BufferType = enum (self + 1): u32 {
     Front

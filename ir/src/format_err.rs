@@ -225,6 +225,11 @@ impl Errors {
                 ),
                 format!("Expected expression"),
             ),
+            Errors::SelfReferencial => (
+                "424",
+                format!("The object value that could not be resolved",),
+                format!("Self referencial"),
+            ),
         }
     }
 }

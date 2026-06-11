@@ -2,7 +2,7 @@ use core::panic;
 use dashmap::DashMap;
 use ir::ast::{
     Alias, Body, Diagnostics, Expression, Function, IdentifierPath, Literal, LoweringError, Module,
-    Object, Parameter, Postfix, Statement, Type, Value,
+    Object, Parameter, PathSelector, Postfix, Statement, Type, Value,
 };
 use line_index::{LineCol, LineIndex, TextSize};
 use parser::{
@@ -170,6 +170,11 @@ impl IndexedWalk for Module {
 impl IndexedWalk for ir::ast::Span<Object> {
     fn index(&self, line_index: &LineIndex, spans: &mut Vec<Span>) {
         match self.inner.as_ref() {
+            Object::Using { selector } => {
+                spans.push(self.span_word(Types::Keyword, line_index, "using"));
+
+                selector.index(line_index, spans);
+            }
             Object::TypeImpl {
                 ty,
                 generic_parameters,
@@ -428,6 +433,28 @@ impl IndexedWalk for ir::ast::Span<Object> {
                 ident.index(line_index, spans);
                 if let Some(alias) = &alias.0 {
                     spans.push(alias.span_word(Types::Keyword, line_index, "as"));
+                }
+            }
+        }
+    }
+}
+
+impl IndexedWalk for ir::ast::Span<PathSelector> {
+    fn index(&self, line_index: &LineIndex, spans: &mut Vec<Span>) {
+        for ident in &self.path.path {
+            spans.push(ident.span(Types::Ident, line_index));
+        }
+        if let Some(ends_on) = &self.ends_on {
+            match ends_on.deref() {
+                ir::ast::PathSelectorEndOptions::All => (),
+                ir::ast::PathSelectorEndOptions::Set(selectors) => {
+                    for selector in selectors {
+                        selector.index(line_index, spans);
+                    }
+                }
+                ir::ast::PathSelectorEndOptions::Alias(alias) => {
+                    spans.push(alias.span_word(Types::Keyword, line_index, "as"));
+                    spans.push(alias.deref().span(Types::Ident, line_index));
                 }
             }
         }

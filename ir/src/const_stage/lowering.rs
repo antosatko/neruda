@@ -918,10 +918,9 @@ impl ast::Expression {
                             },
                             size: Some(values.len()),
                         };
-                        let ty = AnyTypeKey::Array(ctx.types.arrays.push_unique(ty));
                         ConstValue::Array {
                             elements: values,
-                            ty,
+                            ty: AnyTypeKey::Array(ctx.types.arrays.push_unique(ty)),
                         }
                     }
                     ast::Literal::Tuple(exprs) => {

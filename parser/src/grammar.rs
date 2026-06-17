@@ -36,6 +36,7 @@ const KEYWORDS: &[&'static str] = &[
     "impl",
     "for",
     "using",
+    "pub",
 ];
 
 const KEYWORDS_NON_BLOCKING: &[&'static str] = &["where", "on", "import"];
@@ -419,6 +420,18 @@ pub fn gen_parser<'src>() -> Parser<'static> {
         .options([token(";")])
         .build();
 
+    let access_modifier = parser
+        .grammar
+        .new_node("access modifier")
+        .rules([maybe(keyword("pub"))
+            .set("public")
+            .then([maybe(token("(")).then([is_one_of([
+                option(word("mod")).set("modifier"),
+                option(word("project")).set("modifier"),
+            ])])])])
+        .variables([node_var("public"), node_var("modifier")])
+        .build();
+
     let docstr = parser
         .grammar
         .new_node("doc string")
@@ -625,6 +638,7 @@ pub fn gen_parser<'src>() -> Parser<'static> {
     let import = parser
         .grammar
         .new_node("import")
+        .has(access_modifier, "access mod")
         .rules([
             is(keyword("import")).commit(),
             is(ident_path).set(IDENTIFIER).set(global("imports")),
@@ -936,6 +950,7 @@ pub fn gen_parser<'src>() -> Parser<'static> {
         .grammar
         .new_node("const")
         .has(docstr, "docs")
+        .has(access_modifier, "access mod")
         .rules([
             is(keyword("const")).commit(),
             is(ident).set(IDENTIFIER),
@@ -1136,6 +1151,7 @@ pub fn gen_parser<'src>() -> Parser<'static> {
         .grammar
         .new_node("function")
         .has(docstr, "docs")
+        .has(access_modifier, "access mod")
         .rules([
             maybe(keyword("invoke")).set("invoke"),
             is(keyword("function")).commit().start(),
@@ -1162,6 +1178,7 @@ pub fn gen_parser<'src>() -> Parser<'static> {
         .grammar
         .new_node("trait")
         .has(docstr, "docs")
+        .has(access_modifier, "access mod")
         .rules([
             is(keyword("trait")).commit(),
             is(ident).set(IDENTIFIER),
@@ -1336,6 +1353,7 @@ pub fn gen_parser<'src>() -> Parser<'static> {
         .grammar
         .new_node("system")
         .has(docstr, "docs")
+        .has(access_modifier, "access mod")
         .rules([
             is(keyword("system")).commit().start(),
             is(ident).set(IDENTIFIER),
@@ -1361,6 +1379,7 @@ pub fn gen_parser<'src>() -> Parser<'static> {
         .grammar
         .new_node("component")
         .has(docstr, "docs")
+        .has(access_modifier, "access mod")
         .rules([
             is(keyword("component")).commit().start(),
             is(ident).set(IDENTIFIER),
@@ -1374,6 +1393,7 @@ pub fn gen_parser<'src>() -> Parser<'static> {
         .grammar
         .new_node("resource")
         .has(docstr, "docs")
+        .has(access_modifier, "access mod")
         .rules([
             is(keyword("resource")).commit().start(),
             is(ident).set(IDENTIFIER),
@@ -1397,6 +1417,7 @@ pub fn gen_parser<'src>() -> Parser<'static> {
         .grammar
         .new_node("type definition")
         .has(docstr, "docs")
+        .has(access_modifier, "access mod")
         .rules([
             is(keyword("type")).commit().start(),
             is(ident).set(IDENTIFIER),

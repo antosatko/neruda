@@ -1,28 +1,29 @@
 import mod::dev::algo
+import main
 
-using algo::Vec
+using algo::*
 
-type DrawBuffer = Vec<u32>
+pub type DrawBuffer = Vec<u32>
 
-type BufferType = enum (self + 1): u32 {
+pub type BufferType = enum: u32 {
     Front
     Back
     Count
 }
 
-type DoubleBuffer<T> = struct {
+pub type DoubleBuffer<T> = struct {
     data: [T; BufferType::Count]
     current: BufferType = BufferType::Front
 }
 
-type DrawSurface = DoubleBuffer<DrawBuffer>
+pub type DrawSurface = DoubleBuffer<DrawBuffer>
 
-type Vector2 = struct {
+pub type Vector2 = struct {
     x: f32
     y: f32
 }
 
-type Vector3 = struct {
+pub type Vector3 = struct {
     x: f32
     y: f32
     z: f32

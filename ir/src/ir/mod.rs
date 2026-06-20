@@ -10,12 +10,12 @@ pub mod lowerng;
 use crate::{
     ast::{ConstValue, Operator, Span, UnaryOp},
     const_stage::{
-        objects::{ConstObjKey, FunctionObjKey},
+        objects::{AnyObjectKey, FunctionObjKey},
         types::AnyTypeKey,
     },
 };
 
-const ERR_VAR_SHADOWING: bool = true;
+pub type BlockKey = StackKey;
 
 pub type VariableKey = Key<VariableTag>;
 pub type VariableArena = Arena<Variable, VariableTag>;
@@ -25,8 +25,9 @@ pub struct VariableTag;
 pub struct Variable {
     pub identifier: Span<SmolStr>,
     pub ty: AnyTypeKey,
-    pub value: Value,
+    pub value: ValueKey,
     pub used: bool,
+    pub constant: bool,
 }
 
 #[derive(Debug)]
@@ -40,39 +41,71 @@ pub type VariableCtx = ScopeTree<SmolStr, VariableKey>;
 #[derive(Debug)]
 pub struct FunctionIr {
     pub variables: VariableArena,
-    pub instructions: Stack<Vec<Instruction>>,
-    pub instructions_entry: StackKey,
+    pub values: Arena<Value, ValueTag>,
+    pub blocks: Stack<BasicBlock>,
+    pub blocks_entry: StackKey,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct BasicBlock {
+    pub instructions: Vec<Instruction>,
+    pub terminator: Option<Terminator>,
 }
 
 #[derive(Debug, Clone)]
 pub enum Addr {
     Var(VariableKey),
-    Function(FunctionObjKey),
-    Const(ConstObjKey),
+    Value(ValueKey),
+    Object(AnyObjectKey),
 }
 
-#[derive(Debug, Clone)]
-pub enum Value {
-    Const(ConstValue),
-    Runtime(AnyTypeKey),
-    Addr(Addr),
+#[derive(Debug, Clone, Hash, PartialEq, Eq, Copy)]
+pub struct ValueTag;
+pub type ValueKey = Key<ValueTag>;
+#[derive(Debug, Clone, Copy)]
+pub struct Value {
+    ty: AnyTypeKey,
 }
 
 #[derive(Debug, Clone)]
 pub enum Instruction {
-    /// Pushes a constant value on stack
-    PushConst { src: ConstValue },
-    /// Pops two values on stack, applies operator and pushes result
-    BinOp { op: Operator },
-    /// Pops value on stack, applies unary operator and pushes result
-    UnaryOp { op: UnaryOp },
-    /// Pops value from stack and stores it in variable
-    StoreVar { dst: VariableKey },
-    /// Loads value from variable and pushes it on stack
-    PushVar { src: VariableKey },
-    /// Calls a function, expects arguments to be pushed to the stack in the same order as defined in signature
-    /// Pushes result to the stack
-    Call { fun: FunctionObjKey },
-    /// Returns from a function
-    Return,
+    LoadConst {
+        src: ConstValue,
+        dst: ValueKey,
+    },
+    BinOp {
+        op: Operator,
+        l: ValueKey,
+        r: ValueKey,
+        dst: ValueKey,
+    },
+    UnaryOp {
+        op: UnaryOp,
+        src: ValueKey,
+        dst: ValueKey,
+    },
+    StoreVar {
+        dst: VariableKey,
+        src: ValueKey,
+    },
+    LoadVar {
+        src: VariableKey,
+        dst: ValueKey,
+    },
+    Call {
+        fun: FunctionObjKey,
+        result: ValueKey,
+    },
+}
+
+#[derive(Debug, Clone)]
+/// May require a boolean value on stack
+enum Terminator {
+    Return(Option<ValueKey>),
+    Jump(BlockKey, Option<ValueKey>),
+    Branch {
+        then_block: BlockKey,
+        else_block: BlockKey,
+    },
+    Unreachable,
 }

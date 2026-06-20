@@ -1,4 +1,4 @@
-type Vec<T> = struct {
+pub type Vec<T> = struct {
     ptr: &[T]
     len: u32
     cap: u32

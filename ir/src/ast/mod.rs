@@ -133,12 +133,14 @@ pub enum Object {
     Function(Function),
 
     Component {
+        access: Access,
         ident: Span<SmolStr>,
         ty: Option<Span<Type>>,
         docs: Vec<Span<SmolStr>>,
     },
 
     Type {
+        access: Access,
         ident: Span<SmolStr>,
         generics: Option<Span<Vec<Span<GenericParameter>>>>,
         ty: Option<Span<Type>>,
@@ -146,6 +148,7 @@ pub enum Object {
     },
 
     System {
+        access: Access,
         ident: Span<SmolStr>,
         generics: Option<Span<Vec<Span<GenericParameter>>>>,
         docs: Vec<Span<SmolStr>>,
@@ -156,6 +159,7 @@ pub enum Object {
     },
 
     Import {
+        access: Access,
         ident: Span<IdentifierPath>,
         alias: Alias,
     },
@@ -164,6 +168,7 @@ pub enum Object {
         selector: Span<PathSelector>,
     },
     Const {
+        access: Access,
         docs: Vec<Span<SmolStr>>,
         ident: Span<SmolStr>,
         ty: Span<Type>,
@@ -171,6 +176,7 @@ pub enum Object {
     },
 
     Trait {
+        access: Access,
         docs: Vec<Span<SmolStr>>,
         ident: Span<SmolStr>,
         methods: Vec<Span<Function>>,
@@ -191,6 +197,7 @@ pub enum Object {
     },
 
     Resource {
+        access: Access,
         ident: Span<SmolStr>,
         docs: Vec<Span<SmolStr>>,
         ty: Option<Span<Type>>,
@@ -198,9 +205,25 @@ pub enum Object {
         is_optional: Option<Keyword>,
     },
 }
+#[derive(Debug, Clone, Default)]
+pub struct Access {
+    pub modifier: AccessModifiers,
+    pub public_kw: Option<Keyword>,
+    pub modifier_kw: Option<Keyword>,
+}
+
+#[derive(Debug, Clone, Default, Copy)]
+pub enum AccessModifiers {
+    Public,
+    #[default]
+    Private,
+    PublicModule,
+    PublicProject,
+}
 
 #[derive(Debug, Clone)]
 pub struct Function {
+    pub access: Access,
     pub ident: Span<SmolStr>,
     pub generics: Option<Span<Vec<Span<GenericParameter>>>>,
     pub parameters: Vec<Span<Parameter>>,

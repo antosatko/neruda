@@ -8,7 +8,7 @@ resource AvgUnitDirection = struct Vec2 { }
 
 type StopAll
 
-pub component Position = f32x2
+component Position = f32x2
 component Velocity = f32x2
 component Orbiting = entity
 

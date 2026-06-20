@@ -5,7 +5,9 @@ use std::sync::Arc;
 use arena::Key;
 use smol_str::SmolStr;
 
-use crate::ast::{self, ConstValue, Number, NumberValue, PathSelectorEndOptions, Span, SpanIndex};
+use crate::ast::{
+    self, AccessModifiers, ConstValue, Number, NumberValue, PathSelectorEndOptions, Span, SpanIndex,
+};
 use crate::const_stage::objects::{
     AnyObject, AnyObjectKey, ComponentObj, ComponentObjKey, ConstObj, ConstObjKey, FunctionObj,
     FunctionObjKey, ImportObj, InitState, Module, ResourceObj, ResourceObjKey, TraitObj,
@@ -33,7 +35,11 @@ impl Context {
             for (obj_key, obj) in module.objects.iter_pairs() {
                 let (ident, key): (SmolStr, AnyObjectKey) = match obj.inner.as_ref() {
                     ast::Object::Using { .. } => continue,
-                    ast::Object::Import { ident, alias } => {
+                    ast::Object::Import {
+                        ident,
+                        alias,
+                        access,
+                    } => {
                         let raw_path: Vec<SmolStr> = ident
                             .inner
                             .path
@@ -69,7 +75,13 @@ impl Context {
                         };
 
                         let obj = ImportObj { module: ty_key };
-                        let obj = AnyObject::new(ident.clone(), obj, obj_key, *module_key);
+                        let obj = AnyObject::new(
+                            ident.clone(),
+                            obj,
+                            obj_key,
+                            *module_key,
+                            access.modifier,
+                        );
                         let key = self.objects.imports.push(obj);
                         ir_module
                             .symbol_map
@@ -77,6 +89,7 @@ impl Context {
                         continue;
                     }
                     ast::Object::Resource {
+                        access,
                         ident,
                         docs: _,
                         ty: _,
@@ -90,12 +103,13 @@ impl Context {
                                 optional: is_optional.is_some(),
                                 ty: InitState::Uninitialized,
                             },
+                            access: access.modifier,
                             identifier: ident.deref().clone(),
                             ast_object: obj_key,
                             module: *module_key,
                         })),
                     ),
-                    ast::Object::Function(ast::Function { ident, .. }) => (
+                    ast::Object::Function(ast::Function { ident, access, .. }) => (
                         ident.inner.as_ref().clone(),
                         self.objects
                             .functions
@@ -107,13 +121,14 @@ impl Context {
                                     type_of: InitState::Uninitialized,
                                     ir: InitState::Uninitialized,
                                 },
+                                access: access.modifier,
                                 identifier: ident.inner.as_ref().clone(),
                                 ast_object: obj_key,
                                 module: *module_key,
                             })
                             .into(),
                     ),
-                    ast::Object::Component { ident, .. } => (
+                    ast::Object::Component { ident, access, .. } => (
                         ident.inner.as_ref().clone(),
                         self.objects
                             .components
@@ -121,6 +136,7 @@ impl Context {
                                 data: ComponentObj {
                                     ty: InitState::Uninitialized,
                                 },
+                                access: access.modifier,
                                 identifier: ident.inner.as_ref().clone(),
                                 ast_object: obj_key,
                                 module: *module_key,
@@ -129,7 +145,7 @@ impl Context {
                     ),
                     ast::Object::TypeImpl { .. } => continue,
                     ast::Object::TraitImpl { .. } => continue,
-                    ast::Object::Trait { ident, .. } => (
+                    ast::Object::Trait { ident, access, .. } => (
                         ident.inner.as_ref().clone(),
                         self.objects
                             .traits
@@ -139,13 +155,14 @@ impl Context {
                                         ident: ident.inner.as_ref().clone(),
                                     })),
                                 },
+                                access: access.modifier,
                                 identifier: ident.inner.as_ref().clone(),
                                 ast_object: obj_key,
                                 module: *module_key,
                             })
                             .into(),
                     ),
-                    ast::Object::Type { ident, .. } => (
+                    ast::Object::Type { ident, access, .. } => (
                         ident.inner.as_ref().clone(),
                         self.objects
                             .types
@@ -157,6 +174,7 @@ impl Context {
                                     generics: InitState::Uninitialized,
                                     constants: HashMap::new(),
                                 },
+                                access: access.modifier,
                                 identifier: ident.inner.as_ref().clone(),
                                 ast_object: obj_key,
                                 module: *module_key,
@@ -164,7 +182,7 @@ impl Context {
                             .into(),
                     ),
                     ast::Object::System { .. } => continue,
-                    ast::Object::Const { ident, .. } => (
+                    ast::Object::Const { ident, access, .. } => (
                         ident.inner.as_ref().clone(),
                         self.objects
                             .constants
@@ -173,6 +191,7 @@ impl Context {
                                     value: InitState::Uninitialized,
                                     ty: InitState::Uninitialized,
                                 },
+                                access: access.modifier,
                                 identifier: ident.inner.as_ref().clone(),
                                 ast_object: obj_key,
                                 module: *module_key,
@@ -189,77 +208,138 @@ impl Context {
     }
 
     pub(crate) fn lower_using_stage(&mut self) -> Result<(), Error> {
-        for (current_module_path, module_key) in &self.module_map {
-            let ast_module = self.ast.get(current_module_path).unwrap();
+        for (current_module_path, module_key) in &self.module_map.clone() {
+            let ast_module = self.ast.get(current_module_path).unwrap().clone();
 
             for (obj_key, obj) in ast_module.objects.iter_pairs() {
                 match obj.inner.as_ref() {
                     ast::Object::Using { selector } => {
-                        match self.resolve_selector_target(*module_key, selector)? {
-                            (PathNode::Module(key), ident) => {
-                                match &selector.ends_on.as_ref().map(|o| o.deref()) {
-                                    Some(PathSelectorEndOptions::All) => {
-                                        todo!("symbol propagation things")
-                                    }
-                                    Some(PathSelectorEndOptions::Set(set)) => todo!(),
-                                    Some(PathSelectorEndOptions::Alias(alias)) => {
-                                        let ident = alias.deref().deref().clone();
-                                        let import = self.objects.imports.push(AnyObject {
-                                            data: ImportObj { module: key },
-                                            identifier: ident.clone(),
-                                            ast_object: obj_key,
-                                            module: *module_key,
-                                        });
-                                        self.types
-                                            .modules
-                                            .get_mut_unchecked(module_key)
-                                            .symbol_map
-                                            .insert(ident, AnyObjectKey::Import(import))
-                                    }
-                                    None => {
-                                        let import = self.objects.imports.push(AnyObject {
-                                            data: ImportObj { module: key },
-                                            identifier: ident.deref().clone(),
-                                            ast_object: obj_key,
-                                            module: *module_key,
-                                        });
-                                        self.types
-                                            .modules
-                                            .get_mut_unchecked(module_key)
-                                            .symbol_map
-                                            .insert(
-                                                ident.deref().clone(),
-                                                AnyObjectKey::Import(import),
-                                            )
-                                    }
-                                }
-                            }
-                            (PathNode::Object(key), ident) => {
-                                match &selector.ends_on.as_ref().map(|o| o.deref()) {
-                                    Some(PathSelectorEndOptions::All) => {
-                                        todo!("symbol propagation things")
-                                    }
-                                    Some(PathSelectorEndOptions::Set(set)) => todo!(),
-                                    Some(PathSelectorEndOptions::Alias(alias)) => self
-                                        .types
-                                        .modules
-                                        .get_mut_unchecked(&module_key)
-                                        .symbol_map
-                                        .insert(alias.deref().deref().clone(), key),
-                                    None => self
-                                        .types
-                                        .modules
-                                        .get_mut_unchecked(&module_key)
-                                        .symbol_map
-                                        .insert(ident.deref().clone(), key),
-                                }
-                            }
-                        };
+                        self.use_selector(module_key, &None, obj_key, selector)?;
                     }
                     _ => continue,
                 };
             }
         }
+        Ok(())
+    }
+
+    fn use_selector(
+        &mut self,
+        module_key: &Key<ModuleTag>,
+        prepend: &Option<ModuleKey>,
+        obj_key: Key<ast::ObjectTag>,
+        selector: &Span<ast::PathSelector>,
+    ) -> Result<(), Diagnostic<Errors>> {
+        match self.resolve_selector_target(
+            match prepend {
+                Some(p) => *p,
+                None => *module_key,
+            },
+            selector,
+        )? {
+            (PathNode::Module(key), ident) => match &selector.ends_on.as_ref().map(|o| o.deref()) {
+                Some(PathSelectorEndOptions::All) => {
+                    let symbols = self
+                        .types
+                        .modules
+                        .get_unchecked(&key)
+                        .symbol_map
+                        .values()
+                        .cloned()
+                        .collect::<Vec<_>>();
+                    for symbol in symbols {
+                        if let Ok(_) = self.check_access(*module_key, selector, symbol) {
+                            let ident = symbol.ident(self).clone();
+                            self.types
+                                .modules
+                                .get_mut_unchecked(module_key)
+                                .symbol_map
+                                .insert(ident, symbol);
+                        }
+                    }
+                }
+                Some(PathSelectorEndOptions::Set(set)) => {
+                    let set = set.clone();
+                    for selector in set {
+                        self.use_selector(module_key, &Some(key), obj_key, &selector)?;
+                    }
+                }
+                Some(PathSelectorEndOptions::Alias(alias)) => {
+                    let ident = alias.deref().deref().clone();
+                    let import = self.objects.imports.push(AnyObject {
+                        data: ImportObj { module: key },
+                        access: ast::AccessModifiers::Private,
+                        identifier: ident.clone(),
+                        ast_object: obj_key,
+                        module: *module_key,
+                    });
+                    self.types
+                        .modules
+                        .get_mut_unchecked(module_key)
+                        .symbol_map
+                        .insert(ident, AnyObjectKey::Import(import));
+                }
+                None => {
+                    let import = self.objects.imports.push(AnyObject {
+                        data: ImportObj { module: key },
+                        access: ast::AccessModifiers::Private,
+                        identifier: ident.deref().clone(),
+                        ast_object: obj_key,
+                        module: *module_key,
+                    });
+                    self.types
+                        .modules
+                        .get_mut_unchecked(module_key)
+                        .symbol_map
+                        .insert(ident.deref().clone(), AnyObjectKey::Import(import));
+                }
+            },
+            (PathNode::Object(key), ident) => match &selector.ends_on.as_ref().map(|o| o.deref()) {
+                Some(PathSelectorEndOptions::All) => {
+                    todo!("symbol propagation things")
+                }
+                Some(PathSelectorEndOptions::Set(set)) => todo!(),
+                Some(PathSelectorEndOptions::Alias(alias)) => {
+                    self.check_access(*module_key, selector, key)?;
+                    self.types
+                        .modules
+                        .get_mut_unchecked(module_key)
+                        .symbol_map
+                        .insert(alias.deref().deref().clone(), key);
+                }
+                None => {
+                    self.check_access(*module_key, selector, key)?;
+                    self.types
+                        .modules
+                        .get_mut_unchecked(module_key)
+                        .symbol_map
+                        .insert(ident.deref().clone(), key);
+                }
+            },
+        };
+        Ok(())
+    }
+
+    fn check_access(
+        &self,
+        module: Key<ModuleTag>,
+        selector: &Span<ast::PathSelector>,
+        key: AnyObjectKey,
+    ) -> Result<(), Diagnostic<Errors>> {
+        if module == key.module(self) {
+            return Ok(());
+        }
+        let access = key.access(self);
+        match access {
+            AccessModifiers::Private => Err(Error {
+                inner: Errors::ObjectInaccesible(key),
+                module,
+                span: selector.location,
+            }),
+            AccessModifiers::Public => Ok(()),
+            AccessModifiers::PublicModule => Ok(()),
+            AccessModifiers::PublicProject => Ok(()),
+        }?;
         Ok(())
     }
 
@@ -344,6 +424,7 @@ impl Context {
                 ast::Object::Resource {
                     ident,
                     docs: _,
+                    access: _,
                     ty,
                     default_expression,
                     is_optional,
@@ -418,6 +499,7 @@ impl Context {
                 ast::Object::Function(ast::Function {
                     ident: _,
                     generics,
+                    access: _,
                     parameters,
                     return_type,
                     body: _,
@@ -469,6 +551,7 @@ impl Context {
             if let ast::Object::Component {
                 ty,
                 docs: _,
+                access: _,
                 ident: _,
             } = self
                 .ast
@@ -504,6 +587,7 @@ impl Context {
         Ok(
             if let ast::Object::Const {
                 docs: _,
+                access: _,
                 ident: _,
                 ty,
                 expression,
@@ -548,6 +632,7 @@ impl Context {
         Ok(
             if let ast::Object::Type {
                 ident: _,
+                access: _,
                 generics,
                 ty,
                 docs: _,
@@ -603,6 +688,7 @@ impl Context {
                                         }),
                                     },
                                     ast_object: ast_key,
+                                    access: ast::AccessModifiers::Public,
                                     identifier: ident.clone(),
                                     module: mod_key,
                                 };

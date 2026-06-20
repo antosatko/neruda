@@ -425,10 +425,13 @@ pub fn gen_parser<'src>() -> Parser<'static> {
         .new_node("access modifier")
         .rules([maybe(keyword("pub"))
             .set("public")
-            .then([maybe(token("(")).then([is_one_of([
-                option(word("mod")).set("modifier"),
-                option(word("project")).set("modifier"),
-            ])])])])
+            .then([maybe(token("(")).then([
+                is_one_of([
+                    option(word("mod")).set("modifier"),
+                    option(word("project")).set("modifier"),
+                ]),
+                is(token(")")),
+            ])])])
         .variables([node_var("public"), node_var("modifier")])
         .build();
 
@@ -663,18 +666,29 @@ pub fn gen_parser<'src>() -> Parser<'static> {
         .variables([list_var("selectors")])
         .build();
 
+    let star = parser
+        .grammar
+        .new_node("star")
+        .rules([is(token("*"))])
+        .build();
+
+    let path_endings = parser
+        .grammar
+        .new_enum("path endings")
+        .options([star, path_set_selector])
+        .build();
+
     let many_path_selector = parser
         .grammar
         .new_node("path selector")
         .rules([
             is(ident).set("path").commit(),
-            while_(token("::")).then([is_one_of([
-                option(token("*")).set("ends on").return_node(),
-                option(path_set_selector).set("ends on").return_node(),
-                option(ident)
+            while_(token("::")).then([
+                maybe(path_endings).set("ends on").return_node(),
+                is(ident)
                     .set("path")
                     .then([maybe(alias).set("ends on").return_node()]),
-            ])]),
+            ]),
         ])
         .variables([list_var("path"), node_var("ends on")])
         .build();

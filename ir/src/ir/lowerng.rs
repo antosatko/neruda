@@ -1,17 +1,18 @@
 use std::ops::Deref;
 
 use arena::Arena;
-use arena_scope::{ScopeTree, stack::Stack};
-use smol_str::SmolStr;
+use arena_scope::stack::Stack;
 
 use crate::{
-    ast::{self, Body, Expression, Function, Span},
+    ast::{self, Body, Expression, Function, Span, SpanIndex},
     const_stage::{
         Context, Diagnostic, Error, Errors, Warnings,
-        objects::{AnyObjectKey, ConstObjKey, FunctionObjKey, InitState},
+        objects::{AnyObjectKey, FunctionObjKey, InitState},
         types::{AnyTypeKey, ModuleKey, PrimitiveType},
     },
-    ir::{Addr, BlockCtx, FunctionIr, Instruction, Value, Variable, VariableKey},
+    ir::{
+        Addr, BasicBlock, BlockCtx, FunctionIr, Instruction, Terminator, Value, ValueKey, Variable,
+    },
 };
 
 impl Context {
@@ -31,12 +32,13 @@ impl Context {
         }
         let mod_key = fun.module;
         let module = self.types.modules.get_unchecked(&mod_key);
-        let mut instructions: Stack<Vec<Instruction>> = Default::default();
-        let instructions_entry = instructions.push(Vec::new());
+        let mut instructions: Stack<BasicBlock> = Default::default();
+        let instructions_entry = instructions.push(BasicBlock::default());
 
         let mut ir = FunctionIr {
-            instructions,
-            instructions_entry,
+            blocks: instructions,
+            values: Default::default(),
+            blocks_entry: instructions_entry,
             variables: Arena::default(),
         };
 
@@ -106,14 +108,7 @@ impl Context {
                                 (None, Some(expr)) => {
                                     let (ty, val) =
                                         match self.lower_expression(ir, block_ctx, expr, &None) {
-                                            Ok(val) => (
-                                                val.type_of(self, ir).map_err(|e| Error {
-                                                    inner: e,
-                                                    module: *module,
-                                                    span: expr.location,
-                                                })?,
-                                                val,
-                                            ),
+                                            Ok(val) => (ir.values.get_unchecked(&val).ty, val),
                                             Err(err) => Err(err)?,
                                         };
                                     (val, ty)
@@ -126,7 +121,10 @@ impl Context {
                                             module: *module,
                                             span: ty.location,
                                         })?;
-                                    (Value::Const(default), ty_low)
+                                    (
+                                        load_const(ir, ty.location, &None, *module, default)?,
+                                        ty_low,
+                                    )
                                 }
                                 (None, None) => Err(Error {
                                     inner: Errors::FailedTypeInfer,
@@ -139,6 +137,7 @@ impl Context {
                                 value,
                                 ty,
                                 used: false,
+                                constant: true,
                             };
 
                             let key = ir.variables.push(var);
@@ -186,36 +185,30 @@ impl Context {
         block_ctx: &mut BlockCtx,
         expr: &Span<Expression>,
         expect: &Option<AnyTypeKey>,
-    ) -> Result<Value, Error> {
+    ) -> Result<ValueKey, Error> {
         let module = self
             .objects
             .functions
             .get_unchecked(&block_ctx.source)
             .module;
         match expr.const_eval(self, module, &None, expect) {
-            Ok(const_val) => return Ok(Value::Const(const_val)),
+            Ok(const_val) => {
+                return load_const(ir, expr.location, expect, module, const_val);
+            }
             Err(_) => (),
         }
         match expr.deref() {
             Expression::Binary { l, r, op } => {
                 let left_value = self.lower_expression(ir, block_ctx, l, &None)?;
                 let right_value = self.lower_expression(ir, block_ctx, r, &None)?;
-                self.load_value(ir, block_ctx, left_value, expect)?;
-                let ty = self.load_value(ir, block_ctx, right_value, expect)?;
-                Ok(Value::Runtime(ty))
+                Ok(left_value)
             }
             Expression::Value(val) => {
                 let mut addr = match val.literal.deref() {
                     ast::Literal::Identifier(ident) => {
                         let path = &ident.path.deref().path;
                         match self.resolve_const_path(&path, module, ident.path.location) {
-                            Ok(AnyObjectKey::Const(key)) => Addr::Const(key),
-                            Ok(AnyObjectKey::Function(key)) => Addr::Function(key),
-                            Ok(any) => Err(Error {
-                                inner: Errors::ObjectInaccessibleInBlock(any),
-                                module,
-                                span: ident.path.location,
-                            })?,
+                            Ok(any) => Addr::Object(any),
                             Err(e) => {
                                 if path.len() == 1 {
                                     let ident = path.first().unwrap();
@@ -236,22 +229,8 @@ impl Context {
                     a => todo!("{a:?}"),
                 };
                 dbg!(&addr);
-                Ok(Value::Addr(addr))
+                self.load_addr(ir, block_ctx, addr, expect)
             }
-        }
-    }
-
-    pub fn load_value(
-        &mut self,
-        ir: &mut FunctionIr,
-        block_ctx: &mut BlockCtx,
-        value: Value,
-        expect: &Option<AnyTypeKey>,
-    ) -> Result<AnyTypeKey, Error> {
-        match value {
-            Value::Const(const_value) => Ok(const_value.type_of().unwrap()),
-            Value::Runtime(ty) => Ok(ty),
-            Value::Addr(addr) => self.load_addr(ir, block_ctx, addr, expect),
         }
     }
 
@@ -261,48 +240,54 @@ impl Context {
         block_ctx: &mut BlockCtx,
         addr: Addr,
         expect: &Option<AnyTypeKey>,
-    ) -> Result<AnyTypeKey, Error> {
+    ) -> Result<ValueKey, Error> {
         match addr {
             Addr::Var(key) => {
-                let instr = ir.instructions.get_mut_unchecked();
-                instr.push(Instruction::PushVar { src: key });
+                let ty = ir.variables.get_unchecked(&key).ty;
+                if let Some(expect) = expect {
+                    ty.check(&self.types, expect).map_err(|inner| Error {
+                        inner,
+                        module: todo!(),
+                        span: todo!(),
+                    })?;
+                }
+                let dst = ir.values.push(Value { ty });
+                let instr = ir.blocks.get_mut_unchecked();
+                instr
+                    .instructions
+                    .push(Instruction::LoadVar { src: key, dst });
                 let var = ir.variables.get_mut_unchecked(&key);
                 var.used = true;
-                let ty = var.ty;
-                Ok(ty)
+                Ok(dst)
             }
-            Addr::Function(key) => todo!(),
-            Addr::Const(key) => {
-                let obj = self.objects.constants.get_unchecked(&key);
-                ir.instructions
-                    .get_mut_unchecked()
-                    .push(Instruction::PushConst {
-                        src: obj.data.value.get_done().clone(),
-                    });
-                Ok(*obj.data.ty.get_done())
-            }
+            Addr::Object(obj) => todo!(),
+            Addr::Value(val) => Ok(val),
         }
     }
 }
 
-impl Value {
-    pub fn type_of(&self, ctx: &Context, ir: &FunctionIr) -> Result<AnyTypeKey, Errors> {
-        match self {
-            Self::Const(val) => val.type_of(),
-            Self::Runtime(ty) => Ok(*ty),
-            Self::Addr(addr) => match addr {
-                Addr::Var(key) => Ok(ir.variables.get_unchecked(key).ty),
-                Addr::Function(key) => Ok(*ctx
-                    .objects
-                    .functions
-                    .get_unchecked(key)
-                    .data
-                    .type_of
-                    .get_done()),
-                Addr::Const(key) => {
-                    Ok(*ctx.objects.constants.get_unchecked(key).data.ty.get_done())
-                }
-            },
-        }
-    }
+fn load_const(
+    ir: &mut FunctionIr,
+    span: SpanIndex,
+    expect: &Option<AnyTypeKey>,
+    module: arena::Key<crate::const_stage::types::ModuleTag>,
+    const_val: ast::ConstValue,
+) -> Result<ValueKey, Diagnostic<Errors>> {
+    let ty = match expect {
+        Some(ty) => *ty,
+        None => const_val.type_of().map_err(|inner| Error {
+            inner,
+            module,
+            span,
+        })?,
+    };
+    let dst = ir.values.push(Value { ty });
+    ir.blocks
+        .get_mut_unchecked()
+        .instructions
+        .push(Instruction::LoadConst {
+            src: const_val,
+            dst,
+        });
+    return Ok(dst);
 }

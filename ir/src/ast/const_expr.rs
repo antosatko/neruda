@@ -2,8 +2,6 @@ use std::borrow::Cow;
 use std::iter::repeat_with;
 use std::ops::Deref;
 
-use smol_str::SmolStr;
-
 use crate::ast::{
     ConstValue, Expression, Literal, Number, NumberValue, Operator, Span, SpanIndex, UnaryOp, Value,
 };
@@ -160,7 +158,7 @@ impl ConstValue {
                             ty: Some(target),
                         })
                     }
-                    _ => unreachable!(),
+                    _ => Err(type_check_err)?,
                 };
             }
         };

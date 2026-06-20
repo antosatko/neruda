@@ -230,6 +230,11 @@ impl Errors {
                 format!("The object value that could not be resolved",),
                 format!("Self referencial"),
             ),
+            Errors::ObjectInaccesible(key) => (
+                "425",
+                format!("The object '{}' is inaccessible", key.ident(ctx)),
+                format!("Object inaccesible"),
+            ),
         }
     }
 }

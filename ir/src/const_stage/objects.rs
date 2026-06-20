@@ -5,7 +5,7 @@ use arena_scope::ScopeKey;
 use smol_str::SmolStr;
 
 use crate::{
-    ast::{self, ConstValue},
+    ast::{self, AccessModifiers, ConstValue},
     const_stage::{
         Context,
         types::{AnyTypeKey, ConstraintKey, ModuleKey, NamedTypeKey, TraitKey},
@@ -16,6 +16,7 @@ use crate::{
 #[derive(Debug)]
 pub struct AnyObject<T> {
     pub data: T,
+    pub access: AccessModifiers,
     pub identifier: SmolStr,
     pub ast_object: ast::AstObjectKey,
     pub module: ModuleKey,
@@ -137,9 +138,11 @@ impl<T> AnyObject<T> {
         data: T,
         ast_object: ast::AstObjectKey,
         module: ModuleKey,
+        access: AccessModifiers,
     ) -> Self {
         Self {
             identifier,
+            access,
             data,
             ast_object,
             module,
@@ -227,6 +230,30 @@ impl AnyObjectKey {
             AnyObjectKey::Component(key) => &ctx.objects.components.get_unchecked(key).identifier,
             AnyObjectKey::Function(key) => &ctx.objects.functions.get_unchecked(key).identifier,
             AnyObjectKey::Resource(key) => &ctx.objects.resources.get_unchecked(key).identifier,
+        }
+    }
+
+    pub fn access(&self, ctx: &Context) -> AccessModifiers {
+        match self {
+            AnyObjectKey::Import(key) => ctx.objects.imports.get_unchecked(key).access,
+            AnyObjectKey::Const(key) => ctx.objects.constants.get_unchecked(key).access,
+            AnyObjectKey::Type(key) => ctx.objects.types.get_unchecked(key).access,
+            AnyObjectKey::Trait(key) => ctx.objects.traits.get_unchecked(key).access,
+            AnyObjectKey::Component(key) => ctx.objects.components.get_unchecked(key).access,
+            AnyObjectKey::Function(key) => ctx.objects.functions.get_unchecked(key).access,
+            AnyObjectKey::Resource(key) => ctx.objects.resources.get_unchecked(key).access,
+        }
+    }
+
+    pub fn module(&self, ctx: &Context) -> ModuleKey {
+        match self {
+            AnyObjectKey::Import(key) => ctx.objects.imports.get_unchecked(key).module,
+            AnyObjectKey::Const(key) => ctx.objects.constants.get_unchecked(key).module,
+            AnyObjectKey::Type(key) => ctx.objects.types.get_unchecked(key).module,
+            AnyObjectKey::Trait(key) => ctx.objects.traits.get_unchecked(key).module,
+            AnyObjectKey::Component(key) => ctx.objects.components.get_unchecked(key).module,
+            AnyObjectKey::Function(key) => ctx.objects.functions.get_unchecked(key).module,
+            AnyObjectKey::Resource(key) => ctx.objects.resources.get_unchecked(key).module,
         }
     }
 }

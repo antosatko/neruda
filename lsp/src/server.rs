@@ -5,15 +5,11 @@ use std::{
 };
 
 use dashmap::DashMap;
-use ir::const_stage::{self, Context, Warning};
+use ir::const_stage::{self, Context};
 use line_index::{LineIndex, TextSize};
 use parser::parse_directory;
 use ruparse::Parser;
-use tower_lsp::{
-    Client, LanguageServer,
-    jsonrpc::Result,
-    lsp_types::{self, *},
-};
+use tower_lsp::{Client, LanguageServer, jsonrpc::Result, lsp_types::*};
 
 use crate::index_file;
 

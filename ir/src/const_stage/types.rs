@@ -5,10 +5,7 @@ use smol_str::{SmolStr, ToSmolStr};
 
 use crate::{
     ast::{ConstValue, Number, NumberValue},
-    const_stage::{
-        Errors,
-        objects::{AnyObject, Module, Objects},
-    },
+    const_stage::{Errors, objects::Module},
 };
 
 pub type FunctionArena = Arena<FunctionType, FunctionTag>;

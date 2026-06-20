@@ -8,11 +8,12 @@ use ruparse::{
 use smol_str::SmolStr;
 
 use ir::ast::{
-    ActionClause, Alias, Associativity, Body, Clauses, Diagnostics, Else, ElseIf, ExprItem,
-    Expression, Function, GenericParameter, IdentifierLiteral, IdentifierPath, Keyword, Literal,
-    LoweringError, LoweringWarning, Module, Mutability, Object, Operator, Parameter, PathSelector,
-    PathSelectorEndOptions, Postfix, RestrictionClause, SelectClause, Span, SpanIndex, Statement,
-    Type, TypeLiteral, UnaryOp, Value, char_literal, numeric_literal, string_literal,
+    Access, AccessModifiers, ActionClause, Alias, Associativity, Body, Clauses, Diagnostics, Else,
+    ElseIf, ExprItem, Expression, Function, GenericParameter, IdentifierLiteral, IdentifierPath,
+    Keyword, Literal, LoweringError, LoweringWarning, Module, Mutability, Object, Operator,
+    Parameter, PathSelector, PathSelectorEndOptions, Postfix, RestrictionClause, SelectClause,
+    Span, SpanIndex, Statement, Type, TypeLiteral, UnaryOp, Value, char_literal, numeric_literal,
+    string_literal,
 };
 
 #[derive(Debug, Clone)]
@@ -68,8 +69,10 @@ pub fn module_named(
                 };
                 let generics =
                     generic_params(src, s.try_get_node("generic parameters"), &mut diagnostics);
+                let access = access(src, s);
 
                 let obj = Object::System {
+                    access,
                     ident: ident.clone(),
                     query,
                     docs,
@@ -89,8 +92,10 @@ pub fn module_named(
                     Some(t) => Some(ty(src, t, &mut diagnostics)?),
                     None => None,
                 };
+                let access = access(src, s);
 
                 let obj = Object::Component {
+                    access,
                     ident: ident.clone(),
                     ty,
                     docs,
@@ -108,8 +113,10 @@ pub fn module_named(
                 };
                 let generics =
                     generic_params(src, s.try_get_node("generic parameters"), &mut diagnostics);
+                let access = access(src, s);
 
                 let obj = Object::Type {
+                    access,
                     ident,
                     generics,
                     ty,
@@ -120,18 +127,25 @@ pub fn module_named(
             }
 
             "import" => {
+                let access = access(src, s);
                 let ident = ident_path(src, s.expect_node("identifier"));
                 let alias = alias(src, s.try_get_node("alias"), &mut diagnostics);
-                let obj = Object::Import { ident, alias };
+                let obj = Object::Import {
+                    ident,
+                    alias,
+                    access,
+                };
                 module.objects.push(span(obj, s));
             }
 
             "const" => {
+                let access = access(src, s);
                 let ident = expect_ident(src, s.expect_node("identifier"), &mut diagnostics);
                 let ty = ty(src, s.expect_node("type"), &mut diagnostics)?;
                 let docs = docstrings(src, s);
                 let expression = expression(src, s.expect_node("expression"), &mut diagnostics)?;
                 let obj = Object::Const {
+                    access,
                     docs,
                     ident,
                     ty,
@@ -147,8 +161,10 @@ pub fn module_named(
                 for fun in s.get_list("methods") {
                     methods.push(span(function(src, fun, &mut diagnostics)?, fun));
                 }
+                let access = access(src, s);
 
                 let obj = Object::Trait {
+                    access,
                     docs,
                     ident,
                     methods,
@@ -208,8 +224,10 @@ pub fn module_named(
                     .try_get_node("optional")
                     .as_ref()
                     .map(|n| Keyword(span((), &n)));
+                let access = access(src, s);
 
                 let obj = Object::Resource {
+                    access,
                     ident,
                     docs: docstrings(src, s),
                     ty,
@@ -236,6 +254,39 @@ pub fn module_named(
     })
 }
 
+fn access(src: &str, s: &Nodes<'_>) -> Access {
+    let access_mod = s.expect_node("access mod");
+    let (public_kw, modifier_kw, modifier) = match (
+        access_mod.try_get_node("public"),
+        access_mod.try_get_node("modifier"),
+    ) {
+        (Some(public), Some(modifier)) => (
+            Some(Keyword(span((), public))),
+            Some(Keyword(span((), public))),
+            match modifier.stringify(src) {
+                "mod" => AccessModifiers::PublicModule,
+                "project" => AccessModifiers::PublicProject,
+                m => modifier.ice(&format!("Unknown access modifier '{m}'")),
+            },
+        ),
+        (Some(public), None) => (
+            Some(Keyword(span((), public))),
+            None,
+            AccessModifiers::Public,
+        ),
+        (None, None) => (None, None, AccessModifiers::Private),
+        (None, Some(_)) => access_mod.ice(&format!(
+            "Rules do not permit modifier without public keyword"
+        )),
+    };
+    let access = Access {
+        modifier,
+        modifier_kw,
+        public_kw,
+    };
+    access
+}
+
 fn get_selector(
     src: &str,
     diagnostics: &mut Diagnostics,
@@ -243,20 +294,18 @@ fn get_selector(
 ) -> Span<PathSelector> {
     let ends_on = match selector.try_get_node("ends on") {
         Some(eo) => Some(span(
-            match eo.is_token() {
-                true => PathSelectorEndOptions::All,
-                _ => match eo.get_name() {
-                    "path set" => PathSelectorEndOptions::Set(
-                        eo.get_list("selectors")
-                            .iter()
-                            .map(|s| get_selector(src, diagnostics, s))
-                            .collect(),
-                    ),
-                    "alias" => {
-                        PathSelectorEndOptions::Alias(span(expect_ident(src, eo, diagnostics), eo))
-                    }
-                    _ => todo!(),
-                },
+            match eo.get_name() {
+                "path set" => PathSelectorEndOptions::Set(
+                    eo.get_list("selectors")
+                        .iter()
+                        .map(|s| get_selector(src, diagnostics, s))
+                        .collect(),
+                ),
+                "alias" => {
+                    PathSelectorEndOptions::Alias(span(expect_ident(src, eo, diagnostics), eo))
+                }
+                "star" => PathSelectorEndOptions::All,
+                n => selector.ice(&format!("Path selector '{n}' unknown")),
             },
             eo,
         )),
@@ -291,7 +340,9 @@ fn function(
         .try_get_node("invoke")
         .as_ref()
         .map(|n| Keyword(span((), &n)));
+    let access = access(src, s);
     let obj = Function {
+        access,
         ident: ident.clone(),
         parameters: params,
         return_type,

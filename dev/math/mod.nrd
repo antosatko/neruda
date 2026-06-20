@@ -1,11 +1,9 @@
-type Im<S> = (S, S)
+pub type Im<S> = (S, S)
 
-type ImFloat = Im<f32>
-type ImInt = Im<i32>
+pub type ImFloat = Im<f32>
+pub type ImInt = Im<i32>
 
-const PI: f32 = 3.14159265359
-
-
+pub const PI: f32 = 3.14159265359
 
 impl <S: Add> Add for Im<S> {
     function add(self: &Self, other: &Self): Self => (
@@ -14,12 +12,12 @@ impl <S: Add> Add for Im<S> {
     )
 }
 
-trait Add {
+pub trait Add {
     function add(self: &Self, other: &Self): Self => _
 }
 
-trait Sub {
+pub trait Sub {
     function sub(self: &Self, other: &Self): Self => _
 }
 
-type AddAndSub<T: Add + Sub> = T
+pub type AddAndSub<T: Add + Sub> = T

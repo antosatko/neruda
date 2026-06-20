@@ -209,7 +209,9 @@ impl IndexedWalk for ir::ast::Span<Object> {
                 ty,
                 default_expression,
                 is_optional,
+                access,
             } => {
+                access.index(line_index, spans);
                 spans.push(self.span_word(Types::Keyword, line_index, "resource"));
                 if let Some(ty) = ty {
                     ty.index(line_index, spans);
@@ -255,7 +257,9 @@ impl IndexedWalk for ir::ast::Span<Object> {
                 docs: _,
                 ident,
                 methods,
+                access,
             } => {
+                access.index(line_index, spans);
                 spans.push(self.span_word(Types::Keyword, line_index, "trait"));
                 spans.push(ident.span(Types::Ident, line_index));
                 for method in methods {
@@ -283,7 +287,9 @@ impl IndexedWalk for ir::ast::Span<Object> {
                 body,
                 docs: _,
                 invoke,
+                access,
             }) => {
+                access.index(line_index, spans);
                 spans.push(self.span_word(Types::Keyword, line_index, "function"));
                 spans.push(ident.span(Types::Ident, line_index));
                 if let Some(invoke) = invoke {
@@ -299,7 +305,13 @@ impl IndexedWalk for ir::ast::Span<Object> {
                     spans.extend(generics.iter().map(|g| g.span(Types::Type, line_index)));
                 }
             }
-            Object::Component { ident, ty, docs: _ } => {
+            Object::Component {
+                ident,
+                ty,
+                docs: _,
+                access,
+            } => {
+                access.index(line_index, spans);
                 spans.push(self.span_word(Types::Keyword, line_index, "component"));
                 spans.push(ident.span(Types::Ident, line_index));
                 if let Some(ty) = &ty {
@@ -311,7 +323,9 @@ impl IndexedWalk for ir::ast::Span<Object> {
                 generics,
                 ty,
                 docs: _,
+                access,
             } => {
+                access.index(line_index, spans);
                 spans.push(self.span_word(Types::Keyword, line_index, "type"));
                 spans.push(ident.span(Types::Ident, line_index));
                 if let Some(ty) = &ty {
@@ -326,7 +340,9 @@ impl IndexedWalk for ir::ast::Span<Object> {
                 ident,
                 ty,
                 expression,
+                access,
             } => {
+                access.index(line_index, spans);
                 spans.push(self.span_word(Types::Keyword, line_index, "const"));
                 spans.push(ident.span(Types::Ident, line_index));
                 ty.index(line_index, spans);
@@ -340,7 +356,9 @@ impl IndexedWalk for ir::ast::Span<Object> {
                 after,
                 before,
                 generics,
+                access,
             } => {
+                access.index(line_index, spans);
                 spans.push(self.span_word(Types::Keyword, line_index, "system"));
                 spans.push(ident.span(Types::Ident, line_index));
                 body.index(line_index, spans);
@@ -428,13 +446,29 @@ impl IndexedWalk for ir::ast::Span<Object> {
                     }
                 }
             }
-            Object::Import { ident, alias } => {
+            Object::Import {
+                ident,
+                alias,
+                access,
+            } => {
+                access.index(line_index, spans);
                 spans.push(self.span_word(Types::Keyword, line_index, "import"));
                 ident.index(line_index, spans);
                 if let Some(alias) = &alias.0 {
                     spans.push(alias.span_word(Types::Keyword, line_index, "as"));
                 }
             }
+        }
+    }
+}
+
+impl IndexedWalk for ir::ast::Access {
+    fn index(&self, line_index: &LineIndex, spans: &mut Vec<Span>) {
+        if let Some(kw) = &self.public_kw {
+            spans.push(kw.0.span_word(Types::Keyword, line_index, "pub"));
+        }
+        if let Some(kw) = &self.modifier_kw {
+            spans.push(kw.0.span(Types::Keyword, line_index));
         }
     }
 }

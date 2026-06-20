@@ -38,7 +38,6 @@ enum EmitTarget {
 
 fn main() {
     let cli = Cli::parse();
-    todo!("add publics to ir etc");
 
     match cli.emit {
         EmitTarget::Ast | EmitTarget::AstPretty => {

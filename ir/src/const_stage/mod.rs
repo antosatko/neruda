@@ -11,7 +11,7 @@ use crate::{
     ast::{self, ConstValue, Operator, SpanIndex},
     const_stage::{
         objects::{AnyObjectKey, FunctionObjKey, Objects},
-        types::{AnyTypeKey, AutoTypes, FunctionKey, ModuleKey},
+        types::{AnyTypeKey, AutoTypes, ModuleKey},
     },
     generics::GContext,
     ir::VariableKey,
@@ -82,6 +82,7 @@ pub enum Errors {
     ObjectInaccessibleInBlock(AnyObjectKey),
     ExpectedReturnExpression(FunctionObjKey),
     SelfReferencial,
+    ObjectInaccesible(AnyObjectKey),
 }
 
 #[derive(Debug)]

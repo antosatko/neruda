@@ -4,6 +4,7 @@ pub mod types;
 
 use std::{collections::HashMap, sync::Arc};
 
+use arena::Arena;
 use arena_scope::ScopeTree;
 use smol_str::SmolStr;
 
@@ -14,7 +15,7 @@ use crate::{
         types::{AnyTypeKey, AutoTypes, ModuleKey},
     },
     generics::GContext,
-    ir::VariableKey,
+    ir::{FunctionIr, FunctionIrArena, FunctionIrKey, VariableKey},
 };
 
 use self::types::Types;
@@ -87,10 +88,8 @@ pub enum Errors {
 
 #[derive(Debug)]
 pub enum Warnings {
-    VariableUnused {
-        function: FunctionObjKey,
-        var: VariableKey,
-    },
+    VariableUnused { ir: FunctionIrKey, var: VariableKey },
+    DeadCode,
 }
 
 pub struct Context {
@@ -101,6 +100,7 @@ pub struct Context {
     pub diagnostics: Diagnostics,
     pub generic_ctx: GContext,
     pub module_map: HashMap<Vec<SmolStr>, ModuleKey>,
+    pub ir_cache: FunctionIrArena,
 }
 
 impl Context {
@@ -116,6 +116,7 @@ impl Context {
             ast,
             generic_ctx: ScopeTree::default(),
             module_map: HashMap::with_capacity(0),
+            ir_cache: Default::default(),
         };
 
         if let Err(e) = this.lower_import_stage() {

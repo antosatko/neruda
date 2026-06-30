@@ -1064,6 +1064,32 @@ fn ty(
                 node,
             ))
         }
+        "function type literal" => {
+            let returns = match literal.try_get_node("returns") {
+                Some(r) => Some(ty(src, r, diagnostics)?),
+                None => None,
+            };
+            let mut parameters = Vec::new();
+            let params = literal.expect_node("parameters");
+            for param in params.get_list("parameters") {
+                let p = match param.get_name() {
+                    "unnamed parameter" => (None, ty(src, param.expect_node("type"), diagnostics)?),
+                    "named parameter" => (
+                        Some(expect_ident(src, param, diagnostics)),
+                        ty(src, param.expect_node("type"), diagnostics)?,
+                    ),
+                    a => param.ice(&format!("unknown (un)named parameter: {a}")),
+                };
+                parameters.push(span(p, param));
+            }
+            Ok(span(
+                Type {
+                    refs,
+                    literal: span(TypeLiteral::Function(parameters, returns), literal),
+                },
+                node,
+            ))
+        }
         name => panic!("{name}"),
     }
 }

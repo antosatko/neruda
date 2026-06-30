@@ -10,7 +10,7 @@ use crate::{
 
 pub type FunctionArena = Arena<FunctionType, FunctionTag>;
 pub type FunctionKey = Key<FunctionTag>;
-#[derive(PartialEq, Debug, Copy, Clone, Hash)]
+#[derive(PartialEq, Debug, Copy, Clone, Hash, Eq)]
 pub struct FunctionTag;
 #[derive(PartialEq, Debug, Clone)]
 pub struct FunctionType {
@@ -20,7 +20,7 @@ pub struct FunctionType {
 
 pub type ArrayArena = Arena<ArrayType, ArrayTag>;
 pub type ArrayKey = Key<ArrayTag>;
-#[derive(PartialEq, Debug, Copy, Clone, Hash)]
+#[derive(PartialEq, Debug, Copy, Clone, Hash, Eq)]
 pub struct ArrayTag;
 #[derive(PartialEq, Debug, Clone)]
 pub struct ArrayType {
@@ -30,7 +30,7 @@ pub struct ArrayType {
 
 pub type TupleArena = Arena<TupleType, TupleTag>;
 pub type TupleKey = Key<TupleTag>;
-#[derive(PartialEq, Debug, Copy, Clone, Hash)]
+#[derive(PartialEq, Debug, Copy, Clone, Hash, Eq)]
 pub struct TupleTag;
 #[derive(PartialEq, Debug, Clone)]
 pub struct TupleType {
@@ -39,7 +39,7 @@ pub struct TupleType {
 
 pub type TraitArena = Arena<TraitType, TraitTag>;
 pub type TraitKey = Key<TraitTag>;
-#[derive(PartialEq, Debug, Copy, Clone, Hash)]
+#[derive(PartialEq, Debug, Copy, Clone, Hash, Eq)]
 pub struct TraitTag;
 #[derive(PartialEq, Debug, Clone)]
 pub struct TraitType {
@@ -48,7 +48,7 @@ pub struct TraitType {
 
 pub type StructArena = Arena<StructType, StructTag>;
 pub type StructKey = Key<StructTag>;
-#[derive(PartialEq, Debug, Copy, Clone, Hash)]
+#[derive(PartialEq, Debug, Copy, Clone, Hash, Eq)]
 pub struct StructTag;
 #[derive(PartialEq, Debug, Clone)]
 pub struct StructType {
@@ -57,7 +57,7 @@ pub struct StructType {
 
 pub type EnumArena = Arena<EnumType, EnumTag>;
 pub type EnumKey = Key<EnumTag>;
-#[derive(PartialEq, Debug, Copy, Clone, Hash)]
+#[derive(PartialEq, Debug, Copy, Clone, Hash, Eq)]
 pub struct EnumTag;
 #[derive(PartialEq, Debug, Clone)]
 pub struct EnumType {
@@ -107,7 +107,7 @@ pub struct GenericType {
 
 pub type PolymorphArena = Arena<PolymorphType, PolymorphTag>;
 pub type PolymorphKey = Key<PolymorphTag>;
-#[derive(PartialEq, Debug, Copy, Clone, Hash)]
+#[derive(PartialEq, Debug, Copy, Clone, Hash, Eq)]
 pub struct PolymorphTag;
 #[derive(PartialEq, Debug, Clone)]
 pub struct PolymorphType {
@@ -117,7 +117,7 @@ pub struct PolymorphType {
 
 pub type RefArena = Arena<RefType, RefTag>;
 pub type RefKey = Key<RefTag>;
-#[derive(PartialEq, Debug, Copy, Clone, Hash)]
+#[derive(PartialEq, Debug, Copy, Clone, Hash, Eq)]
 pub struct RefTag;
 #[derive(PartialEq, Debug, Clone)]
 pub struct RefType {
@@ -126,10 +126,10 @@ pub struct RefType {
 
 pub type ModuleArena = Arena<Module, ModuleTag>;
 pub type ModuleKey = Key<ModuleTag>;
-#[derive(PartialEq, Debug, Clone, Copy, Hash)]
+#[derive(PartialEq, Debug, Copy, Clone, Hash, Eq)]
 pub struct ModuleTag;
 
-#[derive(PartialEq, Debug, Copy, Clone, Hash)]
+#[derive(PartialEq, Debug, Copy, Clone, Hash, Eq)]
 #[repr(u8)]
 pub enum PrimitiveType {
     I8,
@@ -154,7 +154,7 @@ pub enum PrimitiveType {
     EntityRef,
 }
 
-#[derive(PartialEq, Debug, Copy, Clone, Hash)]
+#[derive(PartialEq, Debug, Copy, Clone, Hash, Eq)]
 pub enum AnyTypeKey {
     Primitive(PrimitiveType),
     Function(FunctionKey),
@@ -575,6 +575,15 @@ impl AnyTypeKey {
                 let exp_unwrap = types.references.get_unchecked(exp).inner;
                 let got_unwrap = types.references.get_unchecked(got).inner;
                 got_unwrap.check(types, &exp_unwrap).map(|_| true)?
+            }
+            (AnyTypeKey::Struct(exp), AnyTypeKey::Struct(got)) => {
+                let exp = types.structures.get_unchecked(exp);
+                let got = types.structures.get_unchecked(got);
+                exp.parameters
+                    .iter()
+                    .map(|(ident, ty, _)| (ident, ty))
+                    .zip(got.parameters.iter().map(|(ident, ty, _)| (ident, ty)))
+                    .all(|(exp, got)| exp.0 == got.0 && exp.1.check(types, got.1).is_ok())
             }
             _ => false,
         };

@@ -514,7 +514,7 @@ pub fn gen_parser<'src>() -> Parser<'static> {
 
     let named_argument = parser
         .grammar
-        .new_node("named parameter")
+        .new_node("named argument")
         .rules([
             is(ident).set(IDENTIFIER).commit(),
             is(token(":")),
@@ -853,6 +853,64 @@ pub fn gen_parser<'src>() -> Parser<'static> {
         .variables([list_var("parameters")])
         .build();
 
+    let named_parameter = parser
+        .grammar
+        .new_node("named parameter")
+        .has(docstr, "docs")
+        .rules([
+            is(ident).set(IDENTIFIER),
+            is(token(":")).commit(),
+            is_one_of([
+                option(token(",")).fail(&grammar_errs::EMPTY_TYPE_DECLARATION),
+                option(token(")")).fail(&grammar_errs::EMPTY_TYPE_DECLARATION),
+                option(node("type")).set("type"),
+            ]),
+        ])
+        .variables([IDENTIFIER_VAR, node_var("type")])
+        .build();
+
+    let unnamed_parameter = parser
+        .grammar
+        .new_node("unnamed parameter")
+        .has(docstr, "docs")
+        .rules([is(node("type")).set("type")])
+        .variables([node_var("type")])
+        .build();
+
+    let maybe_named_parameter = parser
+        .grammar
+        .new_enum("parameter types")
+        .options([named_parameter, unnamed_parameter])
+        .build();
+
+    let maybe_named_parameter_list = parser
+        .grammar
+        .new_node("maybe named parameters")
+        .rules([
+            is(token("(")).commit(),
+            loop_().then([
+                maybe(maybe_named_parameter).set("parameters"),
+                is_one_of([
+                    option(token(","))
+                        .then([maybe(token(",")).fail(&grammar_errs::MULTIPLE_TRAILING_COMMAS)]),
+                    option(token(")")).return_node(),
+                ]),
+            ]),
+        ])
+        .variables([list_var("parameters")])
+        .build();
+
+    let function_type_literal = parser
+        .grammar
+        .new_node("function type literal")
+        .rules([
+            is(keyword("function")).commit(),
+            is(maybe_named_parameter_list).set("parameters"),
+            maybe(token(":")).then([is(node("type")).set("returns")]),
+        ])
+        .variables([node_var("parameters"), node_var("returns")])
+        .build();
+
     let generic_impl = parser
         .grammar
         .new_node("generics")
@@ -885,6 +943,7 @@ pub fn gen_parser<'src>() -> Parser<'static> {
         .new_enum("type literal")
         .options([
             type_path,
+            function_type_literal,
             struct_type_literal,
             array_type_literal,
             tuple_type_literal,

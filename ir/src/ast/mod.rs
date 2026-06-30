@@ -455,6 +455,10 @@ pub enum TypeLiteral {
     Struct(Vec<Span<Parameter>>),
     Array(Box<Span<Type>>, Option<Span<Expression>>),
     Tuple(Vec<Span<Type>>),
+    Function(
+        Vec<Span<(Option<Span<SmolStr>>, Span<Type>)>>,
+        Option<Span<Type>>,
+    ),
     Enum(
         Option<Box<Span<Type>>>,
         Option<Span<Expression>>,
@@ -742,6 +746,7 @@ impl std::fmt::Display for Type {
                     write!(f, ">")?;
                 }
             }
+            TypeLiteral::Function(_, _) => todo!(),
             TypeLiteral::Struct(parameters) => {
                 write!(f, "struct {{")?;
                 for Parameter {

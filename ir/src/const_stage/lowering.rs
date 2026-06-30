@@ -6,11 +6,12 @@ use arena::Key;
 use smol_str::SmolStr;
 
 use crate::ast::{
-    self, AccessModifiers, ConstValue, Number, NumberValue, PathSelectorEndOptions, Span, SpanIndex,
+    self, AccessModifiers, ConstValue, Number, NumberValue, PathSelectorEndOptions, Span,
+    SpanIndex, Type,
 };
 use crate::const_stage::objects::{
     AnyObject, AnyObjectKey, ComponentObj, ComponentObjKey, ConstObj, ConstObjKey, FunctionObj,
-    FunctionObjKey, ImportObj, InitState, Module, ResourceObj, ResourceObjKey, TraitObj,
+    FunctionObjKey, ImportObj, InitState, IrCache, Module, ResourceObj, ResourceObjKey, TraitObj,
     TypeAliasObj, TypeAliasObjKey,
 };
 use crate::const_stage::types::{
@@ -18,6 +19,7 @@ use crate::const_stage::types::{
     PrimitiveType, RefType, StructType, TraitType, TupleType,
 };
 use crate::const_stage::{Context, Diagnostic, Error, Errors};
+use crate::ir::FunctionIr;
 
 impl Context {
     pub(crate) fn lower_import_stage(&mut self) -> Result<(), Error> {
@@ -31,7 +33,7 @@ impl Context {
 
         for (current_module_path, module) in &self.ast {
             let module_key = map.get(current_module_path).unwrap();
-            let ir_module = self.types.modules.get_mut_unchecked(module_key);
+            let module_type = self.types.modules.get_mut_unchecked(module_key);
             for (obj_key, obj) in module.objects.iter_pairs() {
                 let (ident, key): (SmolStr, AnyObjectKey) = match obj.inner.as_ref() {
                     ast::Object::Using { .. } => continue,
@@ -83,7 +85,7 @@ impl Context {
                             access.modifier,
                         );
                         let key = self.objects.imports.push(obj);
-                        ir_module
+                        module_type
                             .symbol_map
                             .insert(ident, AnyObjectKey::Import(key));
                         continue;
@@ -109,25 +111,38 @@ impl Context {
                             module: *module_key,
                         })),
                     ),
-                    ast::Object::Function(ast::Function { ident, access, .. }) => (
-                        ident.inner.as_ref().clone(),
-                        self.objects
-                            .functions
-                            .push(AnyObject {
-                                data: FunctionObj {
-                                    return_type: InitState::Uninitialized,
-                                    params: HashMap::new(),
-                                    generics: Vec::new(),
-                                    type_of: InitState::Uninitialized,
-                                    ir: InitState::Uninitialized,
-                                },
-                                access: access.modifier,
-                                identifier: ident.inner.as_ref().clone(),
-                                ast_object: obj_key,
-                                module: *module_key,
-                            })
-                            .into(),
-                    ),
+                    ast::Object::Function(ast::Function {
+                        ident,
+                        access,
+                        generics,
+                        ..
+                    }) => {
+                        let mut fun = AnyObject {
+                            data: FunctionObj {
+                                return_type: InitState::Uninitialized,
+                                params: Vec::with_capacity(0),
+                                generics: Vec::new(),
+                                type_of: InitState::Uninitialized,
+                                ir: IrCache::Single(InitState::Uninitialized),
+                                generic_scope: InitState::Uninitialized,
+                            },
+                            access: access.modifier,
+                            identifier: ident.inner.as_ref().clone(),
+                            ast_object: obj_key,
+                            module: *module_key,
+                        };
+                        let ir = match generics.as_ref().map(|g| g.len()).unwrap_or(0) {
+                            0 => IrCache::Single(InitState::Progress(
+                                self.ir_cache.push(FunctionIr::new(&fun)),
+                            )),
+                            _ => IrCache::Polymorphic(HashMap::new()),
+                        };
+                        fun.data.ir = ir;
+                        (
+                            ident.inner.as_ref().clone(),
+                            self.objects.functions.push(fun).into(),
+                        )
+                    }
                     ast::Object::Component { ident, access, .. } => (
                         ident.inner.as_ref().clone(),
                         self.objects
@@ -199,7 +214,7 @@ impl Context {
                             .into(),
                     ),
                 };
-                ir_module.symbol_map.insert(ident, key);
+                module_type.symbol_map.insert(ident, key);
             }
         }
 
@@ -513,22 +528,36 @@ impl Context {
                     };
                     let fun = self.objects.functions.get_mut_unchecked(&function_key);
                     fun.data.return_type = InitState::Done(return_type);
+                    fun.data.generic_scope = InitState::Done(self.generic_ctx.current());
 
-                    let mut params = HashMap::new();
+                    let mut params = Vec::new();
                     for param in parameters {
-                        let ident = param.ident.inner.deref().clone();
                         let ty = param.ty.lower(self, mod_key)?;
-                        params.insert(ident, InitState::Done(ty));
+                        params.push((param.ident.clone(), InitState::Done(ty)));
                     }
                     let fun = self.objects.functions.get_mut_unchecked(&function_key);
                     fun.data.params = params;
 
                     let type_of = FunctionType {
-                        parameters: fun.data.params.values().map(|ty| *ty.get_done()).collect(),
+                        parameters: fun
+                            .data
+                            .params
+                            .iter()
+                            .map(|(_, ty)| *ty.get_done())
+                            .collect(),
                         returns: *fun.data.return_type.get_done(),
                     };
                     let type_of = AnyTypeKey::Function(self.types.functions.push_unique(type_of));
                     fun.data.type_of = InitState::Done(type_of);
+
+                    match &fun.data.ir {
+                        IrCache::Single(InitState::Progress(ir)) => {
+                            self.ir_cache
+                                .get_mut_unchecked(ir)
+                                .const_stage_update(fun, function_key);
+                        }
+                        _ => (),
+                    }
 
                     self.generic_ctx.pop();
 
@@ -786,6 +815,7 @@ impl Context {
         path: &[Span<SmolStr>],
         mod_key: ModuleKey,
         span: SpanIndex,
+        generics: &Option<Span<Vec<Span<Type>>>>,
     ) -> Result<AnyObjectKey, Error> {
         if path.len() == 1 {
             match self.generic_ctx.get(&path[0]) {
@@ -878,6 +908,7 @@ impl ast::Expression {
                             &identifier_path.path.path,
                             mod_key,
                             identifier_path.path.location,
+                            &identifier_path.generics,
                         ) {
                             Ok(key) => {
                                 let obj_key = if let AnyObjectKey::Const(key) = key {
@@ -1087,6 +1118,23 @@ impl ast::Type {
                     resolve_type_path(ctx, module, identifier_path, generic_arguments)?
                 }
             }
+            ast::TypeLiteral::Function(parameters, returns) => {
+                let mut params = Vec::new();
+                for param in parameters {
+                    params.push(param.1.lower(ctx, module)?);
+                }
+                let returns = match returns {
+                    Some(r) => r.lower(ctx, module)?,
+                    None => AnyTypeKey::Primitive(PrimitiveType::Void),
+                };
+                let ty = FunctionType {
+                    parameters: params,
+                    returns,
+                };
+                let key = ctx.types.functions.push_unique(ty);
+
+                AnyTypeKey::Function(key)
+            }
             ast::TypeLiteral::Struct(spans) => {
                 let mut parameters: Vec<(SmolStr, AnyTypeKey, Option<ConstValue>)> = Vec::new();
                 for param in spans {
@@ -1238,8 +1286,12 @@ fn resolve_type_path(
     identifier_path: &ast::Span<ast::IdentifierPath>,
     generic_arguments: &Option<ast::Span<Vec<ast::Span<ast::Type>>>>,
 ) -> Result<AnyTypeKey, Error> {
-    let resolved =
-        ctx.resolve_const_path(&identifier_path.path, module, identifier_path.location)?;
+    let resolved = ctx.resolve_const_path(
+        &identifier_path.path,
+        module,
+        identifier_path.location,
+        generic_arguments,
+    )?;
 
     Ok(match resolved {
         AnyObjectKey::Type(key) => {
@@ -1247,60 +1299,81 @@ fn resolve_type_path(
                 &mut ctx.objects.types.get_mut_unchecked(&key).data;
 
             let ty = match ty {
-                InitState::Done(t) | InitState::Progress(t) => *t,
+                InitState::Done(t) | InitState::Progress(t) => AnyTypeKey::Named(*t),
                 _ => unreachable!("type alias not encountered during init"),
             };
 
-            let gen_args: Vec<_> = generic_arguments
-                .as_ref()
-                .map(|g| g.inner.as_ref().clone())
-                .unwrap_or_default();
+            let generics = *generics.get_done();
 
-            let generics = ctx
-                .generic_ctx
-                .arena()
-                .get_unchecked(generics.get_done())
-                .values
-                .clone();
-
-            if gen_args.len() != generics.len() {
-                return Err(Diagnostic {
-                    inner: Errors::GenericArityMismatch {
-                        expected: generics.len(),
-                        found: gen_args.len(),
-                    },
-                    span: match generic_arguments {
-                        Some(args) => args.location,
-                        None => identifier_path.location,
-                    },
-                    module,
-                });
-            }
-            let substitutions = generics
-                .iter()
-                .zip(&gen_args)
-                .map(|((_, constraint), arg)| {
-                    let substitution = arg.lower(ctx, module)?;
-                    Ok((*constraint, substitution))
-                })
-                .collect::<Result<Vec<_>, Error>>()?;
-
-            let span = gen_args
-                .first()
-                .map(|arg| arg.location)
-                .unwrap_or(identifier_path.location);
-
-            let new = AnyTypeKey::Named(ty)
-                .substitute_many(&mut ctx.types, &substitutions)
-                .map_err(|e| Error {
-                    inner: e,
-                    module,
-                    span,
-                })?;
-
-            new
+            apply_generic_arguments(
+                ctx,
+                module,
+                identifier_path.location,
+                generic_arguments,
+                generics,
+                ty,
+            )?
         }
 
         _ => unreachable!("all paths are expected to end with a type alias"),
     })
+}
+
+pub fn apply_generic_arguments(
+    ctx: &mut Context,
+    module: Key<ModuleTag>,
+    identifier_location: SpanIndex,
+    generic_arguments: &Option<Span<Vec<Span<Type>>>>,
+    generics: Key<arena_scope::ArenaTag>,
+    ty: AnyTypeKey,
+) -> Result<AnyTypeKey, Diagnostic<Errors>> {
+    let gen_args: &Vec<_> = match generic_arguments {
+        Some(generic_arguments) => generic_arguments.deref(),
+        None => return Ok(ty),
+    };
+
+    let generics = ctx
+        .generic_ctx
+        .arena()
+        .get_unchecked(&generics)
+        .values
+        .clone();
+
+    if gen_args.len() != generics.len() {
+        return Err(Diagnostic {
+            inner: Errors::GenericArityMismatch {
+                expected: generics.len(),
+                found: gen_args.len(),
+            },
+            span: match generic_arguments {
+                Some(args) => args.location,
+                None => identifier_location,
+            },
+            module,
+        });
+    }
+
+    let substitutions = generics
+        .iter()
+        .zip(gen_args)
+        .map(|((_, constraint), arg)| {
+            let substitution = arg.lower(ctx, module)?;
+            Ok((*constraint, substitution))
+        })
+        .collect::<Result<Vec<_>, Error>>()?;
+
+    let span = gen_args
+        .first()
+        .map(|arg| arg.location)
+        .unwrap_or(identifier_location);
+
+    let new = ty
+        .substitute_many(&mut ctx.types, &substitutions)
+        .map_err(|e| Error {
+            inner: e,
+            module,
+            span,
+        })?;
+
+    Ok(new)
 }

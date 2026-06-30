@@ -5,12 +5,12 @@ use arena_scope::ScopeKey;
 use smol_str::SmolStr;
 
 use crate::{
-    ast::{self, AccessModifiers, ConstValue},
+    ast::{self, AccessModifiers, ConstValue, Span},
     const_stage::{
-        Context,
+        Context, Errors,
         types::{AnyTypeKey, ConstraintKey, ModuleKey, NamedTypeKey, TraitKey},
     },
-    ir::FunctionIr,
+    ir::{FunctionIr, FunctionIrKey},
 };
 
 #[derive(Debug)]
@@ -22,7 +22,7 @@ pub struct AnyObject<T> {
     pub module: ModuleKey,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub enum InitState<T, U = T> {
     Done(T),
     Progress(U),
@@ -96,10 +96,17 @@ pub type FunctionObjArena = Arena<AnyObject<FunctionObj>, FunctionObjTag>;
 #[derive(Debug)]
 pub struct FunctionObj {
     pub return_type: InitState<AnyTypeKey, ()>,
-    pub params: HashMap<SmolStr, InitState<AnyTypeKey, ()>>,
+    pub params: Vec<(Span<SmolStr>, InitState<AnyTypeKey, ()>)>,
     pub generics: Vec<ConstraintKey>,
     pub type_of: InitState<AnyTypeKey, ()>,
-    pub ir: InitState<FunctionIr, ()>,
+    pub ir: IrCache,
+    pub generic_scope: InitState<ScopeKey, ()>,
+}
+
+#[derive(Debug)]
+pub enum IrCache {
+    Single(InitState<FunctionIrKey>),
+    Polymorphic(HashMap<AnyTypeKey, InitState<FunctionIrKey>>),
 }
 
 #[derive(Default)]
@@ -255,6 +262,32 @@ impl AnyObjectKey {
             AnyObjectKey::Function(key) => ctx.objects.functions.get_unchecked(key).module,
             AnyObjectKey::Resource(key) => ctx.objects.resources.get_unchecked(key).module,
         }
+    }
+
+    pub fn type_of(&self, ctx: &Context) -> Result<AnyTypeKey, Errors> {
+        Ok(match self {
+            AnyObjectKey::Const(key) => {
+                *ctx.objects.constants.get_unchecked(key).data.ty.get_done()
+            }
+            AnyObjectKey::Trait(key) => {
+                AnyTypeKey::Trait(*ctx.objects.traits.get_unchecked(key).data.ty.get_done())
+            }
+            AnyObjectKey::Component(key) => {
+                *ctx.objects.components.get_unchecked(key).data.ty.get_done()
+            }
+            AnyObjectKey::Function(key) => *ctx
+                .objects
+                .functions
+                .get_unchecked(key)
+                .data
+                .type_of
+                .get_done(),
+            AnyObjectKey::Resource(key) => {
+                *ctx.objects.resources.get_unchecked(key).data.ty.get_done()
+            }
+            AnyObjectKey::Type(_) => Err(Errors::FailedTypeInfer)?,
+            AnyObjectKey::Import(_) => Err(Errors::FailedTypeInfer)?,
+        })
     }
 }
 

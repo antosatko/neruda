@@ -1,5 +1,9 @@
 use clap::{Parser, ValueEnum};
-use ir::const_stage::{Context, objects::Objects, types::Types};
+use ir::const_stage::{
+    Context,
+    objects::{IrCache, Objects},
+    types::Types,
+};
 use parser::{
     grammar::gen_parser,
     lowering::{self, ModuleOk},
@@ -202,9 +206,25 @@ fn main() {
                 } = &ir_ctx.objects;
                 for fun in functions.iter() {
                     println!("Function: {}", fun.identifier);
-                    fun.data.ir.get_done().variables.iter().for_each(|v| {
-                        println!("\tvar {}: {}", *v.identifier, v.ty.stringify(&ir_ctx.types))
-                    });
+                    match &fun.data.ir {
+                        IrCache::Single(ir) => {
+                            let ir = ir_ctx.ir_cache.get_unchecked(ir.get_done());
+                            ir.variables.iter().for_each(|v| {
+                                println!(
+                                    "\tvar {}: {}",
+                                    *v.identifier,
+                                    v.ty.stringify(&ir_ctx.types)
+                                )
+                            });
+                            for block in ir.blocks.arena().iter() {
+                                for instr in &block.value.instructions {
+                                    println!("\t{instr:?}");
+                                }
+                                println!("{:?}", block.value.terminator)
+                            }
+                        }
+                        _ => (),
+                    };
                 }
             }
         }

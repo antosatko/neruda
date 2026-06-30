@@ -12,6 +12,10 @@ component Position = f32x2
 component Velocity = f32x2
 component Orbiting = entity
 
+type A
+type B
+type C
+
 invoke function main() {
     invoke {
         apply_velocity()
@@ -41,7 +45,11 @@ system orbit(
 )
 => satellite.V += 1000 / (primary.get(satellite.C).P - satellite.P).pow(2)
 
+function foo<T>(v: T): T => v
+
 function nevimco(in: i32): i32 {
-    var a = 7
-    return a * 8
+    var _: function(a: A): A = foo<A>
+    var _ = foo<B>
+    var a = 5
+    return 6 + a + in
 }

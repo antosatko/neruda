@@ -72,7 +72,7 @@ checksum = "5d38a7a952d7eda94a2a9fa86603be7da3ecb2b5cc0b8341b8131edbf6e32201"
 [[package]]
 name = "arena"
 version = "0.1.0"
-source = "git+https://github.com/antosatko/arena#d445b7d5b41caeac398dbe9fe4f7fc05272046de"
+source = "git+https://github.com/antosatko/arena#e8dea36ab5a03fc0ff5b63149ff908e7110c03b7"
 
 [[package]]
 name = "arena-scope"

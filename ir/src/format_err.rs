@@ -279,16 +279,12 @@ impl Diagnostic<Warnings> {
 impl Warnings {
     pub fn id_header_snippet_report(&self, ctx: &Context) -> (&'static str, String, String) {
         match self {
-            Self::VariableUnused { function, var } => (
+            Self::VariableUnused { ir, var } => (
                 "500",
                 format!(
                     "Variable '{}' is never used",
-                    ctx.objects
-                        .functions
-                        .get_unchecked(function)
-                        .data
-                        .ir
-                        .get_done()
+                    ctx.ir_cache
+                        .get_unchecked(ir)
                         .variables
                         .get_unchecked(var)
                         .identifier
@@ -296,6 +292,7 @@ impl Warnings {
                 ),
                 format!("Unused variable"),
             ),
+            Self::DeadCode => ("501", format!("Code is unreachable",), format!("Dead code")),
         }
     }
 }

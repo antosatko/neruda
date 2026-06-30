@@ -27,7 +27,7 @@ pub struct Variable {
     pub ty: AnyTypeKey,
     pub value: ValueKey,
     pub used: bool,
-    pub constant: bool,
+    pub mutated: bool,
 }
 
 #[derive(Debug)]
@@ -38,12 +38,21 @@ pub struct BlockCtx {
 
 pub type VariableCtx = ScopeTree<SmolStr, VariableKey>;
 
+#[derive(Debug, Clone, Default, Copy, Hash, PartialEq)]
+pub struct FunctionIrTag;
+pub type FunctionIrKey = Key<FunctionIrTag>;
+pub type FunctionIrArena = Arena<FunctionIr, FunctionIrTag>;
 #[derive(Debug)]
 pub struct FunctionIr {
+    pub source: Option<FunctionObjKey>,
+    pub type_of: Option<AnyTypeKey>,
     pub variables: VariableArena,
     pub values: Arena<Value, ValueTag>,
     pub blocks: Stack<BasicBlock>,
     pub blocks_entry: StackKey,
+    pub void: ValueKey,
+    pub returns: Option<AnyTypeKey>,
+    pub parameters: Vec<(SmolStr, VariableKey)>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -57,6 +66,7 @@ pub enum Addr {
     Var(VariableKey),
     Value(ValueKey),
     Object(AnyObjectKey),
+    Function(FunctionIrKey),
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Copy)]
@@ -94,18 +104,27 @@ pub enum Instruction {
     },
     Call {
         fun: FunctionObjKey,
+        arguments: Vec<ValueKey>,
         result: ValueKey,
+    },
+    AddressOfObj {
+        obj: AnyObjectKey,
+        dst: ValueKey,
+    },
+    AddressOfFun {
+        fun: FunctionIrKey,
+        dst: ValueKey,
     },
 }
 
 #[derive(Debug, Clone)]
-/// May require a boolean value on stack
-enum Terminator {
+pub enum Terminator {
     Return(Option<ValueKey>),
     Jump(BlockKey, Option<ValueKey>),
     Branch {
         then_block: BlockKey,
         else_block: BlockKey,
     },
+    Eval(ValueKey),
     Unreachable,
 }

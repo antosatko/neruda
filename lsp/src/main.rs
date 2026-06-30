@@ -204,11 +204,11 @@ impl IndexedWalk for ir::ast::Span<Object> {
                 }
             }
             Object::Resource {
-                ident,
-                docs,
+                ident: _,
+                docs: _,
                 ty,
                 default_expression,
-                is_optional,
+                is_optional: _,
                 access,
             } => {
                 access.index(line_index, spans);
@@ -616,6 +616,18 @@ impl IndexedWalk for ir::ast::Span<Type> {
                     for generic in generics.inner.as_ref() {
                         generic.index(line_index, spans);
                     }
+                }
+            }
+            ir::ast::TypeLiteral::Function(parameters, returns) => {
+                spans.push(self.span_word(Types::Keyword, line_index, "function"));
+                for param in parameters {
+                    if let Some(ident) = &param.0 {
+                        spans.push(ident.span(Types::Ident, line_index));
+                    }
+                    param.1.index(line_index, spans);
+                }
+                if let Some(returns) = returns {
+                    returns.index(line_index, spans);
                 }
             }
             ir::ast::TypeLiteral::Struct(paramers) => {

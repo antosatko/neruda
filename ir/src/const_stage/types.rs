@@ -585,6 +585,7 @@ impl AnyTypeKey {
                     .zip(got.parameters.iter().map(|(ident, ty, _)| (ident, ty)))
                     .all(|(exp, got)| exp.0 == got.0 && exp.1.check(types, got.1).is_ok())
             }
+
             _ => false,
         };
         match equals {

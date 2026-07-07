@@ -34,9 +34,24 @@ pub struct Variable {
 pub struct BlockCtx {
     pub variables: VariableCtx,
     pub source: FunctionObjKey,
+    pub control_stack: Vec<ControlFrame>,
 }
 
 pub type VariableCtx = ScopeTree<SmolStr, VariableKey>;
+
+#[derive(Debug)]
+pub struct ControlFrame {
+    pub label: Option<SmolStr>,
+    pub kind: ControlFrameKind,
+}
+
+#[derive(Debug)]
+pub enum ControlFrameKind {
+    Loop {
+        break_block: BlockKey,
+        continue_block: BlockKey,
+    },
+}
 
 #[derive(Debug, Clone, Default, Copy, Hash, PartialEq)]
 pub struct FunctionIrTag;

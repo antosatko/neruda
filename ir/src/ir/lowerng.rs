@@ -73,6 +73,7 @@ impl Context {
         let mut block_ctx = BlockCtx {
             variables: Default::default(),
             source: *key,
+            control_stack: Vec::new(),
         };
 
         match self
@@ -236,6 +237,9 @@ impl Context {
                         ast::Statement::Invoke { .. } => (),
                         ast::Statement::Expr { expression } => {
                             self.lower_expression(ir, block_ctx, expression, &None)?;
+                        }
+                        ast::Statement::Loop { label, body } => {
+                            todo!("musim nejak ziskat klice bloku");
                         }
                         _ => todo!("{:?}", st),
                     }

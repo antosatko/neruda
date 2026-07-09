@@ -760,6 +760,8 @@ fn operator(node: &Nodes) -> Span<Operator> {
         "*=" => Operator::MulAssign,
         "/=" => Operator::DivAssign,
         "%=" => Operator::ModAssign,
+        "|" => Operator::BitOr,
+        "&" => Operator::BitAnd,
         other => node.ice(&format!("Unknown operator: {}", other)),
     };
 

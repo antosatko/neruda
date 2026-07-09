@@ -82,6 +82,8 @@ pub enum Addr {
     Value(ValueKey),
     Object(AnyObjectKey),
     Function(FunctionIrKey),
+    UnresolvedFunction(FunctionObjKey),
+    MemoryRef(ValueKey),
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Copy)]
@@ -128,6 +130,18 @@ pub enum Instruction {
     },
     AddressOfFun {
         fun: FunctionIrKey,
+        dst: ValueKey,
+    },
+    AddressOfVar {
+        var: VariableKey,
+        dst: ValueKey,
+    },
+    AddressOfVal {
+        val: ValueKey,
+        dst: ValueKey,
+    },
+    Deref {
+        src: ValueKey,
         dst: ValueKey,
     },
 }

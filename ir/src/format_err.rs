@@ -235,6 +235,26 @@ impl Errors {
                 format!("The object '{}' is inaccessible", key.ident(ctx)),
                 format!("Object inaccesible"),
             ),
+            Errors::Todo(what) => (
+                "426",
+                format!("Feature not yet implemented: {what}"),
+                format!("Not implemented"),
+            ),
+            Errors::Undefined(what) => (
+                "427",
+                format!("Behaviour not yet defined: {what}"),
+                format!("Undefined behaviour"),
+            ),
+            Errors::UnresolvedFunctionReference => (
+                "428",
+                format!("Could not reference unresolved function, missing generic parameters"),
+                format!("Unresolved reference"),
+            ),
+            Errors::CouldNotDeref(ty) => (
+                "429",
+                format!("Could not dereference type '{}'", ty.stringify(&ctx.types)),
+                format!("Could not dereference"),
+            ),
         }
     }
 }

@@ -84,6 +84,10 @@ pub enum Errors {
     ExpectedReturnExpression(FunctionObjKey),
     SelfReferencial,
     ObjectInaccesible(AnyObjectKey),
+    Undefined(&'static str),
+    Todo(&'static str),
+    UnresolvedFunctionReference,
+    CouldNotDeref(AnyTypeKey),
 }
 
 #[derive(Debug)]

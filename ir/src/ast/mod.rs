@@ -413,6 +413,9 @@ pub enum Operator {
     MulAssign,
     DivAssign,
     ModAssign,
+
+    BitOr,
+    BitAnd,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -665,6 +668,10 @@ impl Operator {
             Operator::Gr | Operator::Le | Operator::GrEq | Operator::LeEq => 50,
 
             Operator::Eq | Operator::NEq => 45,
+
+            Operator::BitAnd => 44,
+            Operator::BitOr => 42,
+
             Operator::And => 30,
             Operator::Or => 20,
 
@@ -720,6 +727,8 @@ impl std::fmt::Display for Operator {
             Operator::MulAssign => write!(f, "*="),
             Operator::DivAssign => write!(f, "/="),
             Operator::ModAssign => write!(f, "%="),
+            Operator::BitAnd => write!(f, "&"),
+            Operator::BitOr => write!(f, "|"),
         }
     }
 }

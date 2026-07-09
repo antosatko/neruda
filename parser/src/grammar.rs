@@ -395,7 +395,7 @@ pub fn gen_parser<'src>() -> Parser<'static> {
         .grammar
         .new_enum("operator")
         .options(
-            "+ - * / = % == != < > <= >= || && += -= *= /= %="
+            "+ - * / = % == != < > <= >= || && += -= *= /= %= | &"
                 .split_whitespace()
                 .map(|t| token(t)),
         )
@@ -638,6 +638,12 @@ pub fn gen_parser<'src>() -> Parser<'static> {
         .variables([node_var("consumed")])
         .build();
 
+    let end_stmt_hint = parser
+        .grammar
+        .new_node("end statement hint")
+        .rules([peek(delimiters_consume), peek(delimiters_peek_enum)])
+        .build();
+
     let import = parser
         .grammar
         .new_node("import")
@@ -712,7 +718,7 @@ pub fn gen_parser<'src>() -> Parser<'static> {
             is(literals).commit().set("literal"),
             while_(value_tails)
                 .set("tail")
-                .then([maybe(end_stmt).return_node()]),
+                .then([maybe(end_stmt_hint).return_node()]),
         ])
         .variables([
             node_var("literal"),

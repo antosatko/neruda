@@ -382,6 +382,7 @@ impl Span<Operator> {
                 }),
             },
             And | Or => todo!(),
+            BitAnd | BitOr => todo!(),
             Assign | AddAssign | SubAssign | MulAssign | DivAssign | ModAssign => Err(Diagnostic {
                 span: self.location,
                 module,

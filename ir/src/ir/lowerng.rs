@@ -1,16 +1,15 @@
-use std::{collections::HashMap, ops::Deref};
+use std::ops::Deref;
 
 use arena::Arena;
 use arena_scope::stack::Stack;
-use smol_str::SmolStr;
 
 use crate::{
-    ast::{self, Body, Expression, Function, Span, SpanIndex, Type},
+    ast::{self, Body, Expression, Function, Postfix, Span, SpanIndex, Type},
     const_stage::{
         Context, Diagnostic, Error, Errors, Warning, Warnings,
         lowering::apply_generic_arguments,
         objects::{AnyObject, AnyObjectKey, FunctionObj, FunctionObjKey, InitState, IrCache},
-        types::{AnyTypeKey, ModuleKey, PrimitiveType},
+        types::{AnyTypeKey, ModuleKey, PrimitiveType, RefType},
     },
     ir::{
         Addr, BasicBlock, BlockCtx, FunctionIr, FunctionIrKey, Instruction, Terminator, Value,
@@ -30,6 +29,7 @@ impl Context {
         Ok(())
     }
 
+    #[track_caller]
     pub fn lower_function(
         &mut self,
         key: &FunctionObjKey,
@@ -60,9 +60,7 @@ impl Context {
                         key
                     }
                 },
-                None => {
-                    todo!("ses posrar: err")
-                }
+                None => unreachable!("generic inference is not my concern"),
             },
             _ => unreachable!("yup its just like that"),
         };
@@ -188,8 +186,16 @@ impl Context {
                                     span: st.location,
                                 })?,
                             };
-                            let src =
-                                self.load_addr(ir, block_ctx, value, &Some(ty), ident.location)?;
+                            let src = self.load_addr(
+                                ir,
+                                block_ctx,
+                                value,
+                                &Some(ty),
+                                match expression {
+                                    Some(e) => e.location,
+                                    None => ident.location,
+                                },
+                            )?;
                             let var = Variable {
                                 identifier: ident.clone(),
                                 value: src,
@@ -349,9 +355,9 @@ impl Context {
                         span: r.location,
                     }),
                     _ => Err(Error {
-                        inner: todo!(),
+                        inner: Errors::Undefined("Binary operation on non primitive types"),
                         module,
-                        span: r.location,
+                        span: l.location + r.location,
                     }),
                 }
             }
@@ -390,8 +396,17 @@ impl Context {
                                         }
                                     }
                                 }
-                                (AnyObjectKey::Function(_), None) => {
-                                    todo!("vybouchni, musim to tu opravit")
+                                (AnyObjectKey::Function(fun_key), None) => {
+                                    let fun = self.objects.functions.get_unchecked(&fun_key);
+                                    match fun.data.ir {
+                                        IrCache::Single(_) => {
+                                            let ir_key = self.lower_function(&fun_key, &None)?;
+                                            Addr::Function(ir_key)
+                                        }
+                                        IrCache::Polymorphic(_) => {
+                                            Addr::UnresolvedFunction(fun_key)
+                                        }
+                                    }
                                 }
                                 (any, None) => Addr::Object(any),
                                 _ => todo!("do smoething idk"),
@@ -437,6 +452,85 @@ impl Context {
                         module,
                         span: val.location,
                     })?;
+                }
+                for op in &val.postfix {
+                    addr = match op.deref() {
+                        Postfix::Ref => match addr {
+                            Addr::Var(var) => {
+                                let ir = self.ir_cache.get_mut_unchecked(ir);
+                                let var_obj = ir.variables.get_unchecked(&var);
+                                let ty = self
+                                    .types
+                                    .references
+                                    .push_unique(RefType { inner: var_obj.ty });
+                                let dst = ir.values.push(Value {
+                                    ty: AnyTypeKey::Reference(ty),
+                                });
+                                ir.blocks
+                                    .get_mut_unchecked()
+                                    .instructions
+                                    .push(Instruction::AddressOfVar { var, dst });
+                                Addr::Value(dst)
+                            }
+                            Addr::Value(val) => {
+                                let ir = self.ir_cache.get_mut_unchecked(ir);
+                                let val_obj = ir.values.get_unchecked(&val);
+                                let ty = self
+                                    .types
+                                    .references
+                                    .push_unique(RefType { inner: val_obj.ty });
+                                let dst = ir.values.push(Value {
+                                    ty: AnyTypeKey::Reference(ty),
+                                });
+                                ir.blocks
+                                    .get_mut_unchecked()
+                                    .instructions
+                                    .push(Instruction::AddressOfVal { val, dst });
+                                Addr::Value(dst)
+                            }
+                            _ => Err(Error {
+                                inner: Errors::Todo(
+                                    "Referencing of anything that is not a variable nor value",
+                                ),
+                                module,
+                                span: op.location,
+                            })?,
+                        },
+                        Postfix::Deref => match addr {
+                            Addr::Value(src) => {
+                                let ir = self.ir_cache.get_mut_unchecked(ir);
+                                let val_obj = ir.values.get_unchecked(&src);
+                                match val_obj.ty.unwrap_full(&self.types) {
+                                    AnyTypeKey::Reference(key) => {
+                                        let ty = self.types.references.get_unchecked(&key).inner;
+                                        let dst = ir.values.push(Value { ty });
+                                        // ir.blocks
+                                        //     .get_mut_unchecked()
+                                        //     .instructions
+                                        //     .push(Instruction::Deref { src, dst });
+                                        Addr::MemoryRef(dst)
+                                    }
+                                    ty => Err(Error {
+                                        inner: Errors::CouldNotDeref(ty),
+                                        module,
+                                        span: op.location,
+                                    })?,
+                                }
+                            }
+                            _ => Err(Error {
+                                inner: Errors::Todo(
+                                    "Dereferencing of anything that is not a value",
+                                ),
+                                module,
+                                span: op.location,
+                            })?,
+                        },
+                        _ => Err(Error {
+                            inner: Errors::Todo("Postfix notation is not fully implemented"),
+                            module,
+                            span: op.location,
+                        })?,
+                    };
                 }
                 Ok(addr)
             }
@@ -513,7 +607,11 @@ impl Context {
                         let ir = self.ir_cache.get_mut_unchecked(ir);
                         load_const(ir, expect, module, value, span)
                     }
-                    _ => todo!(),
+                    _ => Err(Error {
+                        inner: Errors::Undefined("Referencing arbitrary objects"),
+                        module,
+                        span,
+                    }),
                 }
             }
             Addr::Value(val) => {
@@ -539,6 +637,23 @@ impl Context {
                     .push(Instruction::AddressOfFun { fun, dst });
                 Ok(dst)
             }
+            Addr::UnresolvedFunction(_fun_key) => match expect {
+                Some(_ty) => Err(Error {
+                    inner: Errors::Todo("Type reference inference"),
+                    module,
+                    span,
+                }),
+                None => Err(Error {
+                    inner: Errors::UnresolvedFunctionReference,
+                    module,
+                    span,
+                }),
+            },
+            Addr::MemoryRef(val_key) => Err(Error {
+                inner: Errors::Todo("Copy content of address"),
+                module,
+                span,
+            }),
         }
     }
 }
@@ -701,6 +816,7 @@ impl Addr {
         match self {
             Addr::Object(obj) => obj.type_of(ctx),
             Addr::Value(val) => Ok(ctx.ir_cache.get_unchecked(ir).values.get_unchecked(val).ty),
+            Addr::MemoryRef(val) => Ok(ctx.ir_cache.get_unchecked(ir).values.get_unchecked(val).ty),
             Addr::Var(var) => Ok(ctx
                 .ir_cache
                 .get_unchecked(ir)
@@ -711,6 +827,13 @@ impl Addr {
                 let ir = ctx.ir_cache.get_unchecked(ir_key);
                 Ok(ir.type_of.unwrap())
             }
+            Addr::UnresolvedFunction(fun_key) => Ok(*ctx
+                .objects
+                .functions
+                .get_unchecked(fun_key)
+                .data
+                .type_of
+                .get_done()),
         }
     }
 }

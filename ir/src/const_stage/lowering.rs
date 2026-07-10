@@ -448,7 +448,12 @@ impl Context {
                     let (ty, default) = match (ty, default_expression) {
                         (Some(ty), Some(expr)) => {
                             let ty = ty.lower(self, mod_key)?;
-                            let default = expr.const_eval(self, mod_key, &None, &Some(ty))?;
+                            let default = match expr.const_eval(self, mod_key, &None, &Some(ty)) {
+                                ConstEvalResult::Value(v) => v,
+                                ConstEvalResult::Error(err) | ConstEvalResult::NotConst(err) => {
+                                    return Err(err);
+                                }
+                            };
                             (ty, Some(default))
                         }
                         (Some(ty), None) => {
@@ -466,7 +471,13 @@ impl Context {
                             (type_lowered, default)
                         }
                         (None, Some(default)) => {
-                            let default_val = default.const_eval(self, mod_key, &None, &None)?;
+                            let default_val = match default.const_eval(self, mod_key, &None, &None)
+                            {
+                                ConstEvalResult::Value(v) => v,
+                                ConstEvalResult::Error(err) | ConstEvalResult::NotConst(err) => {
+                                    return Err(err);
+                                }
+                            };
                             let ty = default_val.type_of().map_err(|e| Error {
                                 inner: e,
                                 module: mod_key,
@@ -635,8 +646,10 @@ impl Context {
                 let obj = self.objects.constants.get_mut_unchecked(obj_key);
                 obj.data.ty = InitState::Done(type_key);
                 let v = match expression.const_eval(self, mod_key, self_def, &Some(type_key)) {
-                    Ok(v) => v,
-                    Err(e) => Err(e)?,
+                    ConstEvalResult::Value(v) => v,
+                    ConstEvalResult::Error(err) | ConstEvalResult::NotConst(err) => {
+                        return Err(err);
+                    }
                 };
                 let obj = self.objects.constants.get_mut_unchecked(obj_key);
                 obj.data.value = InitState::Done(v);
@@ -883,6 +896,12 @@ pub enum PathNode {
     Object(AnyObjectKey),
 }
 
+pub enum ConstEvalResult {
+    Value(ConstValue),
+    NotConst(Error),
+    Error(Error),
+}
+
 impl ast::Expression {
     pub fn const_eval(
         &self,
@@ -890,16 +909,16 @@ impl ast::Expression {
         mod_key: ModuleKey,
         self_def: &Option<ConstValue>,
         expect: &Option<AnyTypeKey>,
-    ) -> Result<ConstValue, Error> {
+    ) -> ConstEvalResult {
         let location;
         let result = match self.const_reduce().as_ref() {
             ast::Expression::Value(value) => {
                 location = value.location;
                 if !value.postfix.is_empty() {
-                    return Err(Diagnostic {
-                        span: value.location,
-                        inner: Errors::NotConst,
+                    return ConstEvalResult::NotConst(Error {
+                        inner: Errors::Todo("allow postfix for const evaluation"),
                         module: mod_key,
+                        span: value.postfix.first().map(|op| op.location).unwrap(),
                     });
                 }
                 match value.literal.inner.as_ref() {
@@ -914,11 +933,11 @@ impl ast::Expression {
                                 let obj_key = if let AnyObjectKey::Const(key) = key {
                                     key
                                 } else {
-                                    Err(Error {
+                                    return ConstEvalResult::NotConst(Error {
                                         inner: Errors::NotConst,
                                         module: mod_key,
                                         span: identifier_path.path.location,
-                                    })?
+                                    });
                                 };
                                 let obj = ctx.objects.constants.get_unchecked(&obj_key);
                                 match &obj.data {
@@ -929,13 +948,18 @@ impl ast::Expression {
                                     ConstObj {
                                         value: InitState::Progress(_),
                                         ty: _,
-                                    } => Err(Error {
-                                        inner: Errors::SelfReferencial,
-                                        module: mod_key,
-                                        span: identifier_path.path.location,
-                                    })?,
+                                    } => {
+                                        return ConstEvalResult::Error(Error {
+                                            inner: Errors::SelfReferencial,
+                                            module: mod_key,
+                                            span: identifier_path.path.location,
+                                        });
+                                    }
                                     ConstObj { .. } => {
-                                        let obj = ctx.lower_const_with_key(obj_key)?;
+                                        let obj = match ctx.lower_const_with_key(obj_key) {
+                                            Ok(ok) => ok,
+                                            Err(err) => return ConstEvalResult::Error(err),
+                                        };
                                         match &obj.data {
                                             ConstObj {
                                                 value: InitState::Done(v),
@@ -957,14 +981,16 @@ impl ast::Expression {
                                 {
                                     match self_def {
                                         Some(v) => v.clone(),
-                                        None => Err(Diagnostic {
-                                            span: value.location,
-                                            module: mod_key,
-                                            inner: Errors::UndefinedSelf,
-                                        })?,
+                                        None => {
+                                            return ConstEvalResult::NotConst(Diagnostic {
+                                                span: value.location,
+                                                module: mod_key,
+                                                inner: Errors::UndefinedSelf,
+                                            });
+                                        }
                                     }
                                 } else {
-                                    return Err(e);
+                                    return ConstEvalResult::NotConst(e);
                                 }
                             }
                         }
@@ -973,16 +999,22 @@ impl ast::Expression {
                         let mut const_fields = Vec::with_capacity(fields.len());
                         for field in fields {
                             let ident = field.0.clone();
-                            let value = field.1.const_eval(ctx, mod_key, self_def, &None)?;
+                            let value = match field.1.const_eval(ctx, mod_key, self_def, &None) {
+                                ConstEvalResult::Value(v) => v,
+                                any => return any,
+                            };
                             const_fields.push(Span::new(
                                 (ident, Span::new(value, field.location)),
                                 field.location,
                             ));
                         }
                         let ty = match ty {
-                            Some(ty) => {
-                                Some(resolve_type_path(ctx, mod_key, &ty.path, &ty.generics)?)
-                            }
+                            Some(ty) => Some(
+                                match resolve_type_path(ctx, mod_key, &ty.path, &ty.generics) {
+                                    Ok(ok) => ok,
+                                    Err(err) => return ConstEvalResult::NotConst(err),
+                                },
+                            ),
                             None => None,
                         };
                         let initial = ConstValue::Structure {
@@ -990,11 +1022,14 @@ impl ast::Expression {
                             ty,
                         };
                         match ty {
-                            Some(ty) => initial.implicit_cast(ctx, ty).map_err(|e| Error {
+                            Some(ty) => match initial.implicit_cast(ctx, ty).map_err(|e| Error {
                                 inner: e,
                                 module: mod_key,
                                 span: location,
-                            })?,
+                            }) {
+                                Ok(ok) => ok,
+                                Err(err) => return ConstEvalResult::Error(err),
+                            },
                             None => initial,
                         }
                     }
@@ -1005,21 +1040,20 @@ impl ast::Expression {
                         let mut values = Vec::new();
                         let mut inner_ty = None;
                         for expr in exprs {
-                            let v = expr.const_eval(ctx, mod_key, self_def, &inner_ty)?;
-                            let typeof_v = v.type_of().map_err(|e| Error {
+                            let v = match expr.const_eval(ctx, mod_key, self_def, &inner_ty) {
+                                ConstEvalResult::Value(v) => v,
+                                any => return any,
+                            };
+                            let typeof_v = match v.type_of().map_err(|e| Error {
                                 inner: e,
                                 module: mod_key,
                                 span: expr.location,
-                            })?;
+                            }) {
+                                Ok(ok) => ok,
+                                Err(err) => return ConstEvalResult::Error(err),
+                            };
                             match &inner_ty {
-                                Some(ty) => {
-                                    typeof_v.check(&ctx.types, ty).map_err(|e| Error {
-                                        inner: e,
-                                        module: mod_key,
-                                        span: expr.location,
-                                    })?;
-                                    inner_ty = Some(typeof_v);
-                                }
+                                Some(ty) => {}
                                 None => inner_ty = Some(typeof_v),
                             }
                             values.push(expr.clone().map(|_| v));
@@ -1027,11 +1061,13 @@ impl ast::Expression {
                         let ty = ArrayType {
                             element_type: match inner_ty {
                                 Some(ty) => ty,
-                                None => Err(Error {
-                                    inner: Errors::FailedTypeInfer,
-                                    module: mod_key,
-                                    span: value.location,
-                                })?,
+                                None => {
+                                    return ConstEvalResult::Error(Error {
+                                        inner: Errors::FailedTypeInfer,
+                                        module: mod_key,
+                                        span: value.location,
+                                    });
+                                }
                             },
                             size: Some(values.len()),
                         };
@@ -1043,16 +1079,24 @@ impl ast::Expression {
                     ast::Literal::Tuple(exprs) => {
                         let mut values = Vec::with_capacity(exprs.len());
                         for expr in exprs {
-                            let v = expr.const_eval(ctx, mod_key, self_def, &None)?;
+                            let v = match expr.const_eval(ctx, mod_key, self_def, &None) {
+                                ConstEvalResult::Value(v) => v,
+                                any => return any,
+                            };
                             values.push(expr.clone().map(|_| v));
                         }
                         let mut types = Vec::with_capacity(values.len());
                         for v in &values {
-                            types.push(v.type_of().map_err(|e| Error {
-                                inner: e,
-                                module: mod_key,
-                                span: v.location,
-                            })?);
+                            types.push(
+                                match v.type_of().map_err(|e| Error {
+                                    inner: e,
+                                    module: mod_key,
+                                    span: v.location,
+                                }) {
+                                    Ok(ok) => ok,
+                                    Err(err) => return ConstEvalResult::Error(err),
+                                },
+                            );
                         }
                         let ty = TupleType { parameters: types };
                         let ty = AnyTypeKey::Tuple(ctx.types.tuples.push_unique(ty));
@@ -1069,32 +1113,44 @@ impl ast::Expression {
                     len: r.location.len + r.location.index - l.location.index,
                 };
                 location = span;
-                let left_val = l.const_eval(ctx, mod_key, self_def, &None)?;
-                let typeof_l = left_val.type_of().map_err(|e| Error {
+                let left_val = match l.const_eval(ctx, mod_key, self_def, &None) {
+                    ConstEvalResult::Value(v) => v,
+                    any => return any,
+                };
+                let typeof_l = match left_val.type_of().map_err(|e| Error {
                     inner: e,
                     module: mod_key,
                     span: l.location,
-                })?;
-                let right_val = r.const_eval(ctx, mod_key, self_def, &Some(typeof_l))?;
+                }) {
+                    Ok(ok) => ok,
+                    Err(err) => return ConstEvalResult::Error(err),
+                };
+                let right_val = match r.const_eval(ctx, mod_key, self_def, &Some(typeof_l)) {
+                    ConstEvalResult::Value(v) => v,
+                    any => return any,
+                };
                 match op.const_apply(&left_val, &right_val, mod_key) {
                     Ok(v) => v,
                     Err(mut e) => {
                         e.span = span;
-                        Err(e)?
+                        return ConstEvalResult::Error(e);
                     }
                 }
             }
         };
         match expect {
             Some(e) => {
-                let result = result.implicit_cast(ctx, *e).map_err(|e| Error {
+                let result = match result.implicit_cast(ctx, *e).map_err(|e| Error {
                     inner: e,
                     module: mod_key,
                     span: location,
-                })?;
-                Ok(result)
+                }) {
+                    Ok(ok) => ok,
+                    Err(err) => return ConstEvalResult::Error(err),
+                };
+                ConstEvalResult::Value(result)
             }
-            None => Ok(result),
+            None => ConstEvalResult::Value(result),
         }
     }
 }
@@ -1153,7 +1209,12 @@ impl ast::Type {
                     let ty = param.ty.lower(ctx, module)?;
 
                     let default = match &param.default_value {
-                        Some(v) => Some(v.const_eval(ctx, module, &None, &Some(ty))?),
+                        Some(v) => Some(match v.const_eval(ctx, module, &None, &Some(ty)) {
+                            ConstEvalResult::Value(v) => v,
+                            ConstEvalResult::Error(err) | ConstEvalResult::NotConst(err) => {
+                                return Err(err);
+                            }
+                        }),
                         None => None,
                     };
                     parameters.push((ident.as_ref().clone(), ty, default));
@@ -1171,7 +1232,12 @@ impl ast::Type {
                 let first_value = match iter.next() {
                     Some((ident, expr)) => {
                         let value = match expr {
-                            Some(e) => e.const_eval(ctx, module, &None, &Some(repr))?,
+                            Some(e) => match e.const_eval(ctx, module, &None, &Some(repr)) {
+                                ConstEvalResult::Value(v) => v,
+                                ConstEvalResult::Error(err) | ConstEvalResult::NotConst(err) => {
+                                    return Err(err);
+                                }
+                            },
                             None => repr.const_default(ctx).map_err(|e| Error {
                                 inner: e,
                                 module,
@@ -1187,8 +1253,18 @@ impl ast::Type {
                     for (ident, expr) in iter {
                         let value = match expr {
                             Some(expr) => {
-                                let value =
-                                    expr.const_eval(ctx, module, &Some(last_value), &Some(repr))?;
+                                let value = match expr.const_eval(
+                                    ctx,
+                                    module,
+                                    &Some(last_value),
+                                    &Some(repr),
+                                ) {
+                                    ConstEvalResult::Value(v) => v,
+                                    ConstEvalResult::Error(err)
+                                    | ConstEvalResult::NotConst(err) => {
+                                        return Err(err);
+                                    }
+                                };
 
                                 let ty = value.type_of().map_err(|e| Error {
                                     inner: e,
@@ -1206,7 +1282,18 @@ impl ast::Type {
                             }
                             None => match step {
                                 Some(step) => {
-                                    step.const_eval(ctx, module, &Some(last_value), &Some(repr))?
+                                    match step.const_eval(
+                                        ctx,
+                                        module,
+                                        &Some(last_value),
+                                        &Some(repr),
+                                    ) {
+                                        ConstEvalResult::Value(v) => v,
+                                        ConstEvalResult::Error(err)
+                                        | ConstEvalResult::NotConst(err) => {
+                                            return Err(err);
+                                        }
+                                    }
                                 }
                                 None => last_value.autostep().map_err(|e| Error {
                                     inner: e,
@@ -1232,7 +1319,7 @@ impl ast::Type {
                             &None,
                             &Some(AnyTypeKey::Primitive(PrimitiveType::U32)),
                         ) {
-                            Ok(ConstValue::Number(n)) => match n.value {
+                            ConstEvalResult::Value(ConstValue::Number(n)) => match n.value {
                                 NumberValue::Uint(n) | NumberValue::Any(n) => Some(n as _),
                                 NumberValue::Int(n) => Some(n as _),
                                 value => Err(Diagnostic {
@@ -1243,8 +1330,8 @@ impl ast::Type {
                                     },
                                 })?,
                             },
-                            Err(e) => Err(e)?,
-                            Ok(got) => Err(Diagnostic {
+                            ConstEvalResult::Error(e) | ConstEvalResult::NotConst(e) => Err(e)?,
+                            ConstEvalResult::Value(got) => Err(Diagnostic {
                                 span: const_expr.location,
                                 module,
                                 inner: Errors::ExpectedNumericConst { got },

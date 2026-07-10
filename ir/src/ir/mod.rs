@@ -120,7 +120,7 @@ pub enum Instruction {
         dst: ValueKey,
     },
     Call {
-        fun: FunctionObjKey,
+        fun: FunctionIrKey,
         arguments: Vec<ValueKey>,
         result: ValueKey,
     },

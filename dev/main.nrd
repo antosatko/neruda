@@ -19,7 +19,6 @@ type C
 invoke function main() {
     // nevimco()
     // | nevimco()
-    // var five = foo(5)
 
     invoke {
         apply_velocity()
@@ -50,6 +49,7 @@ system orbit(
 => satellite.V += 1000 / (primary.get(satellite.C).P - satellite.P).pow(2)
 
 function foo<T>(v: T): T => v
+function bar(v: i32): i32 => v
 
 function nevimco(in: i32): i32 {
     var _: function(a: A): A = foo<A>
@@ -57,7 +57,8 @@ function nevimco(in: i32): i32 {
     var a = 5
     var _ = a.&.&.&.&.*
     var ref = a.&
-    ref.* = 7
+    //ref.* = 7
+    var five = bar(5.0)
 
     // loop => _
 

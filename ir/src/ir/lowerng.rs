@@ -7,7 +7,7 @@ use crate::{
     ast::{self, Body, Expression, Function, Postfix, Span, SpanIndex, Type},
     const_stage::{
         Context, Diagnostic, Error, Errors, Warning, Warnings,
-        lowering::apply_generic_arguments,
+        lowering::{ConstEvalResult, apply_generic_arguments},
         objects::{AnyObject, AnyObjectKey, FunctionObj, FunctionObjKey, InitState, IrCache},
         types::{AnyTypeKey, ModuleKey, PrimitiveType, RefType},
     },
@@ -301,17 +301,18 @@ impl Context {
             .functions
             .get_unchecked(&block_ctx.source)
             .module;
-        match &expr.const_eval(self, module, &None, expect) {
-            Ok(const_val) => {
+        match expr.const_eval(self, module, &None, expect) {
+            ConstEvalResult::Value(const_val) => {
                 return Ok(Addr::Value(load_const(
                     self.ir_cache.get_mut_unchecked(ir),
                     expect,
                     module,
-                    const_val,
+                    &const_val,
                     expr.location,
                 )?));
             }
-            Err(_) => (),
+            ConstEvalResult::Error(err) => Err(err)?,
+            ConstEvalResult::NotConst(_) => (),
         }
         match expr.deref() {
             Expression::Binary { l, r, op } => {
@@ -504,10 +505,6 @@ impl Context {
                                     AnyTypeKey::Reference(key) => {
                                         let ty = self.types.references.get_unchecked(&key).inner;
                                         let dst = ir.values.push(Value { ty });
-                                        // ir.blocks
-                                        //     .get_mut_unchecked()
-                                        //     .instructions
-                                        //     .push(Instruction::Deref { src, dst });
                                         Addr::MemoryRef(dst)
                                     }
                                     ty => Err(Error {
@@ -524,6 +521,50 @@ impl Context {
                                 module,
                                 span: op.location,
                             })?,
+                        },
+                        Postfix::Call(arguments) => match addr {
+                            Addr::Function(ir_key) => {
+                                let callee = self.ir_cache.get_unchecked(&ir_key);
+                                let result = callee
+                                    .returns
+                                    .unwrap_or(AnyTypeKey::Primitive(PrimitiveType::Void));
+                                let mut arg_values = Vec::with_capacity(arguments.capacity());
+                                for (expr, (ident, expect)) in
+                                    arguments.iter().zip(callee.parameters.clone())
+                                {
+                                    let expect = self
+                                        .ir_cache
+                                        .get_unchecked(&ir_key)
+                                        .variables
+                                        .get_unchecked(&expect)
+                                        .ty;
+                                    let addr =
+                                        self.lower_expression(ir, block_ctx, expr, &Some(expect))?;
+                                    let val = self.load_addr(
+                                        ir,
+                                        block_ctx,
+                                        addr,
+                                        &Some(expect),
+                                        expr.location,
+                                    )?;
+                                    arg_values.push(val);
+                                }
+                                let self_ir = self.ir_cache.get_mut_unchecked(ir);
+                                let dst = self_ir.values.push(Value { ty: result });
+                                self_ir.blocks.get_mut_unchecked().instructions.push(
+                                    Instruction::Call {
+                                        fun: ir_key,
+                                        arguments: arg_values,
+                                        result: dst,
+                                    },
+                                );
+                                Addr::Value(dst)
+                            }
+                            _ => {
+                                let val =
+                                    self.load_addr(ir, block_ctx, addr, expect, op.location)?;
+                                todo!()
+                            }
                         },
                         _ => Err(Error {
                             inner: Errors::Todo("Postfix notation is not fully implemented"),
@@ -649,11 +690,16 @@ impl Context {
                     span,
                 }),
             },
-            Addr::MemoryRef(val_key) => Err(Error {
-                inner: Errors::Todo("Copy content of address"),
-                module,
-                span,
-            }),
+            Addr::MemoryRef(src) => {
+                let ir = self.ir_cache.get_mut_unchecked(ir);
+                let ty = ir.values.get_unchecked(&src).ty;
+                let dst = ir.values.push(Value { ty });
+                ir.blocks
+                    .get_mut_unchecked()
+                    .instructions
+                    .push(Instruction::Deref { src, dst });
+                Ok(dst)
+            }
         }
     }
 }

@@ -1,8 +1,11 @@
 use clap::{Parser, ValueEnum};
-use ir::const_stage::{
-    Context,
-    objects::{IrCache, Objects},
-    types::Types,
+use ir::{
+    const_stage::{
+        Context,
+        objects::{IrCache, Objects},
+        types::Types,
+    },
+    interpret::Interpreter,
 };
 use parser::{
     grammar::gen_parser,
@@ -160,6 +163,20 @@ fn main() {
                         _ => (),
                     };
                 }
+                let main = ir_ctx
+                    .objects
+                    .functions
+                    .iter()
+                    .find(|f| f.identifier == "main")
+                    .map(|f| match &f.data.ir {
+                        IrCache::Polymorphic(_) => todo!(),
+                        IrCache::Single(k) => *k.get_done(),
+                    })
+                    .unwrap();
+                let mut interpret = Interpreter::new(ir_ctx.ir_cache);
+                interpret
+                    .interpret_function(main, Vec::with_capacity(0))
+                    .unwrap();
             }
         }
         EmitTarget::Asm => println!("Running back-end... generating Assembly."),

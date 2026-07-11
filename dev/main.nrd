@@ -17,8 +17,7 @@ type B
 type C
 
 invoke function main() {
-    // nevimco()
-    // | nevimco()
+    var _ = nevimco(69).&.*
 
     invoke {
         apply_velocity()
@@ -27,6 +26,8 @@ invoke function main() {
         count_units()
         orbit()
     }
+
+    return
 }
 
 

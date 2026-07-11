@@ -77,7 +77,7 @@ source = "git+https://github.com/antosatko/arena#ad6955245414be8504d587adb247714
 [[package]]
 name = "arena-scope"
 version = "0.1.0"
-source = "git+https://github.com/antosatko/arena-scope#d5ed009df2f6daf9e38db387022e7322bbba80cc"
+source = "git+https://github.com/antosatko/arena-scope#f85556a41dbe8e5de3d2d6d132fe075b5c9c95b1"
 dependencies = [
  "arena",
 ]

@@ -151,6 +151,7 @@ pub enum Terminator {
     Return(Option<ValueKey>),
     Jump(BlockKey, Option<ValueKey>),
     Branch {
+        condition: ValueKey,
         then_block: BlockKey,
         else_block: BlockKey,
     },

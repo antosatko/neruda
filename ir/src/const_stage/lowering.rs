@@ -486,7 +486,7 @@ impl Context {
                             (ty, Some(default_val))
                         }
                         (None, None) => match is_optional {
-                            Some(_) => (AnyTypeKey::Primitive(PrimitiveType::Void), None),
+                            Some(_) => (AnyTypeKey::Void, None),
                             None => Err(Error {
                                 inner: Errors::ExpectedOptionalResource { ident: identifier },
                                 module: mod_key,
@@ -535,7 +535,7 @@ impl Context {
                     self.push_generic_scope(generics, &mod_key)?;
                     let return_type = match return_type {
                         Some(ty) => ty.lower(self, mod_key)?,
-                        None => AnyTypeKey::Primitive(PrimitiveType::Void),
+                        None => AnyTypeKey::Void,
                     };
                     let fun = self.objects.functions.get_mut_unchecked(&function_key);
                     fun.data.return_type = InitState::Done(return_type);
@@ -604,7 +604,7 @@ impl Context {
             {
                 let ty = match ty {
                     Some(ty) => ty.lower(self, mod_key)?,
-                    None => AnyTypeKey::Primitive(PrimitiveType::Void),
+                    None => AnyTypeKey::Void,
                 };
                 let obj = self.objects.components.get_mut_unchecked(&component_key);
                 obj.data.ty = InitState::Done(ty);
@@ -710,7 +710,7 @@ impl Context {
                     self.types.named.get_mut_unchecked(&named_key).name = obj.identifier.clone();
                     let key = match ty {
                         Some(t) => t.lower(self, mod_key)?,
-                        _ => AnyTypeKey::Primitive(PrimitiveType::Void),
+                        _ => AnyTypeKey::Void,
                     };
                     match &key {
                         AnyTypeKey::Enum(enum_key) => {
@@ -1181,7 +1181,7 @@ impl ast::Type {
                 }
                 let returns = match returns {
                     Some(r) => r.lower(ctx, module)?,
-                    None => AnyTypeKey::Primitive(PrimitiveType::Void),
+                    None => AnyTypeKey::Void,
                 };
                 let ty = FunctionType {
                     parameters: params,
@@ -1352,7 +1352,7 @@ impl ast::Type {
                     parameters.push(ty.lower(ctx, module)?);
                 }
                 match parameters.is_empty() {
-                    true => AnyTypeKey::Primitive(PrimitiveType::Void),
+                    true => AnyTypeKey::Void,
                     _ => {
                         let key = ctx.types.tuples.push_unique(TupleType { parameters });
                         AnyTypeKey::Tuple(key)

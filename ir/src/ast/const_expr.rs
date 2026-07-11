@@ -308,15 +308,14 @@ impl AnyTypeKey {
                 let this = ctx.types.morphs.get_unchecked(key);
                 this.this.clone().const_default(ctx)
             }
-            AnyTypeKey::Trait(_) => Err(Errors::UndefinedDefault(*self)),
-            AnyTypeKey::Enum(_) => Err(Errors::UndefinedDefault(*self)),
-            AnyTypeKey::Reference(_) => Err(Errors::UndefinedDefault(*self)),
-            AnyTypeKey::ModuleRef(_) => Err(Errors::UndefinedDefault(*self)),
-            AnyTypeKey::Function(_) => Err(Errors::UndefinedDefault(*self)),
-            // AnyTypeKey::Constraint(_) => Err(Errors::UndefinedDefault(*self)),
-            //AnyTypeKey::AnonymousStruct => Err(Errors::UndefinedDefault(*self)),
-            AnyTypeKey::Polymorph(_) => Err(Errors::UndefinedDefault(*self)),
-            AnyTypeKey::Generic(_) => Err(Errors::UndefinedDefault(*self)),
+            AnyTypeKey::Generic(_)
+            | AnyTypeKey::Polymorph(_)
+            | AnyTypeKey::Function(_)
+            | AnyTypeKey::ModuleRef(_)
+            | AnyTypeKey::Reference(_)
+            | AnyTypeKey::Void
+            | AnyTypeKey::Trait(_)
+            | AnyTypeKey::Enum(_) => Err(Errors::UndefinedDefault(*self)),
         }
     }
 }

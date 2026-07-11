@@ -57,10 +57,7 @@ function nevimco(in: i32): i32 {
     var a = 5
     var _ = a.&.&.&.&.*
     var ref = a.&
-    //ref.* = 7
-    var five = bar(5.0)
+    var five = foo<i32>(bar(bar(ref.*)))
 
-    // loop => _
-
-    return 6 + a + in
+    return 6 + a + in / five / five
 }

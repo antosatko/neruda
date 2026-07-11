@@ -83,7 +83,7 @@ pub enum Addr {
     Object(AnyObjectKey),
     Function(FunctionIrKey),
     UnresolvedFunction(FunctionObjKey),
-    MemoryRef(ValueKey),
+    MemoryRef { src: ValueKey, inner_ty: AnyTypeKey },
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Copy)]

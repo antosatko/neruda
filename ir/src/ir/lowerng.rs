@@ -9,7 +9,7 @@ use crate::{
         Context, Diagnostic, Error, Errors, Warning, Warnings,
         lowering::{ConstEvalResult, apply_generic_arguments},
         objects::{AnyObject, AnyObjectKey, FunctionObj, FunctionObjKey, InitState, IrCache},
-        types::{AnyTypeKey, ModuleKey, PrimitiveType, RefType},
+        types::{AnyTypeKey, ModuleKey, RefType},
     },
     ir::{
         Addr, BasicBlock, BlockCtx, FunctionIr, FunctionIrKey, Instruction, Terminator, Value,
@@ -227,7 +227,7 @@ impl Context {
                                     )?)
                                 }
                                 None => match returns {
-                                    AnyTypeKey::Primitive(PrimitiveType::Void) => None,
+                                    AnyTypeKey::Void => None,
                                     _ => Err(Error {
                                         inner: Errors::ExpectedReturnExpression(block_ctx.source),
                                         module: *module,
@@ -328,8 +328,8 @@ impl Context {
                     module,
                     span: r.location,
                 })?;
-                let left_value = self.load_addr(ir, block_ctx, left_addr, expect, l.location)?;
-                let right_value = self.load_addr(ir, block_ctx, right_addr, expect, r.location)?;
+                let left_value = self.load_addr(ir, block_ctx, left_addr, &None, l.location)?;
+                let right_value = self.load_addr(ir, block_ctx, right_addr, &None, r.location)?;
                 match (left_ty, right_ty) {
                     (AnyTypeKey::Primitive(l_prim), AnyTypeKey::Primitive(r_prim))
                         if l_prim == r_prim =>
@@ -442,18 +442,6 @@ impl Context {
                     }
                     a => todo!("{a:?}"),
                 };
-                if let Some(expect) = expect {
-                    let ty = addr.type_of(self, ir).map_err(|inner| Error {
-                        inner,
-                        module,
-                        span: val.location,
-                    })?;
-                    ty.check(&self.types, expect).map_err(|inner| Error {
-                        inner,
-                        module,
-                        span: val.location,
-                    })?;
-                }
                 for op in &val.postfix {
                     addr = match op.deref() {
                         Postfix::Ref => match addr {
@@ -497,37 +485,27 @@ impl Context {
                                 span: op.location,
                             })?,
                         },
-                        Postfix::Deref => match addr {
-                            Addr::Value(src) => {
-                                let ir = self.ir_cache.get_mut_unchecked(ir);
-                                let val_obj = ir.values.get_unchecked(&src);
-                                match val_obj.ty.unwrap_full(&self.types) {
-                                    AnyTypeKey::Reference(key) => {
-                                        let ty = self.types.references.get_unchecked(&key).inner;
-                                        let dst = ir.values.push(Value { ty });
-                                        Addr::MemoryRef(dst)
-                                    }
-                                    ty => Err(Error {
-                                        inner: Errors::CouldNotDeref(ty),
-                                        module,
-                                        span: op.location,
-                                    })?,
+                        Postfix::Deref => {
+                            let src = self.load_addr(ir, block_ctx, addr, &None, op.location)?;
+
+                            let ir = self.ir_cache.get_mut_unchecked(ir);
+                            let val_obj = ir.values.get_unchecked(&src);
+                            match val_obj.ty.unwrap_full(&self.types) {
+                                AnyTypeKey::Reference(key) => {
+                                    let ty = self.types.references.get_unchecked(&key).inner;
+                                    Addr::MemoryRef { inner_ty: ty, src }
                                 }
+                                ty => Err(Error {
+                                    inner: Errors::CouldNotDeref(ty),
+                                    module,
+                                    span: op.location,
+                                })?,
                             }
-                            _ => Err(Error {
-                                inner: Errors::Todo(
-                                    "Dereferencing of anything that is not a value",
-                                ),
-                                module,
-                                span: op.location,
-                            })?,
-                        },
+                        }
                         Postfix::Call(arguments) => match addr {
                             Addr::Function(ir_key) => {
                                 let callee = self.ir_cache.get_unchecked(&ir_key);
-                                let result = callee
-                                    .returns
-                                    .unwrap_or(AnyTypeKey::Primitive(PrimitiveType::Void));
+                                let result = callee.returns.unwrap_or(AnyTypeKey::Void);
                                 let mut arg_values = Vec::with_capacity(arguments.capacity());
                                 for (expr, (ident, expect)) in
                                     arguments.iter().zip(callee.parameters.clone())
@@ -562,7 +540,7 @@ impl Context {
                             }
                             _ => {
                                 let val =
-                                    self.load_addr(ir, block_ctx, addr, expect, op.location)?;
+                                    self.load_addr(ir, block_ctx, addr, &None, op.location)?;
                                 todo!()
                             }
                         },
@@ -572,6 +550,18 @@ impl Context {
                             span: op.location,
                         })?,
                     };
+                }
+                if let Some(expect) = expect {
+                    let ty = addr.type_of(self, ir).map_err(|inner| Error {
+                        inner,
+                        module,
+                        span: val.location,
+                    })?;
+                    ty.check(&self.types, expect).map_err(|inner| Error {
+                        inner,
+                        module,
+                        span: val.location,
+                    })?;
                 }
                 Ok(addr)
             }
@@ -690,7 +680,7 @@ impl Context {
                     span,
                 }),
             },
-            Addr::MemoryRef(src) => {
+            Addr::MemoryRef { src, inner_ty } => {
                 let ir = self.ir_cache.get_mut_unchecked(ir);
                 let ty = ir.values.get_unchecked(&src).ty;
                 let dst = ir.values.push(Value { ty });
@@ -710,7 +700,7 @@ impl FunctionIr {
         let blocks_entry = instructions.push(BasicBlock::default());
         let mut values = Arena::default();
         let void = values.push(Value {
-            ty: AnyTypeKey::Primitive(PrimitiveType::Void),
+            ty: AnyTypeKey::Void,
         });
         let mut variables = Arena::new();
         let mut parameters = Vec::new();
@@ -750,7 +740,7 @@ impl FunctionIr {
         let blocks_entry = instructions.push(BasicBlock::default());
         let mut values = Arena::default();
         let void = values.push(Value {
-            ty: AnyTypeKey::Primitive(PrimitiveType::Void),
+            ty: AnyTypeKey::Void,
         });
         let mut variables = Arena::new();
         let mut parameters = Vec::new();
@@ -862,7 +852,7 @@ impl Addr {
         match self {
             Addr::Object(obj) => obj.type_of(ctx),
             Addr::Value(val) => Ok(ctx.ir_cache.get_unchecked(ir).values.get_unchecked(val).ty),
-            Addr::MemoryRef(val) => Ok(ctx.ir_cache.get_unchecked(ir).values.get_unchecked(val).ty),
+            Addr::MemoryRef { src: _, inner_ty } => Ok(*inner_ty),
             Addr::Var(var) => Ok(ctx
                 .ir_cache
                 .get_unchecked(ir)

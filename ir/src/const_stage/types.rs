@@ -150,7 +150,6 @@ pub enum PrimitiveType {
     F64x4,
     Char,
     Bool,
-    Void,
     EntityRef,
 }
 
@@ -169,6 +168,7 @@ pub enum AnyTypeKey {
     Polymorph(PolymorphKey),
     Generic(GenericKey),
     Morphed(MorphedKey),
+    Void,
 }
 
 #[derive(Default)]
@@ -253,7 +253,6 @@ impl PrimitiveType {
             PrimitiveType::F64x4 => "f64x4",
             PrimitiveType::Char => "char",
             PrimitiveType::Bool => "bool",
-            PrimitiveType::Void => "()",
             PrimitiveType::EntityRef => "entity",
         }
     }
@@ -311,10 +310,6 @@ impl PrimitiveType {
             }),
             PrimitiveType::Char => ConstValue::Char(0 as char),
             PrimitiveType::Bool => ConstValue::Bool(false),
-            PrimitiveType::Void => ConstValue::Tuple {
-                elements: Vec::with_capacity(0),
-                ty: AnyTypeKey::Primitive(PrimitiveType::Void),
-            },
             PrimitiveType::F32x2 => todo!(),
             PrimitiveType::F64x2 => todo!(),
             PrimitiveType::F32x4 => todo!(),
@@ -622,7 +617,7 @@ impl AnyTypeKey {
         substitutions: &Vec<(GenericKey, AnyTypeKey)>,
     ) -> Result<AnyTypeKey, Errors> {
         Ok(match *self {
-            AnyTypeKey::Primitive(_) | AnyTypeKey::Enum(_) => *self,
+            AnyTypeKey::Primitive(_) | AnyTypeKey::Enum(_) | AnyTypeKey::Void => *self,
             AnyTypeKey::Generic(key) => match substitutions.iter().find(|(k, _)| k.eq(&key)) {
                 Some((_, s)) => dbg!(*s), // TODO: add constraint checks etc
                 None => *self,
@@ -725,6 +720,7 @@ impl AnyTypeKey {
             AnyTypeKey::Trait(key) => Cow::Owned(types.traits.get_unchecked(key).stringify()),
             AnyTypeKey::ModuleRef(key) => Cow::Owned(types.modules.get_unchecked(key).stringify()),
             AnyTypeKey::Named(key) => Cow::Owned(types.named.get_unchecked(key).stringify(types)),
+            AnyTypeKey::Void => Cow::Borrowed("()"),
         }
     }
 }

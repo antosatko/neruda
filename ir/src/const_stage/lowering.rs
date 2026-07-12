@@ -3,6 +3,7 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use arena::Key;
+use arena_scope::ScopeKey;
 use smol_str::SmolStr;
 
 use crate::ast::{
@@ -1351,6 +1352,13 @@ impl ast::Type {
         let ref_type = (0..*refs.inner).fold(type_val, |a, _| {
             AnyTypeKey::Reference(ctx.types.references.push_unique(RefType { inner: a }))
         });
+        ref_type
+            .substitute_many(&mut ctx.types)
+            .map_err(|inner| Error {
+                inner,
+                module,
+                span: self.literal.location,
+            })?;
         Ok(ref_type)
     }
 }
@@ -1402,10 +1410,10 @@ pub fn apply_generic_arguments(
     generic_arguments: &Option<Span<Vec<Span<Type>>>>,
     generics: Key<arena_scope::ArenaTag>,
     ty: AnyTypeKey,
-) -> Result<(AnyTypeKey, Vec<(GenericKey, AnyTypeKey)>), Diagnostic<Errors>> {
+) -> Result<(AnyTypeKey, Option<ScopeKey>), Diagnostic<Errors>> {
     let gen_args: &Vec<_> = match generic_arguments {
         Some(generic_arguments) => generic_arguments.deref(),
-        None => return Ok((ty, Vec::with_capacity(0))),
+        None => return Ok((ty, None)),
     };
 
     let generics = ctx
@@ -1429,14 +1437,14 @@ pub fn apply_generic_arguments(
         });
     }
 
-    let substitutions = generics
-        .iter()
-        .zip(gen_args)
-        .map(|((_, constraint), arg)| {
-            let substitution = arg.lower(ctx, module)?;
-            Ok((*constraint, substitution))
-        })
-        .collect::<Result<Vec<_>, Error>>()?;
+    ctx.types.substitutions.dirty.push();
+    for ((_, constraint), arg) in generics.iter().zip(gen_args) {
+        let substitution = arg.lower(ctx, module)?;
+        ctx.types
+            .substitutions
+            .dirty
+            .insert(*constraint, substitution);
+    }
 
     let span = gen_args
         .first()
@@ -1448,6 +1456,7 @@ pub fn apply_generic_arguments(
         module,
         span,
     })?;
+    let subs = ctx.types.substitutions.dirty.pop();
 
-    Ok((new, substitutions))
+    Ok((new, Some(subs)))
 }

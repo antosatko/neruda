@@ -37,15 +37,8 @@ impl Context {
     ) -> Result<FunctionIrKey, Error> {
         let fun = self.objects.functions.get_unchecked(key);
         let mod_key = fun.module;
-        let (ty, substitutions) = apply_generic_arguments(
-            self,
-            mod_key,
-            SpanIndex::default(),
-            generic_arguments,
-            *fun.data.generic_scope.get_done(),
-            AnyTypeKey::Function(*fun.data.type_of.get_done()),
-        )?;
         let backup_ir = FunctionIr::new_polymorphic(self, *key, generic_arguments)?;
+        let ty = backup_ir.type_of.unwrap();
         dbg!("creating probably redundant ir");
         let fun = self.objects.functions.get_mut_unchecked(key);
         let ir_key = match &mut fun.data.ir {
@@ -73,6 +66,11 @@ impl Context {
             source: *key,
             control_stack: Vec::new(),
         };
+        let ir = self.ir_cache.get_mut_unchecked(&ir_key);
+        match ir.substitutions {
+            Some(s) => self.types.substitutions.dirty.restore(s),
+            None => (),
+        }
 
         match self
             .ast
@@ -758,7 +756,7 @@ impl FunctionIr {
             variables,
             void,
             parameters,
-            substitutions: Vec::with_capacity(0),
+            substitutions: None,
         }
     }
 

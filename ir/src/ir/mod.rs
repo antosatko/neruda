@@ -11,7 +11,7 @@ use crate::{
     ast::{ConstValue, Operator, Span, UnaryOp},
     const_stage::{
         objects::{AnyObjectKey, FunctionObjKey},
-        types::AnyTypeKey,
+        types::{AnyTypeKey, ConstraintKey, GenericKey},
     },
 };
 
@@ -65,6 +65,7 @@ pub struct FunctionIr {
     pub values: Arena<Value, ValueTag>,
     pub blocks: Stack<BasicBlock>,
     pub blocks_entry: StackKey,
+    pub substitutions: Vec<(GenericKey, AnyTypeKey)>,
     pub void: ValueKey,
     pub returns: Option<AnyTypeKey>,
     pub parameters: Vec<(SmolStr, VariableKey)>,

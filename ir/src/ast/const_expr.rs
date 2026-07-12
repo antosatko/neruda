@@ -112,10 +112,14 @@ impl Expression {
 }
 
 impl ConstValue {
-    pub fn implicit_cast(&self, ctx: &Context, target: AnyTypeKey) -> Result<ConstValue, Errors> {
+    pub fn implicit_cast(
+        &self,
+        ctx: &mut Context,
+        target: AnyTypeKey,
+    ) -> Result<ConstValue, Errors> {
         let typeof_self = self.type_of();
         let type_check_err = match self.type_of() {
-            Ok(typeof_self) => match typeof_self.check(&ctx.types, &target) {
+            Ok(typeof_self) => match typeof_self.check(&mut ctx.types, &target) {
                 Ok(_) => return Ok(self.clone()),
                 Err(e) => e,
             },
@@ -124,7 +128,7 @@ impl ConstValue {
                     (ConstValue::Structure { ty: None, fields }, target) => {
                         let target = target.unwrap_full(&ctx.types);
                         let target_struct = match &target {
-                            AnyTypeKey::Struct(t) => ctx.types.structures.get_unchecked(t),
+                            AnyTypeKey::Struct(t) => ctx.types.structures.get_unchecked(t).clone(),
                             _ => Err(Errors::FailedImplicitCast {
                                 from: typeof_self?,
                                 to: target,

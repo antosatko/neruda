@@ -15,7 +15,7 @@ use crate::const_stage::objects::{
     TypeAliasObj, TypeAliasObjKey,
 };
 use crate::const_stage::types::{
-    AnyTypeKey, ArrayType, EnumType, FunctionType, ModuleKey, ModuleTag, PolymorphType,
+    AnyTypeKey, ArrayType, EnumType, FunctionType, GenericKey, ModuleKey, ModuleTag, PolymorphType,
     PrimitiveType, RefType, StructType, TraitType, TupleType,
 };
 use crate::const_stage::{Context, Diagnostic, Error, Errors};
@@ -558,7 +558,7 @@ impl Context {
                             .collect(),
                         returns: *fun.data.return_type.get_done(),
                     };
-                    let type_of = AnyTypeKey::Function(self.types.functions.push_unique(type_of));
+                    let type_of = self.types.functions.push_unique(type_of);
                     fun.data.type_of = InitState::Done(type_of);
 
                     match &fun.data.ir {
@@ -1266,18 +1266,6 @@ impl ast::Type {
                                     }
                                 };
 
-                                let ty = value.type_of().map_err(|e| Error {
-                                    inner: e,
-                                    module: module,
-                                    span: expr.location,
-                                })?;
-
-                                ty.check(&ctx.types, &repr).map_err(|e| Error {
-                                    inner: e,
-                                    module,
-                                    span: expr.location,
-                                })?;
-
                                 value
                             }
                             None => match step {
@@ -1400,6 +1388,7 @@ fn resolve_type_path(
                 generics,
                 ty,
             )?
+            .0
         }
 
         _ => unreachable!("all paths are expected to end with a type alias"),
@@ -1413,10 +1402,10 @@ pub fn apply_generic_arguments(
     generic_arguments: &Option<Span<Vec<Span<Type>>>>,
     generics: Key<arena_scope::ArenaTag>,
     ty: AnyTypeKey,
-) -> Result<AnyTypeKey, Diagnostic<Errors>> {
+) -> Result<(AnyTypeKey, Vec<(GenericKey, AnyTypeKey)>), Diagnostic<Errors>> {
     let gen_args: &Vec<_> = match generic_arguments {
         Some(generic_arguments) => generic_arguments.deref(),
-        None => return Ok(ty),
+        None => return Ok((ty, Vec::with_capacity(0))),
     };
 
     let generics = ctx
@@ -1454,13 +1443,11 @@ pub fn apply_generic_arguments(
         .map(|arg| arg.location)
         .unwrap_or(identifier_location);
 
-    let new = ty
-        .substitute_many(&mut ctx.types, &substitutions)
-        .map_err(|e| Error {
-            inner: e,
-            module,
-            span,
-        })?;
+    let new = ty.substitute_many(&mut ctx.types).map_err(|e| Error {
+        inner: e,
+        module,
+        span,
+    })?;
 
-    Ok(new)
+    Ok((new, substitutions))
 }

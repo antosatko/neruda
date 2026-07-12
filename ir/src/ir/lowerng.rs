@@ -37,13 +37,13 @@ impl Context {
     ) -> Result<FunctionIrKey, Error> {
         let fun = self.objects.functions.get_unchecked(key);
         let mod_key = fun.module;
-        let ty = apply_generic_arguments(
+        let (ty, substitutions) = apply_generic_arguments(
             self,
             mod_key,
             SpanIndex::default(),
             generic_arguments,
             *fun.data.generic_scope.get_done(),
-            *fun.data.type_of.get_done(),
+            AnyTypeKey::Function(*fun.data.type_of.get_done()),
         )?;
         let backup_ir = FunctionIr::new_polymorphic(self, *key, generic_arguments)?;
         dbg!("creating probably redundant ir");
@@ -373,13 +373,13 @@ impl Context {
                                 (AnyObjectKey::Function(fun_key), Some(_)) => {
                                     let fun = self.objects.functions.get_unchecked(&fun_key);
 
-                                    let concrete_ty = apply_generic_arguments(
+                                    let (concrete_ty, subs) = apply_generic_arguments(
                                         self,
                                         module,
                                         ident.path.location,
                                         generics,
                                         *fun.data.generic_scope.get_done(),
-                                        *fun.data.type_of.get_done(),
+                                        AnyTypeKey::Function(*fun.data.type_of.get_done()),
                                     )?;
 
                                     let fun = self.objects.functions.get_unchecked(&fun_key);
@@ -538,6 +538,34 @@ impl Context {
                                 );
                                 Addr::Value(dst)
                             }
+                            Addr::UnresolvedFunction(fun_key) => {
+                                let obj = self.objects.functions.get_unchecked(&fun_key);
+                                let generics = obj.data.generics.clone();
+                                let signature = *obj.data.type_of.get_done();
+                                let params = self
+                                    .types
+                                    .functions
+                                    .get_unchecked(&signature)
+                                    .parameters
+                                    .clone();
+                                let returns =
+                                    self.types.functions.get_unchecked(&signature).returns;
+                                let mut arg_values = Vec::with_capacity(arguments.capacity());
+                                for (expr, expect) in arguments.iter().zip(params) {
+                                    let addr =
+                                        self.lower_expression(ir, block_ctx, expr, &Some(expect))?;
+                                    let val = self.load_addr(
+                                        ir,
+                                        block_ctx,
+                                        addr,
+                                        &Some(expect),
+                                        expr.location,
+                                    )?;
+                                    arg_values.push(val);
+                                }
+
+                                todo!()
+                            }
                             _ => {
                                 let val =
                                     self.load_addr(ir, block_ctx, addr, &None, op.location)?;
@@ -557,7 +585,8 @@ impl Context {
                         module,
                         span: val.location,
                     })?;
-                    ty.check(&self.types, expect).map_err(|inner| Error {
+                    let ir = self.ir_cache.get_mut_unchecked(ir);
+                    ty.check(&mut self.types, expect).map_err(|inner| Error {
                         inner,
                         module,
                         span: val.location,
@@ -586,7 +615,7 @@ impl Context {
                 let ir = self.ir_cache.get_mut_unchecked(ir);
                 let ty = ir.variables.get_unchecked(&key).ty;
                 if let Some(expect) = expect {
-                    ty.check(&self.types, expect).map_err(|inner| Error {
+                    ty.check(&mut self.types, expect).map_err(|inner| Error {
                         inner,
                         module,
                         span,
@@ -609,7 +638,8 @@ impl Context {
                 })?;
                 match expect {
                     Some(expect) => {
-                        ty.check(&self.types, expect).map_err(|inner| Error {
+                        let ir = self.ir_cache.get_mut_unchecked(ir);
+                        ty.check(&mut self.types, expect).map_err(|inner| Error {
                             inner,
                             module,
                             span,
@@ -649,7 +679,7 @@ impl Context {
                 let ir = self.ir_cache.get_mut_unchecked(ir);
                 let ty = ir.values.get_unchecked(&val).ty;
                 if let Some(expect) = expect {
-                    ty.check(&self.types, expect).map_err(|inner| Error {
+                    ty.check(&mut self.types, expect).map_err(|inner| Error {
                         inner,
                         module,
                         span,
@@ -728,6 +758,7 @@ impl FunctionIr {
             variables,
             void,
             parameters,
+            substitutions: Vec::with_capacity(0),
         }
     }
 
@@ -747,24 +778,24 @@ impl FunctionIr {
         let fun = ctx.objects.functions.get_unchecked(&fun_key);
         let module = fun.module;
         let generics = *fun.data.generic_scope.get_done();
-        let type_of = apply_generic_arguments(
+        let (type_of, substitutions) = apply_generic_arguments(
             ctx,
             module,
             SpanIndex::default(),
             generic_arguments,
             generics,
-            *fun.data.type_of.get_done(),
+            AnyTypeKey::Function(*fun.data.type_of.get_done()),
         )?;
         let fun = ctx.objects.functions.get_unchecked(&fun_key);
         for (ident, ty) in fun.data.params.clone() {
-            let ty = apply_generic_arguments(
-                ctx,
-                module,
-                SpanIndex::default(),
-                generic_arguments,
-                generics,
-                *ty.get_done(),
-            )?;
+            let ty = ty
+                .get_done()
+                .substitute_many(&mut ctx.types)
+                .map_err(|inner| Error {
+                    inner,
+                    module,
+                    span: ident.location,
+                })?;
             let value = values.push(Value { ty });
             let variable = Variable {
                 identifier: ident.clone(),
@@ -777,14 +808,18 @@ impl FunctionIr {
             parameters.push((ident.deref().clone(), variable));
         }
         let fun = ctx.objects.functions.get_unchecked(&fun_key);
-        let returns = Some(apply_generic_arguments(
-            ctx,
-            module,
-            SpanIndex::default(),
-            generic_arguments,
-            generics,
-            *fun.data.return_type.get_done(),
-        )?);
+        let returns = Some(
+            fun.data
+                .return_type
+                .get_done()
+                .substitute_many(&mut ctx.types)
+                .map_err(|inner| Error {
+                    inner,
+                    module,
+                    span: todo!("mensi zmeny mozna?"),
+                })?,
+        );
+        dbg!(&substitutions);
 
         Ok(FunctionIr {
             source: None,
@@ -796,6 +831,7 @@ impl FunctionIr {
             variables,
             void,
             parameters,
+            substitutions,
         })
     }
 
@@ -816,7 +852,7 @@ impl FunctionIr {
         }
         self.parameters = parameters;
         self.source = Some(fun_key);
-        self.type_of = Some(*fun.data.type_of.get_done());
+        self.type_of = Some(AnyTypeKey::Function(*fun.data.type_of.get_done()));
         self.returns = Some(*fun.data.return_type.get_done());
     }
 }
@@ -863,13 +899,14 @@ impl Addr {
                 let ir = ctx.ir_cache.get_unchecked(ir_key);
                 Ok(ir.type_of.unwrap())
             }
-            Addr::UnresolvedFunction(fun_key) => Ok(*ctx
-                .objects
-                .functions
-                .get_unchecked(fun_key)
-                .data
-                .type_of
-                .get_done()),
+            Addr::UnresolvedFunction(fun_key) => Ok(AnyTypeKey::Function(
+                *ctx.objects
+                    .functions
+                    .get_unchecked(fun_key)
+                    .data
+                    .type_of
+                    .get_done(),
+            )),
         }
     }
 }

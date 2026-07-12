@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 
 use arena::{Arena, Key};
+use arena_scope::ScopeTree;
 use smol_str::{SmolStr, ToSmolStr};
 
 use crate::{
@@ -186,6 +187,13 @@ pub struct Types {
     pub references: RefArena,
     pub modules: ModuleArena,
     pub named: NamedTypeArena,
+    pub substitutions: Substitutions,
+}
+
+#[derive(Debug, Default)]
+pub struct Substitutions {
+    pub stack: ScopeTree<GenericKey, AnyTypeKey>,
+    pub dirty: ScopeTree<GenericKey, AnyTypeKey>,
 }
 
 pub struct AutoTypes {
@@ -543,15 +551,18 @@ impl GenericType {
 
 impl AnyTypeKey {
     #[must_use]
-    pub fn check(&self, types: &Types, expect: &Self) -> Result<(), Errors> {
+    pub fn check(&self, types: &mut Types, expect: &Self) -> Result<(), Errors> {
+        self.substitute_many(types)?;
         let equals = match (expect, self) {
             (a, b) if a == b => return Ok(()),
             (AnyTypeKey::Array(exp), AnyTypeKey::Array(got)) => {
                 let exp_unwrap = types.arrays.get_unchecked(exp);
+                let exp_elem_type = exp_unwrap.element_type;
                 let got_unwrap = types.arrays.get_unchecked(got);
-                got_unwrap
-                    .element_type
-                    .check(types, &exp_unwrap.element_type)?;
+                let got_unwrap_type = got_unwrap.element_type;
+                got_unwrap_type.check(types, &exp_elem_type)?;
+                let exp_unwrap = types.arrays.get_unchecked(exp);
+                let got_unwrap = types.arrays.get_unchecked(got);
                 match (exp_unwrap.size, got_unwrap.size) {
                     (None, _) => true,
                     (Some(exp), Some(got)) => (exp == got)
@@ -572,15 +583,22 @@ impl AnyTypeKey {
                 got_unwrap.check(types, &exp_unwrap).map(|_| true)?
             }
             (AnyTypeKey::Struct(exp), AnyTypeKey::Struct(got)) => {
-                let exp = types.structures.get_unchecked(exp);
-                let got = types.structures.get_unchecked(got);
+                let exp = types.structures.get_unchecked(exp).clone();
+                let got = types.structures.get_unchecked(got).clone();
                 exp.parameters
                     .iter()
                     .map(|(ident, ty, _)| (ident, ty))
                     .zip(got.parameters.iter().map(|(ident, ty, _)| (ident, ty)))
                     .all(|(exp, got)| exp.0 == got.0 && exp.1.check(types, got.1).is_ok())
             }
-
+            (AnyTypeKey::Generic(expect), got) => {
+                let constr_key = types.generics.get_unchecked(expect).constraint;
+                for constr in &types.constraints.get_unchecked(&constr_key).constraints {
+                    todo!("yah we need to do figure some things out")
+                }
+                types.substitutions.dirty.insert(*expect, *got);
+                true
+            }
             _ => false,
         };
         match equals {
@@ -611,36 +629,34 @@ impl AnyTypeKey {
         this
     }
 
-    pub fn substitute_many(
-        &self,
-        types: &mut Types,
-        substitutions: &Vec<(GenericKey, AnyTypeKey)>,
-    ) -> Result<AnyTypeKey, Errors> {
+    pub fn substitute_many(&self, types: &mut Types) -> Result<AnyTypeKey, Errors> {
         Ok(match *self {
             AnyTypeKey::Primitive(_) | AnyTypeKey::Enum(_) | AnyTypeKey::Void => *self,
-            AnyTypeKey::Generic(key) => match substitutions.iter().find(|(k, _)| k.eq(&key)) {
-                Some((_, s)) => dbg!(*s), // TODO: add constraint checks etc
+            AnyTypeKey::Generic(key) => match types.substitutions.get(&key) {
+                Some(s) => {
+                    dbg!(*s)
+                } // TODO: add constraint checks etc
                 None => *self,
             },
             AnyTypeKey::Function(key) => {
                 let mut this = types.functions.get_unchecked(&key).clone();
                 for param in &mut this.parameters {
-                    *param = param.substitute_many(types, substitutions)?;
+                    *param = param.substitute_many(types)?;
                 }
-                this.returns = this.returns.substitute_many(types, substitutions)?;
+                this.returns = this.returns.substitute_many(types)?;
                 let ty_key = types.functions.push_unique(this);
                 AnyTypeKey::Function(ty_key)
             }
             AnyTypeKey::Array(key) => {
                 let mut this = types.arrays.get_unchecked(&key).clone();
-                this.element_type = this.element_type.substitute_many(types, substitutions)?;
+                this.element_type = this.element_type.substitute_many(types)?;
                 let ty_key = types.arrays.push_unique(this);
                 AnyTypeKey::Array(ty_key)
             }
             AnyTypeKey::Tuple(key) => {
                 let mut this = types.tuples.get_unchecked(&key).clone();
                 for param in &mut this.parameters {
-                    *param = param.substitute_many(types, substitutions)?;
+                    *param = param.substitute_many(types)?;
                 }
                 let ty_key = types.tuples.push_unique(this);
                 AnyTypeKey::Tuple(ty_key)
@@ -648,7 +664,7 @@ impl AnyTypeKey {
             AnyTypeKey::Struct(key) => {
                 let mut this = types.structures.get_unchecked(&key).clone();
                 for (_, ty, _) in &mut this.parameters {
-                    *ty = ty.substitute_many(types, substitutions)?;
+                    *ty = ty.substitute_many(types)?;
                 }
                 let this_key = types.structures.push_unique(this);
                 AnyTypeKey::Struct(this_key)
@@ -656,28 +672,28 @@ impl AnyTypeKey {
 
             AnyTypeKey::Named(key) => {
                 let mut this = types.named.get_unchecked(&key).clone();
-                this.repr = this.repr.substitute_many(types, substitutions)?;
+                this.repr = this.repr.substitute_many(types)?;
                 let this_key = types.named.push_unique(this);
                 AnyTypeKey::Named(this_key)
             }
 
             AnyTypeKey::Morphed(key) => {
                 let this = types.morphs.get_unchecked(&key).this;
-                this.substitute_many(types, substitutions)?
+                this.substitute_many(types)?
             }
             AnyTypeKey::Reference(key) => {
                 let mut this = types.references.get_unchecked(&key).clone();
-                this.inner = this.inner.substitute_many(types, substitutions)?;
+                this.inner = this.inner.substitute_many(types)?;
                 let this_key = types.references.push_unique(this);
                 AnyTypeKey::Reference(this_key)
             }
             AnyTypeKey::Polymorph(key) => {
                 let this = types.polymorphs.get_unchecked(&key);
 
-                let inner = this.inner.clone().substitute_many(types, substitutions)?;
+                let inner = this.inner.clone().substitute_many(types)?;
 
                 let morphed = MorphedType {
-                    arguments: substitutions.iter().map(|(_, ty)| *ty).collect(),
+                    arguments: dbg!(Vec::with_capacity(0)),
                     parent: key,
                     this: inner,
                 };
@@ -722,5 +738,11 @@ impl AnyTypeKey {
             AnyTypeKey::Named(key) => Cow::Owned(types.named.get_unchecked(key).stringify(types)),
             AnyTypeKey::Void => Cow::Borrowed("()"),
         }
+    }
+}
+
+impl Substitutions {
+    pub fn get(&self, generic: &GenericKey) -> Option<&AnyTypeKey> {
+        self.dirty.get(generic).or(self.stack.get(generic))
     }
 }

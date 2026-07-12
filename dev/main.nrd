@@ -51,6 +51,9 @@ system orbit(
 
 function foo<T>(v: T): T => v
 function bar(v: i32): i32 => v
+function baz<T>() {
+    var a: T
+}
 
 function nevimco(in: i32): i32 {
     var _: function(a: A): A = foo<A>
@@ -59,6 +62,7 @@ function nevimco(in: i32): i32 {
     var _ = a.&.&.&.&.*
     var ref = a.&
     var five = foo<i32>(bar(bar(ref.*)))
+    baz<f32>()
 
     return 6 + a + in / five / five
 }

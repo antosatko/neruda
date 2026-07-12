@@ -8,7 +8,7 @@ use crate::{
     ast::{self, AccessModifiers, ConstValue, Span},
     const_stage::{
         Context, Errors,
-        types::{AnyTypeKey, ConstraintKey, ModuleKey, NamedTypeKey, TraitKey},
+        types::{AnyTypeKey, ConstraintKey, FunctionKey, ModuleKey, NamedTypeKey, TraitKey},
     },
     ir::{FunctionIr, FunctionIrKey},
 };
@@ -98,7 +98,7 @@ pub struct FunctionObj {
     pub return_type: InitState<AnyTypeKey, ()>,
     pub params: Vec<(Span<SmolStr>, InitState<AnyTypeKey, ()>)>,
     pub generics: Vec<ConstraintKey>,
-    pub type_of: InitState<AnyTypeKey, ()>,
+    pub type_of: InitState<FunctionKey, ()>,
     pub ir: IrCache,
     pub generic_scope: InitState<ScopeKey, ()>,
 }
@@ -275,13 +275,14 @@ impl AnyObjectKey {
             AnyObjectKey::Component(key) => {
                 *ctx.objects.components.get_unchecked(key).data.ty.get_done()
             }
-            AnyObjectKey::Function(key) => *ctx
-                .objects
-                .functions
-                .get_unchecked(key)
-                .data
-                .type_of
-                .get_done(),
+            AnyObjectKey::Function(key) => AnyTypeKey::Function(
+                *ctx.objects
+                    .functions
+                    .get_unchecked(key)
+                    .data
+                    .type_of
+                    .get_done(),
+            ),
             AnyObjectKey::Resource(key) => {
                 *ctx.objects.resources.get_unchecked(key).data.ty.get_done()
             }

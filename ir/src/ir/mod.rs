@@ -11,7 +11,7 @@ use crate::{
     ast::{ConstValue, Operator, Span, UnaryOp},
     const_stage::{
         objects::{AnyObjectKey, FunctionObjKey},
-        types::{AnyTypeKey, ConstraintKey, GenericKey},
+        types::AnyTypeKey,
     },
 };
 
@@ -73,7 +73,7 @@ pub struct FunctionIr {
 
 #[derive(Debug, Clone, Default)]
 pub struct BasicBlock {
-    pub instructions: Vec<Instruction>,
+    pub instructions: Vec<Span<Instruction>>,
     pub terminator: Option<Terminator>,
 }
 

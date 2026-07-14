@@ -1,7 +1,7 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, ops::Deref};
 
 use crate::{
-    ast::{ConstValue, Operator, UnaryOp},
+    ast::{ConstValue, Operator, Span, UnaryOp},
     ir::{
         FunctionIr, FunctionIrArena, FunctionIrKey, Instruction, Terminator, ValueKey, VariableKey,
     },
@@ -94,7 +94,7 @@ impl Interpreter {
 
                 Some(Terminator::Unreachable) => return Err("Reached unreachable".into()),
 
-                None => return Err("Missing terminator".into()),
+                None => return dbg!(Ok(InterpreterValue::Unit)),
             }
         }
     }
@@ -102,13 +102,13 @@ impl Interpreter {
     fn execute_instruction(
         &self,
         frame: &mut Frame,
-        instruction: Instruction,
+        instruction: Span<Instruction>,
     ) -> Result<(), String> {
-        match instruction {
+        match instruction.deref() {
             Instruction::LoadConst { src, dst } => {
                 frame
                     .values
-                    .insert(dst, InterpreterValue::from_const_value(&src));
+                    .insert(*dst, InterpreterValue::from_const_value(&src));
             }
 
             Instruction::LoadVar { src, dst } => {
@@ -118,30 +118,30 @@ impl Interpreter {
                     .cloned()
                     .ok_or_else(|| format!("uninitialized variable {:?}", src))?;
 
-                frame.values.insert(dst, value);
+                frame.values.insert(*dst, value);
             }
 
             Instruction::StoreVar { dst, src } => {
-                let value = frame.get_value(src)?;
+                let value = frame.get_value(*src)?;
 
-                frame.variables.insert(dst, value);
+                frame.variables.insert(*dst, value);
             }
 
             Instruction::BinOp { op, l, r, dst } => {
-                let left = frame.get_value(l)?;
-                let right = frame.get_value(r)?;
+                let left = frame.get_value(*l)?;
+                let right = frame.get_value(*r)?;
 
                 let result = evaluate_binary_op(&op, &left, &right)?;
 
-                frame.values.insert(dst, result);
+                frame.values.insert(*dst, result);
             }
 
             Instruction::UnaryOp { op, src, dst } => {
-                let value = frame.get_value(src)?;
+                let value = frame.get_value(*src)?;
 
                 let result = evaluate_unary_op(&op, &value)?;
 
-                frame.values.insert(dst, result);
+                frame.values.insert(*dst, result);
             }
 
             Instruction::Call {
@@ -151,7 +151,7 @@ impl Interpreter {
             } => {
                 let args = arguments
                     .into_iter()
-                    .map(|x| frame.get_value(x))
+                    .map(|x| frame.get_value(*x))
                     .collect::<Result<Vec<_>, _>>()?;
 
                 let function = self.functions.get_unchecked(&fun);
@@ -164,23 +164,23 @@ impl Interpreter {
 
                 let returned = self.execute_function(function, &mut child)?;
 
-                frame.values.insert(result, returned);
+                frame.values.insert(*result, returned);
             }
 
             Instruction::AddressOfVar { var, dst } => {
                 frame
                     .values
-                    .insert(dst, InterpreterValue::Pointer(Pointer::Variable(var)));
+                    .insert(*dst, InterpreterValue::Pointer(Pointer::Variable(*var)));
             }
 
             Instruction::AddressOfVal { val, dst } => {
                 frame
                     .values
-                    .insert(dst, InterpreterValue::Pointer(Pointer::Value(val)));
+                    .insert(*dst, InterpreterValue::Pointer(Pointer::Value(*val)));
             }
 
             Instruction::Deref { src, dst } => {
-                let pointer = frame.get_value(src)?;
+                let pointer = frame.get_value(*src)?;
 
                 let value = match pointer {
                     InterpreterValue::Pointer(Pointer::Variable(variable)) => frame
@@ -200,13 +200,13 @@ impl Interpreter {
 
                 println!("Val: {value:?}");
 
-                frame.values.insert(dst, value);
+                frame.values.insert(*dst, value);
             }
 
             Instruction::AddressOfObj { .. } => return Err("objects not implemented".into()),
 
             Instruction::AddressOfFun { fun, dst } => {
-                frame.values.insert(dst, InterpreterValue::Function(fun));
+                frame.values.insert(*dst, InterpreterValue::Function(*fun));
             }
         }
 
@@ -264,7 +264,7 @@ impl InterpreterValue {
         match value {
             ConstValue::Number(number) => match number.value {
                 crate::ast::NumberValue::Any(v) => Self::Number(v as i64),
-
+                crate::ast::NumberValue::Float(v) => Self::Float(v),
                 _ => todo!("add number variants"),
             },
 

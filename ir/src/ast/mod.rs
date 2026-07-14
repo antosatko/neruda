@@ -76,11 +76,11 @@ impl<T> Span<T> {
         Self { inner, location }
     }
 
-    pub fn map<U, F>(self, f: F) -> Span<U>
+    pub fn map<U, F>(&self, f: F) -> Span<U>
     where
         F: FnOnce(Arc<T>) -> U,
     {
-        Span::new(f(self.inner), self.location)
+        Span::new(f(self.inner.clone()), self.location)
     }
 }
 

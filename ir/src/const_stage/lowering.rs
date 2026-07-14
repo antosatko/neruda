@@ -1352,14 +1352,14 @@ impl ast::Type {
         let ref_type = (0..*refs.inner).fold(type_val, |a, _| {
             AnyTypeKey::Reference(ctx.types.references.push_unique(RefType { inner: a }))
         });
-        ref_type
+        let final_type = ref_type
             .substitute_many(&mut ctx.types)
             .map_err(|inner| Error {
                 inner,
                 module,
                 span: self.literal.location,
             })?;
-        Ok(ref_type)
+        Ok(final_type)
     }
 }
 

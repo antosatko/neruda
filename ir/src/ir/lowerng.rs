@@ -58,6 +58,10 @@ impl Context {
             _ => unreachable!("yup its just like that"),
         };
         let fun = self.objects.functions.get_unchecked(key);
+        let ast_obj = match &fun.ast_object {
+            Some(o) => o,
+            None => return Ok(ir_key),
+        };
         self.generic_ctx.restore(*fun.data.generic_scope.get_done());
         let module = self.types.modules.get_unchecked(&mod_key);
 
@@ -77,7 +81,7 @@ impl Context {
             .get(&module.path)
             .unwrap()
             .objects
-            .get_unchecked(&fun.ast_object)
+            .get_unchecked(ast_obj)
             .clone()
             .deref()
         {
@@ -838,7 +842,7 @@ impl FunctionIr {
                     span: todo!("mensi zmeny mozna?"),
                 })?,
         );
-        ctx.types.substitutions.dirty.pop();
+        // ctx.types.substitutions.dirty.pop();
         dbg!(&substitutions);
 
         Ok(FunctionIr {

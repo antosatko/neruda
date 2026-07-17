@@ -1,4 +1,4 @@
-use std::borrow::Cow;
+use std::{borrow::Cow, collections::HashMap};
 
 use arena::{Arena, Key};
 use arena_scope::ScopeTree;
@@ -6,7 +6,11 @@ use smol_str::{SmolStr, ToSmolStr};
 
 use crate::{
     ast::{ConstValue, Number, NumberValue},
-    const_stage::{Errors, objects::Module},
+    const_stage::{
+        Errors,
+        objects::{AnyObjectKey, ConstObjKey, FunctionObjKey, InitState, Module},
+    },
+    ir::FunctionIrKey,
 };
 
 pub type FunctionArena = Arena<FunctionType, FunctionTag>;
@@ -45,6 +49,7 @@ pub struct TraitTag;
 #[derive(PartialEq, Debug, Clone)]
 pub struct TraitType {
     pub ident: SmolStr,
+    pub methods: HashMap<SmolStr, InitState<FunctionKey, ()>>,
 }
 
 pub type StructArena = Arena<StructType, StructTag>;
@@ -188,6 +193,57 @@ pub struct Types {
     pub modules: ModuleArena,
     pub named: NamedTypeArena,
     pub substitutions: Substitutions,
+    pub implementations: Implementations,
+}
+
+type IdentMap<T> = HashMap<SmolStr, T>;
+
+#[derive(Debug, Default)]
+pub struct Implementations {
+    pub concrete: HashMap<AnyTypeKey, IdentMap<AnyObjectKey>>,
+    pub generic_methods: HashMap<PolymorphKey, IdentMap<FunctionObjKey>>,
+}
+
+impl Types {
+    pub fn get_impl(&self, ty: AnyTypeKey, ident: SmolStr) -> Result<AnyObjectKey, Errors> {
+        // Attribute err to whole object path?
+        const ERR: Result<AnyObjectKey, Errors> = Err(Errors::Undefined("Object undefined"));
+
+        match self.implementations.concrete.get(&ty) {
+            Some(map) => match map.get(&ident) {
+                Some(obj) => Ok(*obj),
+                None => ERR,
+            },
+            None => match ty.unwrap(self) {
+                Some(ty) => self.get_impl(ty, ident),
+                None => ERR,
+            },
+        }
+    }
+}
+
+impl Implementations {
+    pub fn insert_obj(
+        &mut self,
+        ty: AnyTypeKey,
+        ident: SmolStr,
+        obj: AnyObjectKey,
+    ) -> Result<(), Errors> {
+        match self.concrete.get_mut(&ty) {
+            Some(map) => match map.get(&ident) {
+                Some(_) => Err(Errors::DuplicateIdentifier(ident)),
+                None => {
+                    map.insert(ident, obj);
+                    Ok(())
+                }
+            },
+            None => {
+                let map = HashMap::from([(ident, obj)]);
+                self.concrete.insert(ty, map);
+                Ok(())
+            }
+        }
+    }
 }
 
 #[derive(Debug, Default)]
@@ -205,6 +261,7 @@ impl AutoTypes {
     pub fn new(types: &mut Types) -> Self {
         let any_trt = types.traits.push(TraitType {
             ident: "Any".to_smolstr(),
+            methods: HashMap::with_capacity(0),
         });
         Self {
             any_conr: types.constraints.push(ConstraintType {

@@ -16,8 +16,8 @@ use crate::const_stage::objects::{
     TypeAliasObj, TypeAliasObjKey,
 };
 use crate::const_stage::types::{
-    AnyTypeKey, ArrayType, EnumType, FunctionType, GenericKey, ModuleKey, ModuleTag, PolymorphType,
-    PrimitiveType, RefType, StructType, TraitType, TupleType,
+    AnyTypeKey, ArrayType, EnumType, FunctionType, GenericKey, ModuleKey, ModuleTag, NamedTypeType,
+    PolymorphType, PrimitiveType, RefType, StructType, TraitType, TupleType,
 };
 use crate::const_stage::{Context, Diagnostic, Error, Errors};
 use crate::ir::FunctionIr;
@@ -81,7 +81,7 @@ impl Context {
                         let obj = AnyObject::new(
                             ident.clone(),
                             obj,
-                            obj_key,
+                            Some(obj_key),
                             *module_key,
                             access.modifier,
                         );
@@ -108,7 +108,7 @@ impl Context {
                             },
                             access: access.modifier,
                             identifier: ident.deref().clone(),
-                            ast_object: obj_key,
+                            ast_object: Some(obj_key),
                             module: *module_key,
                         })),
                     ),
@@ -129,7 +129,7 @@ impl Context {
                             },
                             access: access.modifier,
                             identifier: ident.inner.as_ref().clone(),
-                            ast_object: obj_key,
+                            ast_object: Some(obj_key),
                             module: *module_key,
                         };
                         let ir = match generics.as_ref().map(|g| g.len()).unwrap_or(0) {
@@ -154,14 +154,19 @@ impl Context {
                                 },
                                 access: access.modifier,
                                 identifier: ident.inner.as_ref().clone(),
-                                ast_object: obj_key,
+                                ast_object: Some(obj_key),
                                 module: *module_key,
                             })
                             .into(),
                     ),
                     ast::Object::TypeImpl { .. } => continue,
                     ast::Object::TraitImpl { .. } => continue,
-                    ast::Object::Trait { ident, access, .. } => (
+                    ast::Object::Trait {
+                        ident,
+                        access,
+                        methods,
+                        ..
+                    } => (
                         ident.inner.as_ref().clone(),
                         self.objects
                             .traits
@@ -169,11 +174,12 @@ impl Context {
                                 data: TraitObj {
                                     ty: InitState::Progress(self.types.traits.push(TraitType {
                                         ident: ident.inner.as_ref().clone(),
+                                        methods: HashMap::with_capacity(methods.len()),
                                     })),
                                 },
                                 access: access.modifier,
                                 identifier: ident.inner.as_ref().clone(),
-                                ast_object: obj_key,
+                                ast_object: Some(obj_key),
                                 module: *module_key,
                             })
                             .into(),
@@ -188,11 +194,10 @@ impl Context {
                                         self.types.named.empty_alloc()
                                     }),
                                     generics: InitState::Uninitialized,
-                                    constants: HashMap::new(),
                                 },
                                 access: access.modifier,
                                 identifier: ident.inner.as_ref().clone(),
-                                ast_object: obj_key,
+                                ast_object: Some(obj_key),
                                 module: *module_key,
                             })
                             .into(),
@@ -209,7 +214,7 @@ impl Context {
                                 },
                                 access: access.modifier,
                                 identifier: ident.inner.as_ref().clone(),
-                                ast_object: obj_key,
+                                ast_object: Some(obj_key),
                                 module: *module_key,
                             })
                             .into(),
@@ -286,7 +291,7 @@ impl Context {
                         data: ImportObj { module: key },
                         access: ast::AccessModifiers::Private,
                         identifier: ident.clone(),
-                        ast_object: obj_key,
+                        ast_object: Some(obj_key),
                         module: *module_key,
                     });
                     self.types
@@ -300,7 +305,7 @@ impl Context {
                         data: ImportObj { module: key },
                         access: ast::AccessModifiers::Private,
                         identifier: ident.deref().clone(),
-                        ast_object: obj_key,
+                        ast_object: Some(obj_key),
                         module: *module_key,
                     });
                     self.types
@@ -360,7 +365,7 @@ impl Context {
     }
 
     fn resolve_selector_target(
-        &self,
+        &mut self,
         module_key: Key<ModuleTag>,
         selector: &Span<ast::PathSelector>,
     ) -> Result<(PathNode, Span<SmolStr>), Diagnostic<Errors>> {
@@ -427,13 +432,17 @@ impl Context {
         let obj = self.objects.resources.get_unchecked(&resource_key);
         let mod_key = obj.module;
         let module = self.types.modules.get_unchecked(&mod_key);
+        let ast_obj = match &obj.ast_object {
+            Some(o) => o,
+            None => return Ok(self.objects.resources.get_mut_unchecked(&resource_key)),
+        };
         Ok(
             match self
                 .ast
                 .get(&module.path)
                 .unwrap()
                 .objects
-                .get_unchecked(&obj.ast_object)
+                .get_unchecked(ast_obj)
                 .clone()
                 .deref()
             {
@@ -513,13 +522,17 @@ impl Context {
         let obj = self.objects.functions.get_unchecked(&function_key);
         let mod_key = obj.module;
         let module = self.types.modules.get_unchecked(&mod_key);
+        let ast_obj = match &obj.ast_object {
+            Some(o) => o,
+            None => return Ok(self.objects.functions.get_mut_unchecked(&function_key)),
+        };
         Ok(
             match self
                 .ast
                 .get(&module.path)
                 .unwrap()
                 .objects
-                .get_unchecked(&obj.ast_object)
+                .get_unchecked(ast_obj)
                 .clone()
                 .deref()
             {
@@ -588,6 +601,10 @@ impl Context {
         let ast_key = this.ast_object;
         let mod_key = this.module;
         let module_path = &self.types.modules.get_unchecked(&mod_key).path;
+        let ast_obj = match &this.ast_object {
+            Some(o) => o,
+            None => return Ok(self.objects.components.get_mut_unchecked(&component_key)),
+        };
         Ok(
             if let ast::Object::Component {
                 ty,
@@ -599,7 +616,7 @@ impl Context {
                 .get(module_path)
                 .unwrap()
                 .objects
-                .get_unchecked(&ast_key)
+                .get_unchecked(ast_obj)
                 .clone()
                 .deref()
             {
@@ -622,9 +639,12 @@ impl Context {
         const_key: Key<super::objects::ConstObjTag>,
     ) -> Result<&mut AnyObject<ConstObj>, Diagnostic<Errors>> {
         let this = self.objects.constants.get_unchecked(&const_key);
-        let ast_key = this.ast_object;
         let mod_key = this.module;
         let module_path = &self.types.modules.get_unchecked(&mod_key).path;
+        let ast_obj = match &this.ast_object {
+            Some(o) => o,
+            None => return Ok(self.objects.constants.get_mut_unchecked(&const_key)),
+        };
         Ok(
             if let ast::Object::Const {
                 docs: _,
@@ -637,7 +657,7 @@ impl Context {
                 .get(module_path)
                 .unwrap()
                 .objects
-                .get_unchecked(&ast_key)
+                .get_unchecked(ast_obj)
                 .clone()
                 .deref()
             {
@@ -672,6 +692,17 @@ impl Context {
         let ast_key = this.ast_object;
         let mod_key = this.module;
         let module_path = &self.types.modules.get_unchecked(&mod_key).path;
+        let ast_obj = match &this.ast_object {
+            Some(o) => o,
+            None => return Ok(self.objects.types.get_mut_unchecked(&type_key)),
+        };
+        let type_obj = self
+            .ast
+            .get(module_path)
+            .unwrap()
+            .objects
+            .get_unchecked(ast_obj)
+            .clone();
         Ok(
             if let ast::Object::Type {
                 ident: _,
@@ -679,14 +710,7 @@ impl Context {
                 generics,
                 ty,
                 docs: _,
-            } = self
-                .ast
-                .get(module_path)
-                .unwrap()
-                .objects
-                .get_unchecked(&ast_key)
-                .clone()
-                .deref()
+            } = type_obj.deref()
             {
                 {
                     if self
@@ -708,44 +732,11 @@ impl Context {
                         } else {
                             unreachable!("type should already be prepared")
                         };
-                    self.types.named.get_mut_unchecked(&named_key).name = obj.identifier.clone();
+                    let name = obj.identifier.clone();
                     let key = match ty {
                         Some(t) => t.lower(self, mod_key)?,
                         _ => AnyTypeKey::Void,
                     };
-                    match &key {
-                        AnyTypeKey::Enum(enum_key) => {
-                            let ty = self.types.enums.get_unchecked(enum_key);
-                            for ident in ty
-                                .variants
-                                .iter()
-                                .map(|(ident, _)| ident.clone())
-                                .collect::<Vec<SmolStr>>()
-                            {
-                                let const_obj = AnyObject {
-                                    data: ConstObj {
-                                        ty: InitState::Done(AnyTypeKey::Enum(*enum_key)),
-                                        value: InitState::Done(ConstValue::EnumVariant {
-                                            parent: AnyTypeKey::Named(named_key),
-                                            variant: ident.clone(),
-                                        }),
-                                    },
-                                    ast_object: ast_key,
-                                    access: ast::AccessModifiers::Public,
-                                    identifier: ident.clone(),
-                                    module: mod_key,
-                                };
-                                let obj_key = self.objects.constants.push(const_obj);
-                                self.objects
-                                    .types
-                                    .get_mut_unchecked(&type_key)
-                                    .data
-                                    .constants
-                                    .insert(ident, obj_key);
-                            }
-                        }
-                        _ => (),
-                    }
                     let introduced_scope = self.generic_ctx.node(&self.generic_ctx.current());
                     let key = if !introduced_scope.values.is_empty() {
                         let parameters =
@@ -759,11 +750,16 @@ impl Context {
                     } else {
                         key
                     };
-                    self.types.named.get_mut_unchecked(&named_key).repr = key;
+                    let repr = key;
+                    unsafe {
+                        self.types
+                            .named
+                            .mem_write(&named_key, NamedTypeType { name, repr })
+                    };
                     let obj = self.objects.types.get_mut_unchecked(&type_key);
                     obj.data.ty.mark_done();
                     obj.data.generics = InitState::Done(self.generic_ctx.pop());
-                    self.objects.types.get_mut_unchecked(&type_key)
+                    obj
                 }
             } else {
                 unreachable!()
@@ -772,7 +768,7 @@ impl Context {
     }
 
     pub fn resolve_first_static_stop_of_path(
-        &self,
+        &mut self,
         stop: &Span<SmolStr>,
         mod_key: ModuleKey,
     ) -> Result<PathNode, Error> {
@@ -785,7 +781,7 @@ impl Context {
     }
 
     pub fn resolve_next_static_stop_of_path(
-        &self,
+        &mut self,
         next: &Span<SmolStr>,
         current: &PathNode,
         module: &ModuleKey,
@@ -807,20 +803,41 @@ impl Context {
                     })?,
                 }
             }
-            PathNode::Object(key) => match key {
-                AnyObjectKey::Type(type_key) => {
-                    let type_obj = self.objects.types.get_unchecked(type_key);
-                    match type_obj.data.constants.get(next.deref()) {
-                        Some(v) => return Ok(PathNode::Object(AnyObjectKey::Const(*v))),
-                        _ => Err(Error {
-                            inner: Errors::ObjectNotFound(vec![next.deref().clone()]),
-                            module: *module,
-                            span: next.location,
-                        })?,
+            PathNode::Object(key) => {
+                /*match key {
+                    AnyObjectKey::Type(type_key) => {
+                        let type_obj = self.objects.types.get_unchecked(type_key);
+                        match type_obj.data.constants.get(next.deref()) {
+                            Some(v) => return Ok(PathNode::Object(AnyObjectKey::Const(*v))),
+                            _ => Err(Error {
+                                inner: Errors::ObjectNotFound(vec![next.deref().clone()]),
+                                module: *module,
+                                span: next.location,
+                            })?,
+                        }
                     }
+                    _ => todo!(),
+                }*/
+                self.lower_object_const_stage(*key)?;
+                match key.type_of(self) {
+                    Ok(ty) => {
+                        let obj =
+                            self.types
+                                .get_impl(ty, next.deref().clone())
+                                .map_err(|inner| Error {
+                                    inner,
+                                    module: *module,
+                                    span: next.location,
+                                })?;
+                        Ok(PathNode::Object(obj))
+                    }
+                    _ => Err(Error {
+                        inner: Errors::ObjectNotFound(vec![next.deref().clone()]),
+                        module: *module,
+                        span: next.location,
+                    })?,
                 }
-                _ => todo!(),
-            },
+            }
         }
     }
 
@@ -858,24 +875,28 @@ impl Context {
                         })?,
                     }
                 }
-                PathNode::Object(obj_key) => match obj_key {
-                    AnyObjectKey::Type(type_key) => {
-                        let type_obj = self.lower_type_alias_with_key(*type_key)?;
-                        match type_obj.data.constants.get(next_stop.deref()) {
-                            Some(v) => {
-                                current_path_node = PathNode::Object(AnyObjectKey::Const(*v))
-                            }
-                            _ => Err(Diagnostic {
-                                inner: Errors::ObjectNotFound(
-                                    path[..=i].iter().map(|v| v.deref().clone()).collect(),
-                                ),
-                                span: next_stop.location,
-                                module: mod_key,
-                            })?,
+                PathNode::Object(key) => {
+                    self.lower_object_const_stage(*key)?;
+                    match key.type_of(self) {
+                        Ok(ty) => {
+                            let obj = self.types.get_impl(ty, next_stop.deref().clone()).map_err(
+                                |inner| Error {
+                                    inner,
+                                    module: mod_key,
+                                    span: next_stop.location,
+                                },
+                            )?;
+                            current_path_node = PathNode::Object(obj);
                         }
+                        _ => Err(Diagnostic {
+                            inner: Errors::ObjectNotFound(
+                                path[..=i].iter().map(|v| v.deref().clone()).collect(),
+                            ),
+                            span: next_stop.location,
+                            module: mod_key,
+                        })?,
                     }
-                    _ => todo!(),
-                },
+                }
             }
         }
         match current_path_node {
@@ -1250,14 +1271,14 @@ impl ast::Type {
                     }
                     None => None,
                 };
-                if let Some(mut last_value) = first_value {
+                if let Some(mut prev_value) = first_value {
                     for (ident, expr) in iter {
                         let value = match expr {
                             Some(expr) => {
                                 let value = match expr.const_eval(
                                     ctx,
                                     module,
-                                    &Some(last_value),
+                                    &Some(prev_value),
                                     &Some(repr),
                                 ) {
                                     ConstEvalResult::Value(v) => v,
@@ -1274,7 +1295,7 @@ impl ast::Type {
                                     match step.const_eval(
                                         ctx,
                                         module,
-                                        &Some(last_value),
+                                        &Some(prev_value),
                                         &Some(repr),
                                     ) {
                                         ConstEvalResult::Value(v) => v,
@@ -1284,7 +1305,7 @@ impl ast::Type {
                                         }
                                     }
                                 }
-                                None => last_value.autostep().map_err(|e| Error {
+                                None => prev_value.autostep().map_err(|e| Error {
                                     inner: e,
                                     module,
                                     span: ident.location,
@@ -1292,10 +1313,41 @@ impl ast::Type {
                             },
                         };
                         variants.push((ident.inner.as_ref().clone(), value.clone()));
-                        last_value = value;
+                        prev_value = value;
                     }
                 }
-                let key = ctx.types.enums.push_unique(EnumType { repr, variants });
+                let key = ctx.types.enums.push_unique(EnumType {
+                    repr,
+                    variants: variants.clone(),
+                });
+                for (ident, value) in &variants {
+                    let const_obj = AnyObject {
+                        data: ConstObj {
+                            ty: InitState::Done(AnyTypeKey::Enum(key)),
+                            value: InitState::Done(ConstValue::EnumVariant {
+                                parent: AnyTypeKey::Enum(key),
+                                variant: ident.clone(),
+                            }),
+                        },
+                        ast_object: None,
+                        access: ast::AccessModifiers::Public,
+                        identifier: ident.clone(),
+                        module,
+                    };
+                    let obj_key = ctx.objects.constants.push(const_obj);
+                    ctx.types
+                        .implementations
+                        .insert_obj(
+                            AnyTypeKey::Enum(key),
+                            ident.clone(),
+                            AnyObjectKey::Const(obj_key),
+                        )
+                        .map_err(|inner| Error {
+                            inner,
+                            module,
+                            span: literal.location,
+                        })?
+                }
                 AnyTypeKey::Enum(key)
             }
             ast::TypeLiteral::Array(span, size) => {

@@ -5,7 +5,7 @@ using algo::*
 
 pub type DrawBuffer = Vec<u32>
 
-pub type BufferType = enum: u32 {
+pub type BufferType = enum: u32{
     Front
     Back
     Count

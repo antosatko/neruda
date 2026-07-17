@@ -18,11 +18,11 @@ pub struct AnyObject<T> {
     pub data: T,
     pub access: AccessModifiers,
     pub identifier: SmolStr,
-    pub ast_object: ast::AstObjectKey,
+    pub ast_object: Option<ast::AstObjectKey>,
     pub module: ModuleKey,
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, PartialEq)]
 pub enum InitState<T, U = T> {
     Done(T),
     Progress(U),
@@ -57,7 +57,6 @@ pub type TypeAliasObjArena = Arena<AnyObject<TypeAliasObj>, TypeAliasObjTag>;
 pub struct TypeAliasObj {
     pub ty: InitState<NamedTypeKey>,
     pub generics: InitState<ScopeKey, ()>,
-    pub constants: HashMap<SmolStr, ConstObjKey>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -143,7 +142,7 @@ impl<T> AnyObject<T> {
     pub fn new(
         identifier: SmolStr,
         data: T,
-        ast_object: ast::AstObjectKey,
+        ast_object: Option<ast::AstObjectKey>,
         module: ModuleKey,
         access: AccessModifiers,
     ) -> Self {
@@ -154,21 +153,6 @@ impl<T> AnyObject<T> {
             ast_object,
             module,
         }
-    }
-
-    #[track_caller]
-    pub fn type_state_mut(&mut self) -> &mut InitState<AnyTypeKey, ()> {
-        todo!()
-    }
-
-    #[track_caller]
-    pub fn type_state_mut_eager(&mut self) -> &mut InitState<NamedTypeKey> {
-        todo!()
-    }
-
-    #[track_caller]
-    pub fn type_of(&self) -> Option<AnyTypeKey> {
-        todo!()
     }
 }
 
@@ -286,7 +270,9 @@ impl AnyObjectKey {
             AnyObjectKey::Resource(key) => {
                 *ctx.objects.resources.get_unchecked(key).data.ty.get_done()
             }
-            AnyObjectKey::Type(_) => Err(Errors::FailedTypeInfer)?,
+            AnyObjectKey::Type(ty) => {
+                AnyTypeKey::Named(*ctx.objects.types.get_unchecked(ty).data.ty.get_done())
+            }
             AnyObjectKey::Import(_) => Err(Errors::FailedTypeInfer)?,
         })
     }

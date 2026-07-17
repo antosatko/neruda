@@ -3,7 +3,6 @@ use ir::{
     const_stage::{
         Context,
         objects::{IrCache, Objects},
-        types::Types,
     },
     interpret::Interpreter,
 };
@@ -173,7 +172,7 @@ fn main() {
                         IrCache::Single(k) => *k.get_done(),
                     })
                     .unwrap();
-                let mut interpret = Interpreter::new(ir_ctx.ir_cache);
+                let interpret = Interpreter::new(ir_ctx.ir_cache);
                 interpret
                     .interpret_function(main, Vec::with_capacity(0))
                     .unwrap();

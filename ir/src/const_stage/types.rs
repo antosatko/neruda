@@ -8,9 +8,8 @@ use crate::{
     ast::{ConstValue, Number, NumberValue},
     const_stage::{
         Errors,
-        objects::{AnyObjectKey, ConstObjKey, FunctionObjKey, InitState, Module},
+        objects::{AnyObjectKey, FunctionObjKey, InitState, Module},
     },
-    ir::FunctionIrKey,
 };
 
 pub type FunctionArena = Arena<FunctionType, FunctionTag>;
@@ -650,7 +649,7 @@ impl AnyTypeKey {
             }
             (AnyTypeKey::Generic(expect), got) => {
                 let constr_key = types.generics.get_unchecked(expect).constraint;
-                for constr in &types.constraints.get_unchecked(&constr_key).constraints {
+                for _constr in &types.constraints.get_unchecked(&constr_key).constraints {
                     todo!("yah we need to do figure some things out")
                 }
                 types.substitutions.dirty.insert(*expect, *got);

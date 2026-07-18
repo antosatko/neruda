@@ -651,7 +651,7 @@ impl AnyTypeKey {
             }
             (AnyTypeKey::Generic(expect), got) => {
                 let constr_key = types.generics.get_unchecked(expect).constraint;
-                for constr in &types.constraints.get_unchecked(&constr_key).constraints {
+                for _constr in &types.constraints.get_unchecked(&constr_key).constraints {
                     todo!("yah we need to do figure some things out")
                 }
                 types.substitutions.dirty.insert(*expect, *got);

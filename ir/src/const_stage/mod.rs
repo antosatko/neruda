@@ -4,7 +4,6 @@ pub mod types;
 
 use std::{collections::HashMap, sync::Arc};
 
-use arena::Arena;
 use arena_scope::ScopeTree;
 use smol_str::SmolStr;
 
@@ -15,7 +14,7 @@ use crate::{
         types::{AnyTypeKey, AutoTypes, ModuleKey},
     },
     generics::GContext,
-    ir::{FunctionIr, FunctionIrArena, FunctionIrKey, VariableKey},
+    ir::{FunctionIrArena, FunctionIrKey, VariableKey},
 };
 
 use self::types::Types;

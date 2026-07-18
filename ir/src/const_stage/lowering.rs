@@ -16,7 +16,7 @@ use crate::const_stage::objects::{
     TypeAliasObj, TypeAliasObjKey,
 };
 use crate::const_stage::types::{
-    AnyTypeKey, ArrayType, EnumType, FunctionType, GenericKey, ModuleKey, ModuleTag, NamedTypeType,
+    AnyTypeKey, ArrayType, EnumType, FunctionType, ModuleKey, ModuleTag, NamedTypeType,
     PolymorphType, PrimitiveType, RefType, StructType, TraitType, TupleType,
 };
 use crate::const_stage::{Context, Diagnostic, Error, Errors};
@@ -319,7 +319,7 @@ impl Context {
                 Some(PathSelectorEndOptions::All) => {
                     todo!("symbol propagation things")
                 }
-                Some(PathSelectorEndOptions::Set(set)) => todo!(),
+                Some(PathSelectorEndOptions::Set(_set)) => todo!(),
                 Some(PathSelectorEndOptions::Alias(alias)) => {
                     self.check_access(*module_key, selector, key)?;
                     self.types
@@ -598,7 +598,7 @@ impl Context {
         component_key: Key<super::objects::ComponentObjTag>,
     ) -> Result<&mut AnyObject<ComponentObj>, Diagnostic<Errors>> {
         let this = self.objects.components.get_unchecked(&component_key);
-        let ast_key = this.ast_object;
+        let _ast_key = this.ast_object;
         let mod_key = this.module;
         let module_path = &self.types.modules.get_unchecked(&mod_key).path;
         let ast_obj = match &this.ast_object {
@@ -689,7 +689,7 @@ impl Context {
         if this.data.generics.is_done() && this.data.ty.is_done() {
             return Ok(self.objects.types.get_mut_unchecked(&type_key));
         }
-        let ast_key = this.ast_object;
+        let _ast_key = this.ast_object;
         let mod_key = this.module;
         let module_path = &self.types.modules.get_unchecked(&mod_key).path;
         let ast_obj = match &this.ast_object {
@@ -846,7 +846,7 @@ impl Context {
         path: &[Span<SmolStr>],
         mod_key: ModuleKey,
         span: SpanIndex,
-        generics: &Option<Span<Vec<Span<Type>>>>,
+        _generics: &Option<Span<Vec<Span<Type>>>>,
     ) -> Result<AnyObjectKey, Error> {
         if path.len() == 1 {
             match self.generic_ctx.get(&path[0]) {
@@ -1075,7 +1075,7 @@ impl ast::Expression {
                                 Err(err) => return ConstEvalResult::Error(err),
                             };
                             match &inner_ty {
-                                Some(ty) => {}
+                                Some(_ty) => {}
                                 None => inner_ty = Some(typeof_v),
                             }
                             values.push(expr.clone().map(|_| v));
@@ -1320,7 +1320,7 @@ impl ast::Type {
                     repr,
                     variants: variants.clone(),
                 });
-                for (ident, value) in &variants {
+                for (ident, _value) in &variants {
                     let const_obj = AnyObject {
                         data: ConstObj {
                             ty: InitState::Done(AnyTypeKey::Enum(key)),

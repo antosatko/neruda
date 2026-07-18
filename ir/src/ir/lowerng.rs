@@ -249,7 +249,7 @@ impl Context {
                         ast::Statement::Expr { expression } => {
                             self.lower_expression(ir, block_ctx, expression, &None)?;
                         }
-                        ast::Statement::Loop { label, body } => {
+                        ast::Statement::Loop { label: _, body: _ } => {
                             todo!("musim nejak ziskat klice bloku");
                         }
                         _ => todo!("{:?}", st),
@@ -380,7 +380,7 @@ impl Context {
                                 (AnyObjectKey::Function(fun_key), Some(_)) => {
                                     let fun = self.objects.functions.get_unchecked(&fun_key);
 
-                                    let (concrete_ty, subs) = apply_generic_arguments(
+                                    let (concrete_ty, _subs) = apply_generic_arguments(
                                         self,
                                         module,
                                         ident.path.location,
@@ -512,7 +512,7 @@ impl Context {
                                 let callee = self.ir_cache.get_unchecked(&ir_key);
                                 let result = callee.returns.unwrap_or(AnyTypeKey::Void);
                                 let mut arg_values = Vec::with_capacity(arguments.capacity());
-                                for (expr, (ident, expect)) in
+                                for (expr, (_ident, expect)) in
                                     arguments.iter().zip(callee.parameters.clone())
                                 {
                                     let expect = self
@@ -546,7 +546,7 @@ impl Context {
                             }
                             Addr::UnresolvedFunction(fun_key) => {
                                 let obj = self.objects.functions.get_unchecked(&fun_key);
-                                let generics = obj.data.generics.clone();
+                                let _generics = obj.data.generics.clone();
                                 let signature = *obj.data.type_of.get_done();
                                 let params = self
                                     .types
@@ -554,7 +554,7 @@ impl Context {
                                     .get_unchecked(&signature)
                                     .parameters
                                     .clone();
-                                let returns =
+                                let _returns =
                                     self.types.functions.get_unchecked(&signature).returns;
                                 let mut arg_values = Vec::with_capacity(arguments.capacity());
                                 for (expr, expect) in arguments.iter().zip(params) {
@@ -594,7 +594,7 @@ impl Context {
                                 // self.lower_function(&fun_key, &None)?;
                             }
                             _ => {
-                                let val =
+                                let _val =
                                     self.load_addr(ir, block_ctx, addr, &None, op.location)?;
                                 todo!()
                             }
@@ -612,7 +612,7 @@ impl Context {
                         module,
                         span: val.location,
                     })?;
-                    let ir = self.ir_cache.get_mut_unchecked(ir);
+                    let _ir = self.ir_cache.get_mut_unchecked(ir);
                     ty.check(&mut self.types, expect).map_err(|inner| Error {
                         inner,
                         module,
@@ -754,7 +754,7 @@ impl Context {
                     span,
                 }),
             },
-            Addr::MemoryRef { src, inner_ty } => {
+            Addr::MemoryRef { src, inner_ty: _ } => {
                 let ir = self.ir_cache.get_mut_unchecked(ir);
                 let ty = ir.values.get_unchecked(&src).ty;
                 let dst = ir.values.push(Value { ty });

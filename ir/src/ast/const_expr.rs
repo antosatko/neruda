@@ -318,6 +318,7 @@ impl AnyTypeKey {
             | AnyTypeKey::ModuleRef(_)
             | AnyTypeKey::Reference(_)
             | AnyTypeKey::Void
+            | AnyTypeKey::Never
             | AnyTypeKey::Trait(_)
             | AnyTypeKey::Enum(_) => Err(Errors::UndefinedDefault(*self)),
         }

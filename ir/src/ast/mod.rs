@@ -212,7 +212,7 @@ pub struct Access {
     pub modifier_kw: Option<Keyword>,
 }
 
-#[derive(Debug, Clone, Default, Copy)]
+#[derive(Debug, Clone, Default, Copy, PartialEq, Eq)]
 pub enum AccessModifiers {
     Public,
     #[default]

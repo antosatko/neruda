@@ -8,9 +8,8 @@ use crate::{
     ast::{ConstValue, Number, NumberValue},
     const_stage::{
         Errors,
-        objects::{AnyObjectKey, ConstObjKey, FunctionObjKey, InitState, Module},
+        objects::{AnyObjectKey, FunctionObjKey, InitState, Module},
     },
-    ir::FunctionIrKey,
 };
 
 pub type FunctionArena = Arena<FunctionType, FunctionTag>;
@@ -175,6 +174,7 @@ pub enum AnyTypeKey {
     Generic(GenericKey),
     Morphed(MorphedKey),
     Void,
+    Never,
 }
 
 #[derive(Default)]
@@ -612,6 +612,7 @@ impl AnyTypeKey {
         self.substitute_many(types)?;
         let equals = match (expect, self) {
             (a, b) if a == b => return Ok(()),
+            (_, AnyTypeKey::Never) => return Ok(()),
             (AnyTypeKey::Array(exp), AnyTypeKey::Array(got)) => {
                 let exp_unwrap = types.arrays.get_unchecked(exp);
                 let exp_elem_type = exp_unwrap.element_type;
@@ -688,7 +689,10 @@ impl AnyTypeKey {
 
     pub fn substitute_many(&self, types: &mut Types) -> Result<AnyTypeKey, Errors> {
         Ok(match *self {
-            AnyTypeKey::Primitive(_) | AnyTypeKey::Enum(_) | AnyTypeKey::Void => *self,
+            AnyTypeKey::Primitive(_)
+            | AnyTypeKey::Enum(_)
+            | AnyTypeKey::Void
+            | AnyTypeKey::Never => *self,
             AnyTypeKey::Generic(key) => match types.substitutions.get(&key) {
                 Some(s) => {
                     dbg!(*s)
@@ -794,6 +798,7 @@ impl AnyTypeKey {
             AnyTypeKey::ModuleRef(key) => Cow::Owned(types.modules.get_unchecked(key).stringify()),
             AnyTypeKey::Named(key) => Cow::Owned(types.named.get_unchecked(key).stringify(types)),
             AnyTypeKey::Void => Cow::Borrowed("()"),
+            AnyTypeKey::Never => Cow::Borrowed("!"),
         }
     }
 }

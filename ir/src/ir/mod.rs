@@ -8,7 +8,7 @@ use smol_str::SmolStr;
 pub mod lowerng;
 
 use crate::{
-    ast::{ConstValue, Operator, Span, UnaryOp},
+    ast::{ConstValue, Operator, Span, SpanIndex, UnaryOp},
     const_stage::{
         objects::{AnyObjectKey, FunctionObjKey},
         types::AnyTypeKey,
@@ -73,8 +73,9 @@ pub struct FunctionIr {
 
 #[derive(Debug, Clone, Default)]
 pub struct BasicBlock {
-    pub instructions: Vec<Span<Instruction>>,
-    pub terminator: Option<Terminator>,
+    instructions: Vec<Span<Instruction>>,
+    terminator: Option<Terminator>,
+    instr_lock: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -85,6 +86,7 @@ pub enum Addr {
     Function(FunctionIrKey),
     UnresolvedFunction(FunctionObjKey),
     MemoryRef { src: ValueKey, inner_ty: AnyTypeKey },
+    Never,
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Copy)]
@@ -92,7 +94,7 @@ pub struct ValueTag;
 pub type ValueKey = Key<ValueTag>;
 #[derive(Debug, Clone, Copy)]
 pub struct Value {
-    ty: AnyTypeKey,
+    pub ty: AnyTypeKey,
 }
 
 #[derive(Debug, Clone)]
@@ -145,6 +147,7 @@ pub enum Instruction {
         src: ValueKey,
         dst: ValueKey,
     },
+    Exit(ValueKey),
 }
 
 #[derive(Debug, Clone)]
@@ -158,4 +161,34 @@ pub enum Terminator {
     },
     Eval(ValueKey),
     Unreachable,
+    Exit(ValueKey),
+}
+
+impl BasicBlock {
+    pub fn instructions(&self) -> &[Span<Instruction>] {
+        &self.instructions
+    }
+
+    pub fn terminator(&self) -> &Option<Terminator> {
+        &self.terminator
+    }
+
+    pub fn lock_instructions(&mut self, lock: bool) {
+        self.instr_lock = lock;
+    }
+
+    pub fn extend(&mut self, instrs: impl IntoIterator<Item = Instruction>, location: SpanIndex) {
+        if self.instr_lock {
+            return;
+        }
+        self.instructions
+            .extend(instrs.into_iter().map(|i| Span::new(i, location)));
+    }
+
+    pub fn terminate(&mut self, term: Terminator, overwrite: bool) {
+        match (&self.terminator, overwrite) {
+            (None, _) | (Some(_), true) => self.terminator = Some(term),
+            _ => (),
+        }
+    }
 }

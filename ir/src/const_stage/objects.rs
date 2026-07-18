@@ -199,14 +199,16 @@ pub struct Module {
     pub path: Vec<SmolStr>,
     pub symbol_map: HashMap<SmolStr, AnyObjectKey>,
     pub ast: Arc<ast::Module>,
+    pub src: Arc<String>,
 }
 
 impl Module {
-    pub fn new(ast: Arc<ast::Module>) -> Self {
+    pub fn new(ast: Arc<ast::Module>, src: Arc<String>) -> Self {
         Self {
             path: Default::default(),
             symbol_map: Default::default(),
             ast,
+            src,
         }
     }
 }

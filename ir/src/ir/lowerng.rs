@@ -4,12 +4,15 @@ use arena::Arena;
 use arena_scope::stack::Stack;
 
 use crate::{
-    ast::{self, Body, Expression, Function, Postfix, Span, SpanIndex, Type},
+    ast::{
+        self, Body, ConstValue, Expression, Function, Number, NumberValue, Postfix, Span,
+        SpanIndex, Type,
+    },
     const_stage::{
         Context, Diagnostic, Error, Errors, Warning, Warnings,
         lowering::{ConstEvalResult, apply_generic_arguments},
         objects::{AnyObject, AnyObjectKey, FunctionObj, FunctionObjKey, InitState, IrCache},
-        types::{AnyTypeKey, FunctionType, ModuleKey, RefType},
+        types::{AnyTypeKey, ModuleKey, RefType},
     },
     ir::{
         Addr, BasicBlock, BlockCtx, FunctionIr, FunctionIrKey, Instruction, Terminator, Value,
@@ -209,8 +212,7 @@ impl Context {
                             let dst = ir.variables.push(var);
                             ir.blocks
                                 .get_mut_unchecked()
-                                .instructions
-                                .push(st.map(|_| Instruction::StoreVar { dst, src }));
+                                .extend([Instruction::StoreVar { dst, src }], st.location);
                             block_ctx.variables.insert(ident.deref().clone(), dst);
                         }
                         ast::Statement::Return { expression } => {
@@ -238,8 +240,9 @@ impl Context {
                                 },
                             };
                             let ir = self.ir_cache.get_mut_unchecked(ir);
-                            ir.blocks.get_mut_unchecked().terminator =
-                                Some(Terminator::Return(val));
+                            ir.blocks
+                                .get_mut_unchecked()
+                                .terminate(Terminator::Return(val), false);
                             return Ok(());
                         }
                         ast::Statement::Invoke { .. } => (),
@@ -260,7 +263,9 @@ impl Context {
                 let val =
                     self.load_addr(ir, block_ctx, addr, &Some(returns), expression.location)?;
                 let ir = self.ir_cache.get_mut_unchecked(ir);
-                ir.blocks.get_mut_unchecked().terminator = Some(Terminator::Eval(val));
+                ir.blocks
+                    .get_mut_unchecked()
+                    .terminate(Terminator::Eval(val), false);
             }
         }
         Ok(())
@@ -338,14 +343,15 @@ impl Context {
                     {
                         let ir = self.ir_cache.get_mut_unchecked(ir);
                         let dst = ir.values.push(Value { ty: left_ty });
-                        ir.blocks.get_mut_unchecked().instructions.push(op.map(|_| {
-                            Instruction::BinOp {
+                        ir.blocks.get_mut_unchecked().extend(
+                            [Instruction::BinOp {
                                 op: *op.deref(),
                                 l: left_value,
                                 r: right_value,
                                 dst,
-                            }
-                        }));
+                            }],
+                            op.location,
+                        );
                         Ok(Addr::Value(dst))
                     }
                     (AnyTypeKey::Primitive(_), AnyTypeKey::Primitive(_)) => Err(Error {
@@ -418,7 +424,7 @@ impl Context {
                                     let ident = path.first().unwrap();
                                     let ir = self.ir_cache.get_mut_unchecked(ir);
                                     match block_ctx.variables.get(ident) {
-                                        _ if ident.deref() == "_" => Addr::Value(ir.void),
+                                        _ if ident.deref() == "_" => Addr::Never,
                                         Some(v) => Addr::Var(*v),
                                         None => match ir
                                             .parameters
@@ -458,8 +464,7 @@ impl Context {
                                 });
                                 ir.blocks
                                     .get_mut_unchecked()
-                                    .instructions
-                                    .push(op.map(|_| Instruction::AddressOfVar { var, dst }));
+                                    .extend([Instruction::AddressOfVar { var, dst }], op.location);
                                 Addr::Value(dst)
                             }
                             Addr::Value(val) => {
@@ -474,8 +479,7 @@ impl Context {
                                 });
                                 ir.blocks
                                     .get_mut_unchecked()
-                                    .instructions
-                                    .push(op.map(|_| Instruction::AddressOfVal { val, dst }));
+                                    .extend([Instruction::AddressOfVal { val, dst }], op.location);
                                 Addr::Value(dst)
                             }
                             _ => Err(Error {
@@ -530,13 +534,14 @@ impl Context {
                                 }
                                 let self_ir = self.ir_cache.get_mut_unchecked(ir);
                                 let dst = self_ir.values.push(Value { ty: result });
-                                self_ir.blocks.get_mut_unchecked().instructions.push(op.map(
-                                    |_| Instruction::Call {
+                                self_ir.blocks.get_mut_unchecked().extend(
+                                    [Instruction::Call {
                                         fun: ir_key,
                                         arguments: arg_values,
                                         result: dst,
-                                    },
-                                ));
+                                    }],
+                                    op.location,
+                                );
                                 Addr::Value(dst)
                             }
                             Addr::UnresolvedFunction(fun_key) => {
@@ -580,10 +585,13 @@ impl Context {
                                 // };
                                 // let ty =
                                 //     AnyTypeKey::Function(self.types.functions.push_unique(type_of));
+                                return Err(Error {
+                                    inner: Errors::Todo("Generic arguments inference"),
+                                    module,
+                                    span: op.location,
+                                });
 
-                                self.lower_function(&fun_key, &None)?;
-
-                                todo!()
+                                // self.lower_function(&fun_key, &None)?;
                             }
                             _ => {
                                 let val =
@@ -630,6 +638,28 @@ impl Context {
             .get_unchecked(&block_ctx.source)
             .module;
         match addr {
+            Addr::Never => {
+                let ir = self.ir_cache.get_mut_unchecked(ir);
+                let code_const = ConstValue::Number(Number {
+                    size: Some(4),
+                    value: NumberValue::Int(1),
+                });
+                let code_value = ir.values.push(Value {
+                    ty: AnyTypeKey::Primitive(crate::const_stage::types::PrimitiveType::I32),
+                });
+                let blk = ir.blocks.get_mut_unchecked();
+                blk.extend(
+                    [Instruction::LoadConst {
+                        src: code_const,
+                        dst: code_value,
+                    }],
+                    span,
+                );
+                blk.terminate(Terminator::Exit(code_value), true);
+                blk.lock_instructions(true);
+
+                Ok(ir.void)
+            }
             Addr::Var(key) => {
                 let ir = self.ir_cache.get_mut_unchecked(ir);
                 let ty = ir.variables.get_unchecked(&key).ty;
@@ -642,9 +672,7 @@ impl Context {
                 }
                 let dst = ir.values.push(Value { ty });
                 let instr = ir.blocks.get_mut_unchecked();
-                instr
-                    .instructions
-                    .push(Span::new(Instruction::LoadVar { src: key, dst }, span));
+                instr.extend([Instruction::LoadVar { src: key, dst }], span);
                 let var = ir.variables.get_mut_unchecked(&key);
                 var.used = true;
                 Ok(dst)
@@ -657,7 +685,6 @@ impl Context {
                 })?;
                 match expect {
                     Some(expect) => {
-                        let ir = self.ir_cache.get_mut_unchecked(ir);
                         ty.check(&mut self.types, expect).map_err(|inner| Error {
                             inner,
                             module,
@@ -672,8 +699,7 @@ impl Context {
                         let dst = ir.values.push(Value { ty });
                         ir.blocks
                             .get_mut_unchecked()
-                            .instructions
-                            .push(Span::new(Instruction::AddressOfObj { obj, dst }, span));
+                            .extend([Instruction::AddressOfObj { obj, dst }], span);
                         Ok(dst)
                     }
                     AnyObjectKey::Const(key) => {
@@ -713,8 +739,7 @@ impl Context {
                 let dst = ir.values.push(Value { ty });
                 ir.blocks
                     .get_mut_unchecked()
-                    .instructions
-                    .push(Span::new(Instruction::AddressOfFun { fun, dst }, span));
+                    .extend([Instruction::AddressOfFun { fun, dst }], span);
                 Ok(dst)
             }
             Addr::UnresolvedFunction(_fun_key) => match expect {
@@ -735,8 +760,7 @@ impl Context {
                 let dst = ir.values.push(Value { ty });
                 ir.blocks
                     .get_mut_unchecked()
-                    .instructions
-                    .push(Span::new(Instruction::Deref { src, dst }, span));
+                    .extend([Instruction::Deref { src, dst }], span);
                 Ok(dst)
             }
         }
@@ -897,13 +921,13 @@ fn load_const(
         })?,
     };
     let dst = ir.values.push(Value { ty });
-    ir.blocks.get_mut_unchecked().instructions.push(Span::new(
-        Instruction::LoadConst {
+    ir.blocks.get_mut_unchecked().extend(
+        [Instruction::LoadConst {
             src: const_val.clone(),
             dst,
-        },
+        }],
         span,
-    ));
+    );
     return Ok(dst);
 }
 
@@ -931,6 +955,7 @@ impl Addr {
                     .type_of
                     .get_done(),
             )),
+            Addr::Never => Ok(AnyTypeKey::Never),
         }
     }
 }

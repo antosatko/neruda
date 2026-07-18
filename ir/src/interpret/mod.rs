@@ -1,4 +1,4 @@
-use std::{collections::HashMap, ops::Deref};
+use std::{collections::HashMap, ops::Deref, process::exit};
 
 use crate::{
     ast::{ConstValue, Operator, Span, UnaryOp},
@@ -43,7 +43,7 @@ impl Interpreter {
         loop {
             let instructions = {
                 let block_ref = function.blocks.node(&block);
-                block_ref.value.instructions.clone()
+                block_ref.value.instructions().to_vec()
             };
 
             for instruction in instructions {
@@ -52,10 +52,18 @@ impl Interpreter {
 
             let terminator = {
                 let block_ref = function.blocks.node(&block);
-                block_ref.value.terminator.clone()
+                block_ref.value.terminator().clone()
             };
 
             match terminator {
+                Some(Terminator::Exit(code)) => {
+                    let value = frame.get_value(code)?;
+                    if let InterpreterValue::Number(n) = value {
+                        exit(n as _)
+                    } else {
+                        unreachable!("value '{value:?}' is not int")
+                    }
+                }
                 Some(Terminator::Return(value)) => {
                     return match value {
                         Some(value) => Ok(frame.get_value(value)?),
@@ -208,6 +216,15 @@ impl Interpreter {
             Instruction::AddressOfFun { fun, dst } => {
                 frame.values.insert(*dst, InterpreterValue::Function(*fun));
             }
+
+            Instruction::Exit(key) => {
+                let val = frame.get_value(*key)?;
+                if let InterpreterValue::Number(n) = val {
+                    exit(n as _)
+                } else {
+                    unreachable!("bla bla")
+                }
+            }
         }
 
         Ok(())
@@ -265,6 +282,8 @@ impl InterpreterValue {
             ConstValue::Number(number) => match number.value {
                 crate::ast::NumberValue::Any(v) => Self::Number(v as i64),
                 crate::ast::NumberValue::Float(v) => Self::Float(v),
+                crate::ast::NumberValue::Uint(v) => Self::Number(v as _),
+                crate::ast::NumberValue::Int(v) => Self::Number(v as _),
                 _ => todo!("add number variants"),
             },
 

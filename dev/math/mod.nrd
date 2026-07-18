@@ -21,3 +21,5 @@ pub trait Sub {
 }
 
 pub type AddAndSub<T: Add + Sub> = T
+
+pub function name(params: i32) => _

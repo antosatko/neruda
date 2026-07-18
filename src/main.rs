@@ -153,10 +153,10 @@ fn main() {
                                 )
                             });
                             for block in ir.blocks.arena().iter() {
-                                for instr in &block.value.instructions {
+                                for instr in block.value.instructions() {
                                     println!("\t{instr:?}");
                                 }
-                                println!("{:?}", block.value.terminator)
+                                println!("{:?}", block.value.terminator())
                             }
                         }
                         _ => (),

@@ -59,11 +59,11 @@ function baz<T>(): T {
 function nevimco(in: i32): i32 {
     var _: function(a: A): A = foo<A>
     var _ = foo<B>
-    var a = 5
+    var a = 7
     var _ = a.&.&.&.&.*
     var ref = a.&
     var five = foo<i32>(bar(bar(ref.*)))
-    var bazz = baz<f32>().&.*
+    var bazz = baz<i32>().&.*
 
-    return 6 + a + in / five / five
+    return 6 + a + in / five
 }

@@ -26,7 +26,7 @@ impl Context {
     pub(crate) fn lower_import_stage(&mut self) -> Result<(), Error> {
         let map: HashMap<Vec<SmolStr>, Key<ModuleTag>> =
             HashMap::from_iter(self.ast.iter().map(|(k, ast)| {
-                let mut module = Module::new(Arc::clone(ast));
+                let mut module = Module::new(Arc::clone(ast), ast.src.clone());
                 module.path = k.clone();
                 let type_key = self.types.modules.push(module);
                 (k.clone(), type_key)

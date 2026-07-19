@@ -32,6 +32,12 @@ struct CompilerExplorer {
     active_lines: HashMap<usize, usize>,
     active_color_index: usize,
     hovered_source_line: Option<usize>,
+    hovered_element: Option<loader::IrElement>,
+
+    // Feature 3: Navigation state tracking
+    nav_history: Vec<String>,
+    current_target: Option<String>,
+
     collapsed_modules: HashSet<usize>,
     panes: pane_grid::State<PaneState>,
 }
@@ -39,11 +45,10 @@ struct CompilerExplorer {
 #[derive(Debug, Clone)]
 enum Message {
     ToggleModule(usize),
-    SelectObject {
-        module_name: String,
-        object_name: String,
-    },
+    NavigateTo(String), // Replaces SelectObject
+    NavigateBack,
     HoverSourceLine(Option<usize>),
+    HoverElement(Option<loader::IrElement>),
     Resized(pane_grid::ResizeEvent),
     ToggleVariables,
     ToggleValues,
@@ -84,12 +89,16 @@ impl CompilerExplorer {
             active_lines: HashMap::new(),
             active_color_index: 0,
             hovered_source_line: None,
+            nav_history: Vec::new(),
+            current_target: None,
             collapsed_modules: HashSet::new(),
             panes,
+            hovered_element: None,
         };
 
         if let Some(ref proj) = explorer.project {
-            if let Some((_, details)) = proj.details.iter().next() {
+            if let Some((target, details)) = proj.details.iter().next() {
+                explorer.current_target = Some(target.clone());
                 explorer.source_lines = details.source_lines.clone();
                 explorer.ir_variables = details.ir_variables.clone();
                 explorer.ir_values = details.ir_values.clone();
@@ -110,21 +119,42 @@ impl CompilerExplorer {
                     self.collapsed_modules.insert(id);
                 }
             }
-            Message::SelectObject {
-                module_name,
-                object_name,
-            } => {
+            Message::HoverElement(element) => match element {
+                Some(loader::IrElement::Text(_) | loader::IrElement::Operator(_)) => (),
+                _ => self.hovered_element = element,
+            },
+            Message::NavigateTo(target) => {
                 if let Some(ref proj) = self.project {
-                    if let Some(details) = proj
-                        .details
-                        .get(&format!("{}::{}", module_name, object_name))
-                    {
+                    if let Some(details) = proj.details.get(&target) {
+                        // Push to history if valid
+                        if let Some(current) = self.current_target.take() {
+                            if self.nav_history.last() != Some(&current) {
+                                self.nav_history.push(current);
+                            }
+                        }
+
+                        self.current_target = Some(target);
                         self.source_lines = details.source_lines.clone();
                         self.ir_variables = details.ir_variables.clone();
                         self.ir_values = details.ir_values.clone();
                         self.ir_instructions = details.ir_instructions.clone();
                         self.active_lines = build_line_colors(&details.ir_instructions);
                         self.active_color_index = details.color_index;
+                    }
+                }
+            }
+            Message::NavigateBack => {
+                if let Some(prev_target) = self.nav_history.pop() {
+                    if let Some(ref proj) = self.project {
+                        if let Some(details) = proj.details.get(&prev_target) {
+                            self.current_target = Some(prev_target);
+                            self.source_lines = details.source_lines.clone();
+                            self.ir_variables = details.ir_variables.clone();
+                            self.ir_values = details.ir_values.clone();
+                            self.ir_instructions = details.ir_instructions.clone();
+                            self.active_lines = build_line_colors(&details.ir_instructions);
+                            self.active_color_index = details.color_index;
+                        }
                     }
                 }
             }
@@ -138,26 +168,48 @@ impl CompilerExplorer {
 
     fn view(&self) -> Element<'_, Message> {
         // ===== Header Bar =====
-        let header = container(
-            row![
-                text("Compiler Explorer")
-                    .font(Font::MONOSPACE)
-                    .size(18)
-                    .style(|_| iced::widget::text::Style {
-                        color: Some(theme::ctp::LAVENDER),
-                    }),
-                text(" — IR Visualization")
-                    .size(14)
-                    .style(|_| iced::widget::text::Style {
-                        color: Some(theme::ctp::OVERLAY1),
-                    }),
-            ]
-            .spacing(8)
-            .align_y(iced::Alignment::Center),
-        )
-        .width(Length::Fill)
-        .padding(Padding::new(12.0))
-        .style(|_| theme::header_bar());
+        let mut header_row = row![
+            text("Compiler Explorer")
+                .font(Font::MONOSPACE)
+                .size(18)
+                .style(|_| iced::widget::text::Style {
+                    color: Some(theme::ctp::LAVENDER),
+                }),
+        ]
+        .spacing(12)
+        .align_y(iced::Alignment::Center);
+
+        if !self.nav_history.is_empty() {
+            header_row = header_row.push(
+                button(text("← Back").size(14))
+                    .on_press(Message::NavigateBack)
+                    .style(|_, _| button::Style {
+                        background: Some(Background::Color(theme::ctp::SURFACE0)),
+                        text_color: theme::ctp::TEXT,
+                        border: Border {
+                            color: Color::TRANSPARENT,
+                            width: 0.0,
+                            radius: 4.0.into(),
+                        },
+                        shadow: Shadow::default(),
+                        snap: false,
+                    })
+                    .padding(Padding::new(4.0).left(8.0).right(8.0)),
+            );
+        }
+
+        if let Some(target) = &self.current_target {
+            header_row = header_row.push(text(format!(" — {}", target)).size(14).style(|_| {
+                iced::widget::text::Style {
+                    color: Some(theme::ctp::OVERLAY1),
+                }
+            }));
+        }
+
+        let header = container(header_row)
+            .width(Length::Fill)
+            .padding(Padding::new(12.0))
+            .style(|_| theme::header_bar());
 
         // ===== Sidebar =====
         let sidebar_content = {
@@ -255,10 +307,10 @@ impl CompilerExplorer {
                             } else {
                                 obj_col = obj_col.push(
                                     button(label)
-                                        .on_press(Message::SelectObject {
-                                            module_name: module.name.clone(),
-                                            object_name: obj.name.clone(),
-                                        })
+                                        .on_press(Message::NavigateTo(format!(
+                                            "{}::{}",
+                                            module.name, obj.name
+                                        )))
                                         .style(|_, _| button::Style {
                                             background: None,
                                             text_color: theme::ctp::SUBTEXT0,
@@ -603,20 +655,20 @@ impl CompilerExplorer {
                     let mut instr_col = column![].spacing(0);
 
                     for instr in &self.ir_instructions {
-                        // 1. Setup Colors
+                        // 1. Setup Colors (Keep your existing background logic)
                         let offset = instr
                             .source_line_index
                             .and_then(|idx| self.active_lines.get(&idx).copied())
                             .unwrap_or(0);
                         let color_idx = self.active_color_index + offset;
-                        let mut source_bg = theme::accent_medium(color_idx);
+                        let mut bg_color = theme::accent_medium(color_idx);
 
                         // Dim inactive lines
                         if let Some(hover) = self.hovered_source_line {
                             if Some(hover) != instr.source_line_index {
-                                source_bg = theme::accent_dim(color_idx);
+                                bg_color = theme::accent_dim(color_idx);
                             } else {
-                                source_bg = theme::accent_hover(color_idx);
+                                bg_color = theme::accent_hover(color_idx);
                             }
                         }
 
@@ -638,30 +690,108 @@ impl CompilerExplorer {
                             ..Default::default()
                         });
 
-                        // 3. Text Styling based on Kind
-                        let mut text_widget = text(&instr.text)
-                            .font(Font::MONOSPACE)
-                            .size(13)
-                            .style(|_| iced::widget::text::Style {
-                                color: Some(theme::ctp::TEXT),
-                            });
-                        let mut bg_color = source_bg;
+                        // 3. Build Interactive Row Content
+                        let mut row_content = row![].spacing(4);
 
+                        for element in &instr.elements {
+                            let is_highlighted = Some(element) == self.hovered_element.as_ref();
+
+                            // Apply special colors based on instruction kind
+                            let text_color = if instr.kind == loader::InstructionKind::Terminator {
+                                theme::ctp::RED
+                            } else if is_highlighted {
+                                theme::ctp::YELLOW
+                            } else {
+                                theme::ctp::TEXT
+                            };
+
+                            let base_text = text(element.stringify().to_string())
+                                .font(if instr.kind == loader::InstructionKind::BlockLabel {
+                                    Font {
+                                        weight: iced::font::Weight::Bold,
+                                        ..Font::MONOSPACE
+                                    }
+                                } else {
+                                    Font::MONOSPACE
+                                })
+                                .style(move |_| iced::widget::text::Style {
+                                    color: Some(text_color),
+                                });
+
+                            let element_widget: Element<'_, Message> = match element {
+                                loader::IrElement::Variable { id } => {
+                                    let hover_text = self
+                                        .ir_variables
+                                        .iter()
+                                        .find(|v| v.id == *id)
+                                        .map(|v| format!("{}: {}", v.identifier, v.ty))
+                                        .unwrap_or_else(|| format!("var_{}", id));
+
+                                    tooltip(
+                                        base_text,
+                                        container(text(hover_text).size(12)).padding(4),
+                                        tooltip::Position::Top,
+                                    )
+                                    .style(|_| theme::tooltip_box())
+                                    .into()
+                                }
+                                loader::IrElement::Value { id } => {
+                                    let hover_text = self
+                                        .ir_values
+                                        .iter()
+                                        .find(|v| v.id == *id)
+                                        .map(|v| format!("type: {}", v.ty))
+                                        .unwrap_or_else(|| format!("val_{}", id));
+
+                                    tooltip(
+                                        base_text,
+                                        container(text(hover_text).size(12)).padding(4),
+                                        tooltip::Position::Top,
+                                    )
+                                    .style(|_| theme::tooltip_box())
+                                    .into()
+                                }
+                                loader::IrElement::Function { id } => {
+                                    // Locate function name in the function_map resolving lookup
+                                    if let Some(ref proj) = self.project {
+                                        if let Some(target_name) = proj.function_map.get(id) {
+                                            button(base_text)
+                                                .on_press(Message::NavigateTo(target_name.clone()))
+                                                .style(|_, _| button::Style {
+                                                    background: None,
+                                                    text_color: theme::ctp::SKY,
+                                                    border: Border::default(),
+                                                    shadow: Shadow::default(),
+                                                    snap: false,
+                                                })
+                                                .padding(0)
+                                                .into()
+                                        } else {
+                                            base_text.into()
+                                        }
+                                    } else {
+                                        base_text.into()
+                                    }
+                                }
+                                _ => base_text.into(),
+                            };
+
+                            let interactive_widget = mouse_area(element_widget)
+                                .on_enter(Message::HoverElement(Some(element.clone())))
+                                .on_exit(Message::HoverElement(None));
+
+                            row_content = row_content.push(interactive_widget);
+                        }
+
+                        // 4. Wrap row_content in the styling container
+                        // Note: We adjust background color if it's a block label
                         if instr.kind == loader::InstructionKind::BlockLabel {
-                            text_widget = text_widget.font(Font {
-                                weight: iced::font::Weight::Bold,
-                                ..Font::MONOSPACE
-                            });
                             let mut label_bg = block_color;
                             label_bg.a = 0.10;
                             bg_color = label_bg;
-                        } else if instr.kind == loader::InstructionKind::Terminator {
-                            text_widget = text_widget.style(|_| iced::widget::text::Style {
-                                color: Some(theme::ctp::RED),
-                            });
                         }
 
-                        let text_block = container(text_widget)
+                        let instruction_container = container(row_content)
                             .width(Length::Fill)
                             .padding(Padding {
                                 top: 2.0,
@@ -675,11 +805,11 @@ impl CompilerExplorer {
                                 ..Default::default()
                             });
 
-                        // 4. Render
+                        // 5. Render
                         instr_col = instr_col.push(
                             mouse_area(
                                 tooltip(
-                                    row![block_indicator, text_block]
+                                    row![block_indicator, instruction_container] // Use instruction_container
                                         .spacing(8)
                                         .align_y(iced::Alignment::Center),
                                     text(&instr.description).size(12).style(|_| {

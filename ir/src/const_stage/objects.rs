@@ -88,7 +88,7 @@ pub struct ResourceObj {
     pub default: InitState<Option<ConstValue>, ()>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash)]
 pub struct FunctionObjTag;
 pub type FunctionObjKey = Key<FunctionObjTag>;
 pub type FunctionObjArena = Arena<AnyObject<FunctionObj>, FunctionObjTag>;

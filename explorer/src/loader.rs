@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::path::Path;
 use std::sync::Arc;
 use std::{collections::HashMap, fs};
@@ -34,6 +35,89 @@ fn stringify_instruction(instr: &Instruction) -> String {
         Instruction::AddressOfVal { val, dst } => format!("{:?} = &val {:?}", dst, val),
         Instruction::Deref { src, dst } => format!("{:?} = *{:?}", dst, src),
         Instruction::Exit(val) => format!("exit {:?}", val),
+    }
+}
+
+fn generate_instr_elements(instr: &Instruction) -> Vec<IrElement> {
+    use IrElement::*;
+
+    match instr {
+        Instruction::LoadConst { src, dst } => vec![
+            Value { id: dst.id() },
+            Text(" = const ".into()),
+            Text(src.stringify().to_string()), // Assuming src stringifies to constant value[cite: 5]
+        ],
+        Instruction::BinOp { op, l, r, dst } => vec![
+            Value { id: dst.id() },
+            Text(" = ".into()),
+            Value { id: l.id() },
+            Operator(format!(" {:?} ", op)),
+            Value { id: r.id() },
+        ],
+        Instruction::UnaryOp { op, src, dst } => vec![
+            Value { id: dst.id() },
+            Text(" = ".into()),
+            Operator(format!("{:?} ", op)),
+            Value { id: src.id() },
+        ],
+        Instruction::StoreVar { dst, src } => vec![
+            Variable { id: dst.id() },
+            Text(" = ".into()),
+            Value { id: src.id() },
+        ],
+        Instruction::LoadVar { src, dst } => vec![
+            Value { id: dst.id() },
+            Text(" = ".into()),
+            Variable { id: src.id() },
+        ],
+        Instruction::Call {
+            fun,
+            arguments,
+            result,
+        } => {
+            let mut elements = vec![
+                Value { id: result.id() },
+                Text(" = call ".into()),
+                Function { id: fun.id() },
+                Text("(".into()),
+            ];
+
+            for (i, arg) in arguments.iter().enumerate() {
+                elements.push(Value { id: arg.id() });
+                if i < arguments.len() - 1 {
+                    elements.push(Text(", ".into()));
+                }
+            }
+            elements.push(Text(")".into()));
+            elements
+        }
+        Instruction::AddressOfObj { obj, dst } => {
+            vec![
+                Value { id: dst.id() },
+                Text(format!(" = ref obj {:?}", obj)),
+            ]
+        }
+        Instruction::AddressOfFun { fun, dst } => vec![
+            Value { id: dst.id() },
+            Text(" = ref fun ".into()),
+            Function { id: fun.id() },
+        ],
+        Instruction::AddressOfVar { var, dst } => vec![
+            Value { id: dst.id() },
+            Text(" = ref var ".into()),
+            Variable { id: var.id() },
+        ],
+        Instruction::AddressOfVal { val, dst } => vec![
+            Value { id: dst.id() },
+            Text(" = ref val ".into()),
+            Value { id: val.id() },
+        ],
+        Instruction::Deref { src, dst } => vec![
+            Value { id: dst.id() },
+            Text(" = deref ".into()),
+            Value { id: src.id() },
+        ],
+        Instruction::Exit(val) => vec![Text("exit ".into()), Value { id: val.id() }],
     }
 }
 
@@ -92,6 +176,20 @@ fn byte_to_line_index(raw_source: &str, byte_index: usize) -> usize {
         .count()
 }
 
+impl IrElement {
+    /// Convert an element to its string representation for rendering/debugging.
+    pub fn stringify(&self) -> String {
+        match self {
+            IrElement::Text(t) => t.clone(),
+            IrElement::Variable { id } => format!("var_{}", id),
+            IrElement::Value { id } => format!("val_{}", id),
+            IrElement::Function { id } => format!("fn_{}", id),
+            IrElement::Operator(op) => op.clone(),
+            IrElement::Block(id) => format!("block_{}", id),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct UiModule {
     pub id: usize,
@@ -126,9 +224,19 @@ pub enum InstructionKind {
     Terminator,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum IrElement {
+    Text(String),
+    Variable { id: usize },
+    Value { id: usize },
+    Function { id: usize },
+    Operator(String),
+    Block(usize),
+}
+
 #[derive(Debug, Clone)]
 pub struct UiIrInstruction {
-    pub text: String,
+    pub elements: Vec<IrElement>,
     pub source_line_index: Option<usize>,
     pub block_idx: usize,
     pub description: String,
@@ -147,6 +255,7 @@ pub struct ObjectDetails {
 pub struct LoadedProject {
     pub modules: Vec<UiModule>,
     pub details: HashMap<String, ObjectDetails>,
+    pub function_map: HashMap<usize, String>, // Feature 4: Map Function ID to global String target
 }
 
 pub fn load_project(dir_path: &Path) -> Result<LoadedProject, String> {
@@ -157,6 +266,8 @@ pub fn load_project(dir_path: &Path) -> Result<LoadedProject, String> {
 
     let mut details_map = HashMap::new();
     let mut ui_modules = Vec::new();
+    let mut function_map = HashMap::new();
+
     let ast_map = HashMap::from_iter(
         modules
             .iter()
@@ -179,7 +290,7 @@ pub fn load_project(dir_path: &Path) -> Result<LoadedProject, String> {
         let source_lines: Vec<String> = raw_source.lines().map(String::from).collect();
         let mut ui_objects = Vec::new();
 
-        for fun in ir_ctx.objects.functions.iter() {
+        for (key, fun) in ir_ctx.objects.functions.iter_pairs() {
             if let Some(module) = ir_ctx.types.modules.get(&fun.module) {
                 if module.src == module_ok.module.src {
                     ui_objects.push(UiModuleObject {
@@ -187,6 +298,10 @@ pub fn load_project(dir_path: &Path) -> Result<LoadedProject, String> {
                         is_exported: !matches!(fun.access, AccessModifiers::Private),
                         is_polymorphic: matches!(fun.data.ir, IrCache::Polymorphic(_)),
                     });
+
+                    let target_name = format!("{}::{}", module_name, fun.identifier);
+                    // Map the compiler's function ID to the global target name for navigation
+                    function_map.insert(key.id(), target_name.clone());
 
                     if let IrCache::Single(ir_handle) = &fun.data.ir {
                         let ir = ir_ctx.ir_cache.get(ir_handle.get_done()).unwrap();
@@ -211,7 +326,7 @@ pub fn load_project(dir_path: &Path) -> Result<LoadedProject, String> {
                         let mut ui_instructions = Vec::new();
                         for (b_idx, block) in ir.blocks.arena().iter().enumerate() {
                             ui_instructions.push(UiIrInstruction {
-                                text: format!("block_{}:", b_idx),
+                                elements: vec![IrElement::Block(b_idx)],
                                 source_line_index: None,
                                 block_idx: b_idx,
                                 description: "Block Label".into(),
@@ -220,7 +335,7 @@ pub fn load_project(dir_path: &Path) -> Result<LoadedProject, String> {
 
                             for wrapped in block.value.instructions() {
                                 ui_instructions.push(UiIrInstruction {
-                                    text: format!("{}", stringify_instruction(&wrapped.inner)),
+                                    elements: generate_instr_elements(&wrapped.inner),
                                     source_line_index: Some(byte_to_line_index(
                                         &raw_source,
                                         wrapped.location.index,
@@ -233,8 +348,8 @@ pub fn load_project(dir_path: &Path) -> Result<LoadedProject, String> {
 
                             if let Some(term) = block.value.terminator() {
                                 ui_instructions.push(UiIrInstruction {
-                                    text: format!("  {}", stringify_terminator(term)), // Terminator
-                                    source_line_index: None, // Terminators often don't map to source lines in same way
+                                    elements: vec![IrElement::Text(stringify_terminator(term))], // Terminator[cite: 5]
+                                    source_line_index: None, // Terminators often don't map to source lines in same way[cite: 5]
                                     block_idx: b_idx,
                                     description: terminator_description(term).into(),
                                     kind: InstructionKind::Terminator,
@@ -245,7 +360,7 @@ pub fn load_project(dir_path: &Path) -> Result<LoadedProject, String> {
                         let color_index = (details_map.len()) % 4;
 
                         details_map.insert(
-                            format!("{}::{}", module_name, fun.identifier),
+                            target_name,
                             ObjectDetails {
                                 source_lines: source_lines.clone(),
                                 ir_variables: ui_variables,
@@ -267,5 +382,6 @@ pub fn load_project(dir_path: &Path) -> Result<LoadedProject, String> {
     Ok(LoadedProject {
         modules: ui_modules,
         details: details_map,
+        function_map,
     })
 }

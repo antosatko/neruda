@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 use std::path::Path;
 use std::sync::Arc;
 use std::{collections::HashMap, fs};
@@ -9,34 +8,6 @@ use ir::{
     ir::{Instruction, Terminator},
 };
 use parser::parse_directory;
-
-fn stringify_instruction(instr: &Instruction) -> String {
-    match instr {
-        Instruction::LoadConst { src, dst } => format!("{:?} = const {}", dst, src.stringify()),
-        Instruction::BinOp { op, l, r, dst } => format!("{:?} = {:?} {:?} {:?}", dst, l, op, r),
-        Instruction::UnaryOp { op, src, dst } => format!("{:?} = {:?}{:?}", dst, op, src),
-        Instruction::StoreVar { dst, src } => format!("var[{:?}] = {:?}", dst, src),
-        Instruction::LoadVar { src, dst } => format!("{:?} = var[{:?}]", dst, src),
-        Instruction::Call {
-            fun,
-            arguments,
-            result,
-        } => {
-            let args = arguments
-                .iter()
-                .map(|v| format!("{v:?}"))
-                .collect::<Vec<_>>()
-                .join(", ");
-            format!("{:?} = call {:?}({})", result, fun, args)
-        }
-        Instruction::AddressOfObj { obj, dst } => format!("{:?} = &obj {:?}", dst, obj),
-        Instruction::AddressOfFun { fun, dst } => format!("{:?} = &fun {:?}", dst, fun),
-        Instruction::AddressOfVar { var, dst } => format!("{:?} = &var {:?}", dst, var),
-        Instruction::AddressOfVal { val, dst } => format!("{:?} = &val {:?}", dst, val),
-        Instruction::Deref { src, dst } => format!("{:?} = *{:?}", dst, src),
-        Instruction::Exit(val) => format!("exit {:?}", val),
-    }
-}
 
 fn generate_instr_elements(instr: &Instruction) -> Vec<IrElement> {
     use IrElement::*;

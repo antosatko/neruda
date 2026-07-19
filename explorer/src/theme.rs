@@ -1,3 +1,5 @@
+#![allow(unused)]
+
 use iced::{Background, Border, Color, Shadow, Vector, widget::container};
 
 /// Catppuccin Mocha — soothing pastel dark theme.

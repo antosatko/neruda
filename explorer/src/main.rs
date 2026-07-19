@@ -9,10 +9,6 @@ use std::path::PathBuf;
 mod loader;
 mod theme;
 
-fn get_hover_color(idx: usize) -> Color {
-    theme::accent_hover(idx)
-}
-
 enum PaneState {
     Source,
     Ir,

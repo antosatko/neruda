@@ -1,5 +1,5 @@
 [workspace]
-members = ["explorer","ir", "lsp", "parser", "runtime"]
+members = ["ir-explorer","ir", "lsp", "parser", "runtime"]
 
 [package]
 name = "neruda"

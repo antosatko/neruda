@@ -149,7 +149,7 @@ source = "git+https://github.com/antosatko/arena#bda92cca21e4d9f88baaca966349030
 [[package]]
 name = "arena-scope"
 version = "0.1.0"
-source = "git+https://github.com/antosatko/arena-scope#4fdf4da570a1c4b546bbf0f5cb85ca377ff753f8"
+source = "git+https://github.com/antosatko/arena-scope#912d9718d45c7ae432f317bbad8934e8f7622fea"
 dependencies = [
  "arena",
 ]
@@ -945,16 +945,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "explorer"
-version = "0.1.0"
-dependencies = [
- "iced",
- "ir",
- "parser",
- "smol_str 0.3.6",
-]
-
-[[package]]
 name = "fastrand"
 version = "2.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1683,6 +1673,16 @@ dependencies = [
  "annotate-snippets",
  "arena",
  "arena-scope",
+ "smol_str 0.3.6",
+]
+
+[[package]]
+name = "ir-explorer"
+version = "0.1.0"
+dependencies = [
+ "iced",
+ "ir",
+ "parser",
  "smol_str 0.3.6",
 ]
 

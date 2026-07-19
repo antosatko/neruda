@@ -53,7 +53,7 @@ pub enum ControlFrameKind {
     },
 }
 
-#[derive(Debug, Clone, Default, Copy, Hash, PartialEq)]
+#[derive(Debug, Clone, Default, Copy, Hash, PartialEq, Eq)]
 pub struct FunctionIrTag;
 pub type FunctionIrKey = Key<FunctionIrTag>;
 pub type FunctionIrArena = Arena<FunctionIr, FunctionIrTag>;

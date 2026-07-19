@@ -1,10 +1,12 @@
 use iced::widget::{
-    PaneGrid, Space, button, column, container, mouse_area, pane_grid, row, scrollable, text,
-    tooltip,
+    PaneGrid, Space, button, column, container, mouse_area, operation::scroll_to, pane_grid, row,
+    scrollable, text, tooltip,
 };
 use iced::{Background, Border, Color, Element, Font, Length, Padding, Shadow, Task};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+
+use iced::widget::Id;
 
 mod loader;
 mod theme;
@@ -30,19 +32,21 @@ struct CompilerExplorer {
     hovered_source_line: Option<usize>,
     hovered_element: Option<loader::IrElement>,
 
-    // Feature 3: Navigation state tracking
     nav_history: Vec<String>,
     current_target: Option<String>,
 
     collapsed_modules: HashSet<usize>,
+    expanded_polymorphs: HashSet<String>,
     panes: pane_grid::State<PaneState>,
 }
 
 #[derive(Debug, Clone)]
 enum Message {
     ToggleModule(usize),
-    NavigateTo(String), // Replaces SelectObject
+    TogglePolymorphic(String),
+    NavigateTo(String),
     NavigateBack,
+    ClickInstruction(Option<usize>),
     HoverSourceLine(Option<usize>),
     HoverElement(Option<loader::IrElement>),
     Resized(pane_grid::ResizeEvent),
@@ -88,6 +92,7 @@ impl CompilerExplorer {
             nav_history: Vec::new(),
             current_target: None,
             collapsed_modules: HashSet::new(),
+            expanded_polymorphs: HashSet::new(),
             panes,
             hovered_element: None,
         };
@@ -101,6 +106,19 @@ impl CompilerExplorer {
                 explorer.ir_instructions = details.ir_instructions.clone();
                 explorer.active_lines = build_line_colors(&details.ir_instructions);
                 explorer.active_color_index = details.color_index;
+
+                if let Some(line) = explorer.active_lines.keys().min().copied() {
+                    return (
+                        explorer,
+                        scroll_to(
+                            Id::new("source_scroll"),
+                            scrollable::AbsoluteOffset {
+                                x: 0.0,
+                                y: line.saturating_sub(2) as f32 * 20.0,
+                            },
+                        ),
+                    );
+                }
             }
         }
         (explorer, Task::none())
@@ -114,15 +132,26 @@ impl CompilerExplorer {
                 } else {
                     self.collapsed_modules.insert(id);
                 }
+                Task::none()
             }
-            Message::HoverElement(element) => match element {
-                Some(loader::IrElement::Text(_) | loader::IrElement::Operator(_)) => (),
-                _ => self.hovered_element = element,
-            },
+            Message::TogglePolymorphic(key) => {
+                if self.expanded_polymorphs.contains(&key) {
+                    self.expanded_polymorphs.remove(&key);
+                } else {
+                    self.expanded_polymorphs.insert(key);
+                }
+                Task::none()
+            }
+            Message::HoverElement(element) => {
+                match element {
+                    Some(loader::IrElement::Text(_) | loader::IrElement::Operator(_)) => (),
+                    _ => self.hovered_element = element,
+                }
+                Task::none()
+            }
             Message::NavigateTo(target) => {
                 if let Some(ref proj) = self.project {
                     if let Some(details) = proj.details.get(&target) {
-                        // Push to history if valid
                         if let Some(current) = self.current_target.take() {
                             if self.nav_history.last() != Some(&current) {
                                 self.nav_history.push(current);
@@ -136,8 +165,19 @@ impl CompilerExplorer {
                         self.ir_instructions = details.ir_instructions.clone();
                         self.active_lines = build_line_colors(&details.ir_instructions);
                         self.active_color_index = details.color_index;
+
+                        if let Some(line) = self.active_lines.keys().min().copied() {
+                            return scroll_to(
+                                Id::new("source_scroll"),
+                                scrollable::AbsoluteOffset {
+                                    x: 0.0,
+                                    y: line.saturating_sub(2) as f32 * 20.0,
+                                },
+                            );
+                        }
                     }
                 }
+                Task::none()
             }
             Message::NavigateBack => {
                 if let Some(prev_target) = self.nav_history.pop() {
@@ -150,16 +190,46 @@ impl CompilerExplorer {
                             self.ir_instructions = details.ir_instructions.clone();
                             self.active_lines = build_line_colors(&details.ir_instructions);
                             self.active_color_index = details.color_index;
+
+                            if let Some(line) = self.active_lines.keys().min().copied() {
+                                return scroll_to(
+                                    Id::new("source_scroll"),
+                                    scrollable::AbsoluteOffset {
+                                        x: 0.0,
+                                        y: line.saturating_sub(2) as f32 * 20.0,
+                                    },
+                                );
+                            }
                         }
                     }
                 }
+                Task::none()
             }
-            Message::HoverSourceLine(line) => self.hovered_source_line = line,
-            Message::Resized(e) => self.panes.resize(e.split, e.ratio),
-            Message::ToggleVariables => self.variables_expanded = !self.variables_expanded,
-            Message::ToggleValues => self.values_expanded = !self.values_expanded,
+            Message::ClickInstruction(Some(line)) => scroll_to(
+                Id::new("source_scroll"),
+                scrollable::AbsoluteOffset {
+                    x: 0.0,
+                    y: line.saturating_sub(2) as f32 * 20.0,
+                },
+            ),
+            Message::ClickInstruction(None) => Task::none(),
+            Message::HoverSourceLine(line) => {
+                self.hovered_source_line = line;
+                Task::none()
+            }
+            Message::Resized(e) => {
+                self.panes.resize(e.split, e.ratio);
+                Task::none()
+            }
+            Message::ToggleVariables => {
+                self.variables_expanded = !self.variables_expanded;
+                Task::none()
+            }
+            Message::ToggleValues => {
+                self.values_expanded = !self.values_expanded;
+                Task::none()
+            }
         }
-        Task::none()
     }
 
     fn view(&self) -> Element<'_, Message> {
@@ -265,7 +335,7 @@ impl CompilerExplorer {
                     sidebar_col = sidebar_col.push(mod_btn);
 
                     if !is_collapsed {
-                        let mut obj_col = column![].spacing(4).padding(Padding::new(20.0).left);
+                        let mut obj_col = column![].spacing(4).padding(Padding::new(12.0).left);
 
                         for obj in &module.objects {
                             let export_icon = if obj.is_exported { "●" } else { "○" };
@@ -275,34 +345,103 @@ impl CompilerExplorer {
                                 theme::ctp::OVERLAY0
                             };
 
-                            let label = row![
-                                text(export_icon).size(10).style(move |_| {
-                                    iced::widget::text::Style {
-                                        color: Some(icon_color),
-                                    }
-                                }),
-                                text(&obj.name)
-                                    .size(13)
-                                    .style(|_| iced::widget::text::Style {
-                                        color: if obj.is_polymorphic {
-                                            Some(theme::ctp::OVERLAY1)
-                                        } else {
-                                            Some(theme::ctp::SUBTEXT0)
-                                        },
-                                    }),
-                            ]
+                            let is_expanded = self
+                                .expanded_polymorphs
+                                .contains(&format!("{}::{}", module.name, obj.name));
+
+                            let mut label_row = row![text(export_icon).size(10).style(move |_| {
+                                iced::widget::text::Style {
+                                    color: Some(icon_color),
+                                }
+                            }),]
                             .spacing(8)
                             .align_y(iced::Alignment::Center);
 
                             if obj.is_polymorphic {
+                                label_row = label_row.push(
+                                    text(if is_expanded { "▼" } else { "▶" }).size(10).style(
+                                        |_| iced::widget::text::Style {
+                                            color: Some(theme::ctp::OVERLAY1),
+                                        },
+                                    ),
+                                );
+                            }
+
+                            label_row = label_row.push(text(&obj.name).size(13).style(|_| {
+                                iced::widget::text::Style {
+                                    color: if obj.is_polymorphic {
+                                        Some(theme::ctp::OVERLAY1)
+                                    } else {
+                                        Some(theme::ctp::SUBTEXT0)
+                                    },
+                                }
+                            }));
+
+                            if obj.is_polymorphic {
                                 obj_col = obj_col.push(
-                                    container(label)
+                                    button(label_row)
+                                        .on_press(Message::TogglePolymorphic(format!(
+                                            "{}::{}",
+                                            module.name, obj.name
+                                        )))
+                                        .style(|_, _| button::Style {
+                                            background: None,
+                                            text_color: theme::ctp::SUBTEXT0,
+                                            border: Border {
+                                                color: Color::TRANSPARENT,
+                                                width: 0.0,
+                                                radius: 4.0.into(),
+                                            },
+                                            shadow: Shadow::default(),
+                                            snap: false,
+                                        })
                                         .padding(Padding::new(4.0))
                                         .width(Length::Fill),
                                 );
+
+                                if is_expanded {
+                                    let mut morph_col =
+                                        column![].spacing(2).padding(Padding::new(12.0).left);
+
+                                    for (sig, target) in &obj.morphed_versions {
+                                        let sig_label = row![
+                                            text("↳").size(12).style(|_| {
+                                                iced::widget::text::Style {
+                                                    color: Some(theme::ctp::OVERLAY0),
+                                                }
+                                            }),
+                                            text(sig).size(12).font(Font::MONOSPACE).style(|_| {
+                                                iced::widget::text::Style {
+                                                    color: Some(theme::ctp::SUBTEXT0),
+                                                }
+                                            }),
+                                        ]
+                                        .spacing(6)
+                                        .align_y(iced::Alignment::Center);
+
+                                        morph_col = morph_col.push(
+                                            button(sig_label)
+                                                .on_press(Message::NavigateTo(target.clone()))
+                                                .style(|_, _| button::Style {
+                                                    background: None,
+                                                    text_color: theme::ctp::SUBTEXT0,
+                                                    border: Border {
+                                                        color: Color::TRANSPARENT,
+                                                        width: 0.0,
+                                                        radius: 4.0.into(),
+                                                    },
+                                                    shadow: Shadow::default(),
+                                                    snap: false,
+                                                })
+                                                .padding(Padding::new(2.0))
+                                                .width(Length::Fill),
+                                        );
+                                    }
+                                    obj_col = obj_col.push(morph_col);
+                                }
                             } else {
                                 obj_col = obj_col.push(
-                                    button(label)
+                                    button(label_row)
                                         .on_press(Message::NavigateTo(format!(
                                             "{}::{}",
                                             module.name, obj.name
@@ -332,7 +471,7 @@ impl CompilerExplorer {
 
         let sidebar = container(scrollable(sidebar_content))
             .width(Length::FillPortion(1))
-            .padding(12)
+            .padding(8)
             .style(|_| theme::sidebar_panel());
 
         // ===== Pane Grid =====
@@ -346,11 +485,9 @@ impl CompilerExplorer {
                         let is_hovered = self.hovered_source_line == Some(index);
 
                         let bg_color = if is_hovered {
-                            color_offset
-                                .map(|&offset| {
-                                    theme::accent_hover(self.active_color_index + offset)
-                                })
-                                .or(Some(theme::ctp::SURFACE0))
+                            color_offset.map(|&offset| {
+                                theme::accent_hover(self.active_color_index + offset)
+                            })
                         } else if let Some(&offset) = color_offset {
                             Some(theme::accent_medium(self.active_color_index + offset))
                         } else {
@@ -368,56 +505,55 @@ impl CompilerExplorer {
                             bg_color
                         };
 
-                        col = col.push(
-                            mouse_area(
+                        let line_container = container(
+                            row![
+                                // Line number
                                 container(
-                                    row![
-                                        // Line number
-                                        container(
-                                            text(format!("{:3}", index + 1))
-                                                .font(Font::MONOSPACE)
-                                                .size(13)
-                                                .style(|_| iced::widget::text::Style {
-                                                    color: Some(theme::ctp::OVERLAY0),
-                                                }),
-                                        )
-                                        .width(Length::Fixed(40.0))
-                                        .padding(Padding::new(0.0).right(8.0))
-                                        .align_x(iced::alignment::Horizontal::Right),
-                                        // Separator
-                                        container(
-                                            Space::new()
-                                                .width(Length::Fixed(1.0))
-                                                .height(Length::Fill)
-                                        )
-                                        .style(|_| {
-                                            container::Style {
-                                                background: Some(Background::Color(
-                                                    theme::ctp::SURFACE0,
-                                                )),
-                                                ..Default::default()
-                                            }
+                                    text(format!("{:3}", index + 1))
+                                        .font(Font::MONOSPACE)
+                                        .size(13)
+                                        .style(|_| iced::widget::text::Style {
+                                            color: Some(theme::ctp::OVERLAY0),
                                         }),
-                                        // Code
-                                        text(line).font(Font::MONOSPACE).size(13).style(|_| {
-                                            iced::widget::text::Style {
-                                                color: Some(theme::ctp::TEXT),
-                                            }
-                                        }),
-                                    ]
-                                    .spacing(8)
-                                    .align_y(iced::Alignment::Center),
                                 )
-                                .width(Length::Fill)
-                                .padding(Padding::new(2.0).left(8.0).right(8.0))
-                                .style(move |_| theme::code_line_bg(line_bg)),
-                            )
-                            .on_enter(Message::HoverSourceLine(Some(index))),
-                        );
+                                .width(Length::Fixed(40.0))
+                                .padding(Padding::new(0.0).right(8.0))
+                                .align_x(iced::alignment::Horizontal::Right),
+                                // Separator
+                                container(
+                                    Space::new().width(Length::Fixed(1.0)).height(Length::Fill)
+                                )
+                                .style(|_| {
+                                    container::Style {
+                                        background: Some(Background::Color(theme::ctp::SURFACE0)),
+                                        ..Default::default()
+                                    }
+                                }),
+                                // Code
+                                text(line).font(Font::MONOSPACE).size(13).style(|_| {
+                                    iced::widget::text::Style {
+                                        color: Some(theme::ctp::TEXT),
+                                    }
+                                }),
+                            ]
+                            .spacing(8)
+                            .align_y(iced::Alignment::Center),
+                        )
+                        .width(Length::Fill)
+                        .padding(Padding::new(2.0).left(8.0).right(8.0))
+                        .style(move |_| theme::code_line_bg(line_bg));
+
+                        col = col.push(mouse_area(line_container).on_enter(
+                            if color_offset.is_some() {
+                                Message::HoverSourceLine(Some(index))
+                            } else {
+                                Message::HoverSourceLine(None)
+                            },
+                        ));
                     }
 
                     let interactive_col = mouse_area(col).on_exit(Message::HoverSourceLine(None));
-                    container(scrollable(interactive_col))
+                    container(scrollable(interactive_col).id(Id::new("source_scroll")))
                         .padding(12)
                         .style(|_| theme::base_panel())
                 }
@@ -504,7 +640,7 @@ impl CompilerExplorer {
                             table = table.push(
                                 container(
                                     row![
-                                        text(format!("{}", v.id))
+                                        text(format!("{}", v.id.id()))
                                             .width(Length::Fixed(50.0))
                                             .font(Font::MONOSPACE)
                                             .size(13)
@@ -611,7 +747,7 @@ impl CompilerExplorer {
                             table = table.push(
                                 container(
                                     row![
-                                        text(format!("{}", v.id))
+                                        text(format!("{}", v.id.id()))
                                             .width(Length::Fixed(50.0))
                                             .font(Font::MONOSPACE)
                                             .size(13)
@@ -721,7 +857,7 @@ impl CompilerExplorer {
                                         .iter()
                                         .find(|v| v.id == *id)
                                         .map(|v| format!("{}: {}", v.identifier, v.ty))
-                                        .unwrap_or_else(|| format!("var_{}", id));
+                                        .unwrap_or_else(|| format!("var_{}", id.id()));
 
                                     tooltip(
                                         base_text,
@@ -737,7 +873,7 @@ impl CompilerExplorer {
                                         .iter()
                                         .find(|v| v.id == *id)
                                         .map(|v| format!("type: {}", v.ty))
-                                        .unwrap_or_else(|| format!("val_{}", id));
+                                        .unwrap_or_else(|| format!("val_{}", id.id()));
 
                                     tooltip(
                                         base_text,
@@ -748,9 +884,8 @@ impl CompilerExplorer {
                                     .into()
                                 }
                                 loader::IrElement::Function { id } => {
-                                    // Locate function name in the function_map resolving lookup
                                     if let Some(ref proj) = self.project {
-                                        if let Some(target_name) = proj.function_map.get(id) {
+                                        if let Some(target_name) = proj.function_map.get(&id.id()) {
                                             button(base_text)
                                                 .on_press(Message::NavigateTo(target_name.clone()))
                                                 .style(|_, _| button::Style {
@@ -780,7 +915,6 @@ impl CompilerExplorer {
                         }
 
                         // 4. Wrap row_content in the styling container
-                        // Note: We adjust background color if it's a block label
                         if instr.kind == loader::InstructionKind::BlockLabel {
                             let mut label_bg = block_color;
                             label_bg.a = 0.10;
@@ -802,23 +936,28 @@ impl CompilerExplorer {
                             });
 
                         // 5. Render
-                        instr_col = instr_col.push(
-                            mouse_area(
-                                tooltip(
-                                    row![block_indicator, instruction_container] // Use instruction_container
-                                        .spacing(8)
-                                        .align_y(iced::Alignment::Center),
-                                    text(&instr.description).size(12).style(|_| {
-                                        iced::widget::text::Style {
-                                            color: Some(theme::ctp::SUBTEXT0),
-                                        }
-                                    }),
-                                    tooltip::Position::Right,
-                                )
-                                .style(|_| theme::tooltip_box()),
+                        let mut interaction_area = mouse_area(
+                            tooltip(
+                                row![block_indicator, instruction_container]
+                                    .spacing(8)
+                                    .align_y(iced::Alignment::Center),
+                                text(&instr.description).size(12).style(|_| {
+                                    iced::widget::text::Style {
+                                        color: Some(theme::ctp::SUBTEXT0),
+                                    }
+                                }),
+                                tooltip::Position::Right,
                             )
-                            .on_enter(Message::HoverSourceLine(instr.source_line_index)),
-                        );
+                            .style(|_| theme::tooltip_box()),
+                        )
+                        .on_enter(Message::HoverSourceLine(instr.source_line_index));
+
+                        if let Some(line_idx) = instr.source_line_index {
+                            interaction_area = interaction_area
+                                .on_press(Message::ClickInstruction(Some(line_idx)));
+                        }
+
+                        instr_col = instr_col.push(interaction_area);
                     }
 
                     let interactive_instr_col =

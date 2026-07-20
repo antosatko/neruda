@@ -1,12 +1,11 @@
+use iced::widget::operation::scroll_to;
 use iced::widget::{
-    PaneGrid, Space, button, column, container, mouse_area, operation::scroll_to, pane_grid, row,
-    scrollable, text, tooltip,
+    Id, PaneGrid, Space, button, column, container, mouse_area, pane_grid, row, scrollable, text,
+    tooltip,
 };
 use iced::{Background, Border, Color, Element, Font, Length, Padding, Shadow, Task};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-
-use iced::widget::Id;
 
 mod loader;
 mod theme;
@@ -281,7 +280,7 @@ impl CompilerExplorer {
         let sidebar_content = {
             let mut sidebar_col = column![
                 text("Modules")
-                    .size(20)
+                    .size(16)
                     .font(Font {
                         weight: iced::font::Weight::Bold,
                         ..Font::MONOSPACE
@@ -296,7 +295,6 @@ impl CompilerExplorer {
                 for module in &proj.modules {
                     let is_collapsed = self.collapsed_modules.contains(&module.id);
 
-                    // Module header button
                     let mod_btn = button(
                         row![
                             text(if is_collapsed { "▶" } else { "▼" })
@@ -507,7 +505,6 @@ impl CompilerExplorer {
 
                         let line_container = container(
                             row![
-                                // Line number
                                 container(
                                     text(format!("{:3}", index + 1))
                                         .font(Font::MONOSPACE)
@@ -519,7 +516,6 @@ impl CompilerExplorer {
                                 .width(Length::Fixed(40.0))
                                 .padding(Padding::new(0.0).right(8.0))
                                 .align_x(iced::alignment::Horizontal::Right),
-                                // Separator
                                 container(
                                     Space::new().width(Length::Fixed(1.0)).height(Length::Fill)
                                 )
@@ -529,7 +525,6 @@ impl CompilerExplorer {
                                         ..Default::default()
                                     }
                                 }),
-                                // Code
                                 text(line).font(Font::MONOSPACE).size(13).style(|_| {
                                     iced::widget::text::Style {
                                         color: Some(theme::ctp::TEXT),
@@ -559,7 +554,7 @@ impl CompilerExplorer {
                 }
 
                 PaneState::Ir => {
-                    let mut col = column![].spacing(16);
+                    let mut col = column![].spacing(12);
 
                     // =========================
                     // 1. Expandable Variables Table
@@ -595,7 +590,11 @@ impl CompilerExplorer {
                         .style(|_, _| button::Style {
                             background: None,
                             text_color: theme::ctp::SUBTEXT1,
-                            border: Border::default(),
+                            border: Border {
+                                color: Color::TRANSPARENT,
+                                width: 0.0,
+                                radius: 4.0.into(),
+                            },
                             shadow: Shadow::default(),
                             snap: false,
                         })
@@ -631,7 +630,7 @@ impl CompilerExplorer {
                                 ]
                                 .spacing(12)
                             )
-                            .padding(Padding::new(8.0))
+                            .padding(Padding::new(6.0).left(8.0).right(8.0))
                             .style(|_| theme::table_header()),
                         ]
                         .spacing(2);
@@ -709,7 +708,11 @@ impl CompilerExplorer {
                         .style(|_, _| button::Style {
                             background: None,
                             text_color: theme::ctp::SUBTEXT1,
-                            border: Border::default(),
+                            border: Border {
+                                color: Color::TRANSPARENT,
+                                width: 0.0,
+                                radius: 4.0.into(),
+                            },
                             shadow: Shadow::default(),
                             snap: false,
                         })
@@ -738,7 +741,7 @@ impl CompilerExplorer {
                                 ]
                                 .spacing(12)
                             )
-                            .padding(Padding::new(8.0))
+                            .padding(Padding::new(6.0).left(8.0).right(8.0))
                             .style(|_| theme::table_header()),
                         ]
                         .spacing(2);
@@ -787,7 +790,6 @@ impl CompilerExplorer {
                     let mut instr_col = column![].spacing(0);
 
                     for instr in &self.ir_instructions {
-                        // 1. Setup Colors (Keep your existing background logic)
                         let offset = instr
                             .source_line_index
                             .and_then(|idx| self.active_lines.get(&idx).copied())
@@ -795,7 +797,6 @@ impl CompilerExplorer {
                         let color_idx = self.active_color_index + offset;
                         let mut bg_color = theme::accent_medium(color_idx);
 
-                        // Dim inactive lines
                         if let Some(hover) = self.hovered_source_line {
                             if Some(hover) != instr.source_line_index {
                                 bg_color = theme::accent_dim(color_idx);
@@ -804,7 +805,6 @@ impl CompilerExplorer {
                             }
                         }
 
-                        // 2. Handle Block Indicator
                         let block_color = theme::BLOCK[instr.block_idx % theme::BLOCK.len()];
 
                         let block_indicator = container(
@@ -822,13 +822,11 @@ impl CompilerExplorer {
                             ..Default::default()
                         });
 
-                        // 3. Build Interactive Row Content
                         let mut row_content = row![].spacing(4);
 
                         for element in &instr.elements {
                             let is_highlighted = Some(element) == self.hovered_element.as_ref();
 
-                            // Apply special colors based on instruction kind
                             let text_color = if instr.kind == loader::InstructionKind::Terminator {
                                 theme::ctp::RED
                             } else if is_highlighted {
@@ -846,6 +844,7 @@ impl CompilerExplorer {
                                 } else {
                                     Font::MONOSPACE
                                 })
+                                .size(13)
                                 .style(move |_| iced::widget::text::Style {
                                     color: Some(text_color),
                                 });
@@ -914,7 +913,6 @@ impl CompilerExplorer {
                             row_content = row_content.push(interactive_widget);
                         }
 
-                        // 4. Wrap row_content in the styling container
                         if instr.kind == loader::InstructionKind::BlockLabel {
                             let mut label_bg = block_color;
                             label_bg.a = 0.10;
@@ -935,7 +933,6 @@ impl CompilerExplorer {
                                 ..Default::default()
                             });
 
-                        // 5. Render
                         let mut interaction_area = mouse_area(
                             tooltip(
                                 row![block_indicator, instruction_container]
@@ -965,7 +962,7 @@ impl CompilerExplorer {
                     col = col.push(interactive_instr_col);
 
                     container(scrollable(col))
-                        .padding(16)
+                        .padding(12)
                         .style(|_| theme::base_panel())
                         .into()
                 }

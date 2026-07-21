@@ -10,6 +10,7 @@ pub mod lowerng;
 use crate::{
     ast::{ConstValue, Operator, Span, SpanIndex, UnaryOp},
     const_stage::{
+        Errors,
         objects::{AnyObjectKey, FunctionObjKey},
         types::AnyTypeKey,
     },
@@ -189,6 +190,38 @@ impl BasicBlock {
         match (&self.terminator, overwrite) {
             (None, _) | (Some(_), true) => self.terminator = Some(term),
             _ => (),
+        }
+    }
+}
+
+impl BlockCtx {
+    pub fn get_break_block(&self, label: &Option<SmolStr>) -> Result<BlockKey, Errors> {
+        for cf in self.control_stack.iter().rev() {
+            if label.is_some() && label != &cf.label {
+                continue;
+            }
+            match cf.kind {
+                ControlFrameKind::Loop { break_block, .. } => return Ok(break_block),
+            }
+        }
+        match label {
+            Some(l) => todo!(),
+            None => todo!(),
+        }
+    }
+
+    pub fn get_continue_block(&self, label: &Option<SmolStr>) -> Result<BlockKey, Errors> {
+        for cf in self.control_stack.iter().rev() {
+            if label.is_some() && label != &cf.label {
+                continue;
+            }
+            match cf.kind {
+                ControlFrameKind::Loop { continue_block, .. } => return Ok(continue_block),
+            }
+        }
+        match label {
+            Some(l) => todo!(),
+            None => todo!(),
         }
     }
 }

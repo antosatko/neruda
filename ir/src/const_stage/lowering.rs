@@ -993,23 +993,22 @@ impl ast::Expression {
                                 }
                             }
                             Err(e) => {
-                                if identifier_path.path.path.len() == 1
-                                    && identifier_path
-                                        .path
-                                        .path
-                                        .first()
-                                        .map(|v| v.deref().as_str())
-                                        == Some("self")
-                                {
-                                    match self_def {
-                                        Some(v) => v.clone(),
-                                        None => {
-                                            return ConstEvalResult::NotConst(Diagnostic {
-                                                span: value.location,
-                                                module: mod_key,
-                                                inner: Errors::UndefinedSelf,
-                                            });
-                                        }
+                                if identifier_path.path.path.len() == 1 {
+                                    let ident = identifier_path.path.path.first().unwrap().clone();
+                                    match ident.deref().as_str() {
+                                        "self" => match self_def {
+                                            Some(v) => v.clone(),
+                                            None => {
+                                                return ConstEvalResult::NotConst(Diagnostic {
+                                                    span: value.location,
+                                                    module: mod_key,
+                                                    inner: Errors::UndefinedSelf,
+                                                });
+                                            }
+                                        },
+                                        "true" => ConstValue::Bool(true),
+                                        "false" => ConstValue::Bool(false),
+                                        _ => return ConstEvalResult::NotConst(e),
                                     }
                                 } else {
                                     return ConstEvalResult::NotConst(e);

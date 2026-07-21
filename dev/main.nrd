@@ -53,6 +53,15 @@ function foo<T>(v: T): T => v
 function bar(v: i32): i32 => v
 function baz<T>(): T {
     var a: T
+    if true {
+        10
+    } else if true {
+        20
+    } else if true {
+        30
+    } else {
+        40
+    }
     return a
 }
 
@@ -64,6 +73,11 @@ function nevimco(in: i32): i32 {
     var ref = a.&
     var five = foo<i32>(bar(bar(ref.*)))
     var bazz = baz<i32>().&.*
+
+    loop {
+        a = a + 1
+        break
+    }
 
     return 6 + a + in / five
 }

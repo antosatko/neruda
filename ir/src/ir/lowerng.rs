@@ -12,11 +12,11 @@ use crate::{
         Context, Diagnostic, Error, Errors, Warning, Warnings,
         lowering::{ConstEvalResult, apply_generic_arguments},
         objects::{AnyObject, AnyObjectKey, FunctionObj, FunctionObjKey, InitState, IrCache},
-        types::{AnyTypeKey, ModuleKey, RefType},
+        types::{AnyTypeKey, ModuleKey, PrimitiveType, RefType},
     },
     ir::{
-        Addr, BasicBlock, BlockCtx, FunctionIr, FunctionIrKey, Instruction, Terminator, Value,
-        ValueKey, Variable,
+        Addr, BasicBlock, BlockCtx, ControlFrame, ControlFrameKind, FunctionIr, FunctionIrKey,
+        Instruction, Terminator, Value, ValueKey, Variable,
     },
 };
 
@@ -249,8 +249,188 @@ impl Context {
                         ast::Statement::Expr { expression } => {
                             self.lower_expression(ir, block_ctx, expression, &None)?;
                         }
-                        ast::Statement::Loop { label: _, body: _ } => {
-                            todo!("musim nejak ziskat klice bloku");
+                        ast::Statement::Loop { label, body } => {
+                            let ir_obj = self.ir_cache.get_mut_unchecked(ir);
+                            let closing_block = ir_obj.blocks.current_key().unwrap();
+                            let break_block = ir_obj.blocks.push(BasicBlock::default());
+                            let continue_block = ir_obj.blocks.push(BasicBlock::default());
+                            ir_obj
+                                .blocks
+                                .arena_mut()
+                                .get_mut_unchecked(&closing_block)
+                                .value
+                                .terminate(Terminator::Jump(continue_block, None), false);
+                            block_ctx.control_stack.push(ControlFrame {
+                                kind: ControlFrameKind::Loop {
+                                    break_block,
+                                    continue_block,
+                                },
+                                label: label.as_ref().map(|s| s.deref().clone()),
+                            });
+                            self.lower_block(ir, block_ctx, body, module)?;
+                            let ir_obj = self.ir_cache.get_mut_unchecked(ir);
+                            ir_obj
+                                .blocks
+                                .get_mut_unchecked()
+                                .terminate(Terminator::Jump(continue_block, None), false);
+                            ir_obj.blocks.pop();
+                            block_ctx.control_stack.pop();
+                        }
+                        ast::Statement::Break { label } => {
+                            let (label, span) = match label {
+                                Some(l) => (Some(l.deref().clone()), l.location),
+                                None => (None, st.location),
+                            };
+                            let break_block =
+                                block_ctx.get_break_block(&label).map_err(|inner| Error {
+                                    inner,
+                                    module: *module,
+                                    span,
+                                })?;
+                            let ir_obj = self.ir_cache.get_mut_unchecked(ir);
+                            ir_obj
+                                .blocks
+                                .get_mut_unchecked()
+                                .terminate(Terminator::Jump(break_block, None), false);
+                            self.dead_code(module, &mut it);
+                        }
+                        ast::Statement::Continue { label } => {
+                            let (label, span) = match label {
+                                Some(l) => (Some(l.deref().clone()), l.location),
+                                None => (None, st.location),
+                            };
+                            let break_block =
+                                block_ctx
+                                    .get_continue_block(&label)
+                                    .map_err(|inner| Error {
+                                        inner,
+                                        module: *module,
+                                        span,
+                                    })?;
+                            let ir_obj = self.ir_cache.get_mut_unchecked(ir);
+                            ir_obj
+                                .blocks
+                                .get_mut_unchecked()
+                                .terminate(Terminator::Jump(break_block, None), false);
+                            self.dead_code(module, &mut it);
+                        }
+                        ast::Statement::If {
+                            condition,
+                            then_block,
+                            else_if,
+                            else_block,
+                        } => {
+                            let cond_expect = Some(AnyTypeKey::Primitive(PrimitiveType::Bool));
+                            let cond =
+                                self.lower_expression(ir, block_ctx, condition, &cond_expect)?;
+                            let mut cond_val = self.load_addr(
+                                ir,
+                                block_ctx,
+                                cond,
+                                &cond_expect,
+                                condition.location,
+                            )?;
+
+                            let ir_obj = self.ir_cache.get_mut_unchecked(ir);
+                            let mut closing_cond_block = ir_obj.blocks.current_key().unwrap();
+
+                            let ir_obj = self.ir_cache.get_mut_unchecked(ir);
+                            let final_blk = ir_obj.blocks.push(BasicBlock::default());
+
+                            let mut then_blk = ir_obj.blocks.push(BasicBlock::default());
+                            self.lower_block(ir, block_ctx, then_block, module)?;
+                            let ir_obj = self.ir_cache.get_mut_unchecked(ir);
+                            ir_obj
+                                .blocks
+                                .get_mut_unchecked()
+                                .terminate(Terminator::Jump(final_blk, None), false);
+                            ir_obj.blocks.pop();
+
+                            for else_if in else_if {
+                                let ir_obj = self.ir_cache.get_mut_unchecked(ir);
+                                let cond_blk = ir_obj.blocks.push(BasicBlock::default());
+                                ir_obj
+                                    .blocks
+                                    .arena_mut()
+                                    .get_mut_unchecked(&closing_cond_block)
+                                    .value
+                                    .terminate(
+                                        Terminator::Branch {
+                                            condition: cond_val,
+                                            then_block: then_blk,
+                                            else_block: cond_blk,
+                                        },
+                                        false,
+                                    );
+                                closing_cond_block = cond_blk;
+
+                                let addr = self.lower_expression(
+                                    ir,
+                                    block_ctx,
+                                    &else_if.condition,
+                                    &cond_expect,
+                                )?;
+                                cond_val = self.load_addr(
+                                    ir,
+                                    block_ctx,
+                                    addr,
+                                    &cond_expect,
+                                    else_if.condition.location,
+                                )?;
+                                let ir_obj = self.ir_cache.get_mut_unchecked(ir);
+                                then_blk = ir_obj.blocks.push(BasicBlock::default());
+                                self.lower_block(ir, block_ctx, &else_if.block, module)?;
+                                let ir_obj = self.ir_cache.get_mut_unchecked(ir);
+                                ir_obj
+                                    .blocks
+                                    .get_mut_unchecked()
+                                    .terminate(Terminator::Jump(final_blk, None), false);
+                                ir_obj.blocks.pop();
+                            }
+
+                            let ir_obj = self.ir_cache.get_mut_unchecked(ir);
+                            match else_block {
+                                Some(else_block) => {
+                                    let else_blk = ir_obj.blocks.push(BasicBlock::default());
+                                    self.lower_block(ir, block_ctx, &else_block.block, module)?;
+                                    let ir_obj = self.ir_cache.get_mut_unchecked(ir);
+                                    ir_obj
+                                        .blocks
+                                        .get_mut_unchecked()
+                                        .terminate(Terminator::Jump(final_blk, None), false);
+                                    ir_obj
+                                        .blocks
+                                        .arena_mut()
+                                        .get_mut_unchecked(&closing_cond_block)
+                                        .value
+                                        .terminate(
+                                            Terminator::Branch {
+                                                condition: cond_val,
+                                                then_block: then_blk,
+                                                else_block: else_blk,
+                                            },
+                                            false,
+                                        );
+                                    ir_obj.blocks.pop();
+                                }
+                                None => {
+                                    ir_obj
+                                        .blocks
+                                        .arena_mut()
+                                        .get_mut_unchecked(&closing_cond_block)
+                                        .value
+                                        .terminate(
+                                            Terminator::Branch {
+                                                condition: cond_val,
+                                                then_block: then_blk,
+                                                else_block: final_blk,
+                                            },
+                                            false,
+                                        );
+                                }
+                            };
+                            let ir_obj = self.ir_cache.get_mut_unchecked(ir);
+                            ir_obj.blocks.restore(final_blk);
                         }
                         _ => todo!("{:?}", st),
                     }

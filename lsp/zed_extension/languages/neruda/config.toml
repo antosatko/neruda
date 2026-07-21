@@ -4,3 +4,8 @@ line_comments = ["// "]
 language_servers = ["neruda-lsp"]
 grammar = "neruda"
 matcher = { file_extensions = ["nrd"] }
+brackets = [
+    { start = "{", end = "}", close = true, newline = true },
+    { start = "[", end = "]", close = true, newline = true },
+    { start = "(", end = ")", close = true, newline = true }
+]

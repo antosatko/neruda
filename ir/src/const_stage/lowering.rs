@@ -133,9 +133,7 @@ impl Context {
                             module: *module_key,
                         };
                         let ir = match generics.as_ref().map(|g| g.len()).unwrap_or(0) {
-                            0 => IrCache::Single(InitState::Progress(
-                                self.ir_cache.push(FunctionIr::new(&fun)),
-                            )),
+                            0 => IrCache::Single(InitState::Uninitialized),
                             _ => IrCache::Polymorphic(HashMap::new()),
                         };
                         fun.data.ir = ir;
@@ -575,12 +573,11 @@ impl Context {
                     let type_of = self.types.functions.push_unique(type_of);
                     fun.data.type_of = InitState::Done(type_of);
 
-                    match &fun.data.ir {
-                        IrCache::Single(InitState::Progress(ir)) => {
-                            self.ir_cache
-                                .get_mut_unchecked(ir)
-                                .const_stage_update(fun, function_key);
-                        }
+                    match &mut fun.data.ir {
+                        IrCache::Single(InitState::Progress(ir)) => self
+                            .ir_cache
+                            .get_mut_unchecked(ir)
+                            .const_stage_update(fun, function_key),
                         _ => (),
                     }
 

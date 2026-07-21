@@ -47,6 +47,11 @@ impl Context {
         let ir_key = match &mut fun.data.ir {
             IrCache::Single(InitState::Progress(p)) => *p,
             IrCache::Single(InitState::Done(p)) => return Ok(*p),
+            IrCache::Single(InitState::Uninitialized) => {
+                let ir = self.ir_cache.push(FunctionIr::new(fun, *key));
+                fun.data.ir = IrCache::Single(InitState::Progress(ir));
+                ir
+            }
             IrCache::Polymorphic(cache) => match generic_arguments {
                 Some(_) => match cache.get(&ty) {
                     Some(InitState::Done(ir)) => return Ok(*ir),
@@ -948,7 +953,7 @@ impl Context {
 }
 
 impl FunctionIr {
-    pub fn new(fun: &AnyObject<FunctionObj>) -> FunctionIr {
+    pub fn new(fun: &AnyObject<FunctionObj>, key: FunctionObjKey) -> FunctionIr {
         let mut instructions: Stack<BasicBlock> = Default::default();
         let blocks_entry = instructions.push(BasicBlock::default());
         let mut values = Arena::default();
@@ -971,10 +976,13 @@ impl FunctionIr {
             parameters.push((ident.deref().clone(), variable));
         }
 
+        let returns = *fun.data.return_type.get_done();
+        let type_of = AnyTypeKey::Function(*fun.data.type_of.get_done());
+
         FunctionIr {
-            source: None,
-            type_of: None,
-            returns: None,
+            source: Some(key),
+            type_of: Some(type_of),
+            returns: Some(returns),
             blocks: instructions,
             values,
             blocks_entry,

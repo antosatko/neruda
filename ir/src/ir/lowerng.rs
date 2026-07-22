@@ -94,7 +94,7 @@ impl Context {
             .deref()
         {
             ast::Object::Function(Function { body, .. }) => {
-                self.lower_block(&ir_key, &mut block_ctx, body, &mod_key)?
+                self.lower_block(&ir_key, &mut block_ctx, &body, &mod_key)?
             }
             _ => unreachable!(),
         }

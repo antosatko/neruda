@@ -86,6 +86,38 @@ fn generate_instr_elements(instr: &Instruction) -> Vec<IrElement> {
     }
 }
 
+fn generate_terminator_elements(term: &Terminator) -> Vec<IrElement> {
+    use IrElement::*;
+
+    match term.clone() {
+        Terminator::Return(Some(val)) => vec![Text("ret ".into()), Value { id: val }],
+        Terminator::Return(None) => vec![Text("ret".into())],
+        Terminator::Jump(blk, Some(val)) => vec![
+            Text("jmp ".into()),
+            Block(blk),
+            Text(" (".into()),
+            Value { id: val },
+            Text(")".into()),
+        ],
+        Terminator::Jump(blk, None) => vec![Text("jmp ".into()), Block(blk)],
+        Terminator::Branch {
+            condition,
+            then_block,
+            else_block,
+        } => vec![
+            Text("br ".into()),
+            Value { id: condition },
+            Text(", ".into()),
+            Block(then_block),
+            Text(", ".into()),
+            Block(else_block),
+        ],
+        Terminator::Eval(val) => vec![Text("eval ".into()), Value { id: val }],
+        Terminator::Unreachable => vec![Text("unreachable".into())],
+        Terminator::Exit(val) => vec![Text("exit ".into()), Value { id: val }],
+    }
+}
+
 fn instruction_description(instr: &Instruction) -> &'static str {
     match instr {
         Instruction::LoadConst { .. } => "Load a constant value",
@@ -100,25 +132,6 @@ fn instruction_description(instr: &Instruction) -> &'static str {
         Instruction::AddressOfVal { .. } => "Get the memory address of a value",
         Instruction::Deref { .. } => "Dereference a pointer to a value",
         Instruction::Exit(_) => "Terminate execution",
-    }
-}
-
-fn stringify_terminator(term: &Terminator) -> String {
-    match term {
-        Terminator::Return(Some(val)) => format!("ret {:?}", val),
-        Terminator::Return(None) => "ret".to_string(),
-        Terminator::Jump(blk, Some(val)) => format!("jmp {:?} ({:?})", blk, val),
-        Terminator::Jump(blk, None) => format!("jmp {:?}", blk),
-        Terminator::Branch {
-            condition,
-            then_block,
-            else_block,
-        } => {
-            format!("br {:?}, {:?}, {:?}", condition, then_block, else_block)
-        }
-        Terminator::Eval(val) => format!("eval {:?}", val),
-        Terminator::Unreachable => "unreachable".to_string(),
-        Terminator::Exit(val) => format!("exit {:?}", val),
     }
 }
 
@@ -142,7 +155,6 @@ fn byte_to_line_index(raw_source: &str, byte_index: usize) -> usize {
 }
 
 impl IrElement {
-    /// Convert an element to its string representation for rendering/debugging.
     pub fn stringify(&self) -> String {
         match self {
             IrElement::Text(t) => t.clone(),
@@ -167,7 +179,7 @@ pub struct UiModuleObject {
     pub name: String,
     pub is_exported: bool,
     pub is_polymorphic: bool,
-    pub morphed_versions: Vec<(String, String)>, // (Signature, Target Name)
+    pub morphed_versions: Vec<(String, String)>,
 }
 
 #[derive(Debug, Clone)]
@@ -278,7 +290,6 @@ pub fn load_project(dir_path: &Path) -> Result<LoadedProject, String> {
                         }
                     }
 
-                    // Sort morphed versions by target name for consistent UI
                     morphed_versions.sort_by(|a, b| a.1.cmp(&b.1));
 
                     let is_polymorphic = matches!(fun.data.ir, IrCache::Polymorphic(_));
@@ -294,7 +305,6 @@ pub fn load_project(dir_path: &Path) -> Result<LoadedProject, String> {
                     });
 
                     for (_signature, target_name, ir_key) in morphed_versions {
-                        // Crucially mapping the *IR function ID* instead of AST ID to fix blank links[cite: 1, 2]
                         function_map.insert(ir_key.id(), target_name.clone());
 
                         if let Some(ir) = ir_ctx.ir_cache.get(ir_key) {
@@ -340,7 +350,7 @@ pub fn load_project(dir_path: &Path) -> Result<LoadedProject, String> {
 
                                 if let Some(term) = block.value.terminator() {
                                     ui_instructions.push(UiIrInstruction {
-                                        elements: vec![IrElement::Text(stringify_terminator(term))],
+                                        elements: generate_terminator_elements(term),
                                         source_line_index: None,
                                         block_idx: b_idx.id(),
                                         description: terminator_description(term).into(),

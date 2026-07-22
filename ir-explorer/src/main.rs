@@ -7,6 +7,8 @@ use iced::{Background, Border, Color, Element, Font, Length, Padding, Shadow, Ta
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
+use crate::loader::InstructionKind;
+
 mod loader;
 mod theme;
 
@@ -22,7 +24,6 @@ struct CompilerExplorer {
     ir_values: Vec<loader::UiValue>,
     ir_instructions: Vec<loader::UiIrInstruction>,
 
-    // Toggle state for IR metadata sections
     variables_expanded: bool,
     values_expanded: bool,
 
@@ -46,6 +47,7 @@ enum Message {
     NavigateTo(String),
     NavigateBack,
     ClickInstruction(Option<usize>),
+    ClickSourceLine(usize),
     HoverSourceLine(Option<usize>),
     HoverElement(Option<loader::IrElement>),
     Resized(pane_grid::ResizeEvent),
@@ -212,6 +214,23 @@ impl CompilerExplorer {
                 },
             ),
             Message::ClickInstruction(None) => Task::none(),
+            Message::ClickSourceLine(line) => {
+                let instr_idx = self
+                    .ir_instructions
+                    .iter()
+                    .position(|i| i.source_line_index == Some(line));
+                if let Some(idx) = instr_idx {
+                    scroll_to(
+                        Id::new("ir_scroll"),
+                        scrollable::AbsoluteOffset {
+                            x: 0.0,
+                            y: idx.saturating_sub(1) as f32 * 28.0,
+                        },
+                    )
+                } else {
+                    Task::none()
+                }
+            }
             Message::HoverSourceLine(line) => {
                 self.hovered_source_line = line;
                 Task::none()
@@ -232,13 +251,12 @@ impl CompilerExplorer {
     }
 
     fn view(&self) -> Element<'_, Message> {
-        // ===== Header Bar =====
         let mut header_row = row![
             text("Compiler Explorer")
                 .font(Font::MONOSPACE)
                 .size(18)
                 .style(|_| iced::widget::text::Style {
-                    color: Some(theme::ctp::LAVENDER),
+                    color: Some(theme::palette::ACCENT_PURPLE),
                 }),
         ]
         .spacing(12)
@@ -246,11 +264,11 @@ impl CompilerExplorer {
 
         if !self.nav_history.is_empty() {
             header_row = header_row.push(
-                button(text("← Back").size(14))
+                button(text("Back").size(14))
                     .on_press(Message::NavigateBack)
                     .style(|_, _| button::Style {
-                        background: Some(Background::Color(theme::ctp::SURFACE0)),
-                        text_color: theme::ctp::TEXT,
+                        background: Some(Background::Color(theme::palette::BG_SURFACE_0)),
+                        text_color: theme::palette::TEXT_MAIN,
                         border: Border {
                             color: Color::TRANSPARENT,
                             width: 0.0,
@@ -264,11 +282,18 @@ impl CompilerExplorer {
         }
 
         if let Some(target) = &self.current_target {
-            header_row = header_row.push(text(format!(" — {}", target)).size(14).style(|_| {
-                iced::widget::text::Style {
-                    color: Some(theme::ctp::OVERLAY1),
-                }
-            }));
+            header_row = header_row.push(
+                row![
+                    text("/").size(14).style(|_| iced::widget::text::Style {
+                        color: Some(theme::palette::TEXT_DIMMED_2),
+                    }),
+                    text(target).size(14).style(|_| iced::widget::text::Style {
+                        color: Some(theme::palette::TEXT_DIMMED_1),
+                    }),
+                ]
+                .spacing(8)
+                .align_y(iced::Alignment::Center),
+            );
         }
 
         let header = container(header_row)
@@ -276,7 +301,6 @@ impl CompilerExplorer {
             .padding(Padding::new(12.0))
             .style(|_| theme::header_bar());
 
-        // ===== Sidebar =====
         let sidebar_content = {
             let mut sidebar_col = column![
                 text("Modules")
@@ -286,7 +310,7 @@ impl CompilerExplorer {
                         ..Font::MONOSPACE
                     })
                     .style(|_| iced::widget::text::Style {
-                        color: Some(theme::ctp::TEXT),
+                        color: Some(theme::palette::TEXT_MAIN),
                     })
             ]
             .spacing(12);
@@ -297,15 +321,16 @@ impl CompilerExplorer {
 
                     let mod_btn = button(
                         row![
-                            text(if is_collapsed { "▶" } else { "▼" })
-                                .size(12)
+                            text(if is_collapsed { "[+]" } else { "[-]" })
+                                .size(11)
+                                .font(Font::MONOSPACE)
                                 .style(|_| iced::widget::text::Style {
-                                    color: Some(theme::ctp::OVERLAY1),
+                                    color: Some(theme::palette::TEXT_DIMMED_1),
                                 }),
                             text(&module.name)
                                 .size(14)
                                 .style(|_| iced::widget::text::Style {
-                                    color: Some(theme::ctp::SUBTEXT1),
+                                    color: Some(theme::palette::TEXT_MUTED_0),
                                 }),
                         ]
                         .spacing(8)
@@ -316,9 +341,9 @@ impl CompilerExplorer {
                         background: if is_collapsed {
                             None
                         } else {
-                            Some(Background::Color(theme::ctp::SURFACE0))
+                            Some(Background::Color(theme::palette::BG_SURFACE_0))
                         },
-                        text_color: theme::ctp::SUBTEXT1,
+                        text_color: theme::palette::TEXT_MUTED_0,
                         border: Border {
                             color: Color::TRANSPARENT,
                             width: 0.0,
@@ -336,41 +361,54 @@ impl CompilerExplorer {
                         let mut obj_col = column![].spacing(4).padding(Padding::new(12.0).left);
 
                         for obj in &module.objects {
-                            let export_icon = if obj.is_exported { "●" } else { "○" };
+                            let export_label = if obj.is_exported { "pub" } else { "priv" };
                             let icon_color = if obj.is_exported {
-                                theme::ctp::GREEN
+                                theme::palette::ACCENT_GREEN
                             } else {
-                                theme::ctp::OVERLAY0
+                                theme::palette::TEXT_DIMMED_2
                             };
 
                             let is_expanded = self
                                 .expanded_polymorphs
                                 .contains(&format!("{}::{}", module.name, obj.name));
 
-                            let mut label_row = row![text(export_icon).size(10).style(move |_| {
-                                iced::widget::text::Style {
-                                    color: Some(icon_color),
-                                }
-                            }),]
-                            .spacing(8)
-                            .align_y(iced::Alignment::Center);
+                            let badge = container(
+                                text(export_label).size(9).font(Font::MONOSPACE).style(|_| {
+                                    iced::widget::text::Style {
+                                        color: Some(theme::palette::BG_MAIN),
+                                    }
+                                }),
+                            )
+                            .padding(Padding::new(1.0).left(3.0).right(3.0))
+                            .style(move |_| container::Style {
+                                background: Some(Background::Color(icon_color)),
+                                border: Border {
+                                    radius: 3.0.into(),
+                                    ..Default::default()
+                                },
+                                ..Default::default()
+                            });
+
+                            let mut label_row =
+                                row![badge].spacing(8).align_y(iced::Alignment::Center);
 
                             if obj.is_polymorphic {
                                 label_row = label_row.push(
-                                    text(if is_expanded { "▼" } else { "▶" }).size(10).style(
-                                        |_| iced::widget::text::Style {
-                                            color: Some(theme::ctp::OVERLAY1),
-                                        },
-                                    ),
+                                    text(if is_expanded { "[-]" } else { "[+]" })
+                                        .size(10)
+                                        .font(Font::MONOSPACE)
+                                        .style(|_| iced::widget::text::Style {
+                                            color: Some(theme::palette::TEXT_DIMMED_1),
+                                        }),
                                 );
                             }
 
                             label_row = label_row.push(text(&obj.name).size(13).style(|_| {
                                 iced::widget::text::Style {
                                     color: if obj.is_polymorphic {
-                                        Some(theme::ctp::OVERLAY1)
+                                        Some(theme::palette::TEXT_DIMMED_1)
                                     } else {
-                                        Some(theme::ctp::SUBTEXT0)
+                                        Some(theme::palette::TEXT_MUTED_1)
                                     },
                                 }
                             }));
@@ -384,7 +422,7 @@ impl CompilerExplorer {
                                         )))
                                         .style(|_, _| button::Style {
                                             background: None,
-                                            text_color: theme::ctp::SUBTEXT0,
+                                            text_color: theme::palette::TEXT_MUTED_1,
                                             border: Border {
                                                 color: Color::TRANSPARENT,
                                                 width: 0.0,
@@ -403,14 +441,16 @@ impl CompilerExplorer {
 
                                     for (sig, target) in &obj.morphed_versions {
                                         let sig_label = row![
-                                            text("↳").size(12).style(|_| {
-                                                iced::widget::text::Style {
-                                                    color: Some(theme::ctp::OVERLAY0),
+                                            text("spec").size(10).font(Font::MONOSPACE).style(
+                                                |_| {
+                                                    iced::widget::text::Style {
+                                                        color: Some(theme::palette::TEXT_DIMMED_2),
+                                                    }
                                                 }
-                                            }),
+                                            ),
                                             text(sig).size(12).font(Font::MONOSPACE).style(|_| {
                                                 iced::widget::text::Style {
-                                                    color: Some(theme::ctp::SUBTEXT0),
+                                                    color: Some(theme::palette::TEXT_MUTED_1),
                                                 }
                                             }),
                                         ]
@@ -422,7 +462,7 @@ impl CompilerExplorer {
                                                 .on_press(Message::NavigateTo(target.clone()))
                                                 .style(|_, _| button::Style {
                                                     background: None,
-                                                    text_color: theme::ctp::SUBTEXT0,
+                                                    text_color: theme::palette::TEXT_MUTED_1,
                                                     border: Border {
                                                         color: Color::TRANSPARENT,
                                                         width: 0.0,
@@ -446,7 +486,7 @@ impl CompilerExplorer {
                                         )))
                                         .style(|_, _| button::Style {
                                             background: None,
-                                            text_color: theme::ctp::SUBTEXT0,
+                                            text_color: theme::palette::TEXT_MUTED_1,
                                             border: Border {
                                                 color: Color::TRANSPARENT,
                                                 width: 0.0,
@@ -472,11 +512,17 @@ impl CompilerExplorer {
             .padding(8)
             .style(|_| theme::sidebar_panel());
 
-        // ===== Pane Grid =====
         let pane_grid = PaneGrid::new(&self.panes, |_, state, _| {
             pane_grid::Content::new(match state {
                 PaneState::Source => {
                     let mut col = column![].spacing(0);
+
+                    let mut line_to_block = HashMap::new();
+                    for instr in &self.ir_instructions {
+                        if let Some(idx) = instr.source_line_index {
+                            line_to_block.entry(idx).or_insert(instr.block_idx);
+                        }
+                    }
 
                     for (index, line) in self.source_lines.iter().enumerate() {
                         let color_offset = self.active_lines.get(&index);
@@ -503,31 +549,46 @@ impl CompilerExplorer {
                             bg_color
                         };
 
+                        let block_idx_opt = line_to_block.get(&index);
+                        let block_gutter = if let Some(&b_idx) = block_idx_opt {
+                            let block_color = theme::BLOCK[b_idx % theme::BLOCK.len()];
+                            container(Space::new().width(Length::Fixed(4.0)).height(Length::Fill))
+                                .style(move |_| container::Style {
+                                    background: Some(Background::Color(block_color)),
+                                    ..Default::default()
+                                })
+                        } else {
+                            container(Space::new().width(Length::Fixed(4.0)).height(Length::Fill))
+                        };
+
                         let line_container = container(
                             row![
+                                block_gutter,
                                 container(
                                     text(format!("{:3}", index + 1))
                                         .font(Font::MONOSPACE)
                                         .size(13)
                                         .style(|_| iced::widget::text::Style {
-                                            color: Some(theme::ctp::OVERLAY0),
+                                            color: Some(theme::palette::TEXT_DIMMED_2),
                                         }),
                                 )
                                 .width(Length::Fixed(40.0))
-                                .padding(Padding::new(0.0).right(8.0))
+                                .padding(Padding::new(0.0).left(8.0).right(8.0))
                                 .align_x(iced::alignment::Horizontal::Right),
                                 container(
                                     Space::new().width(Length::Fixed(1.0)).height(Length::Fill)
                                 )
                                 .style(|_| {
                                     container::Style {
-                                        background: Some(Background::Color(theme::ctp::SURFACE0)),
+                                        background: Some(Background::Color(
+                                            theme::palette::BG_SURFACE_0,
+                                        )),
                                         ..Default::default()
                                     }
                                 }),
                                 text(line).font(Font::MONOSPACE).size(13).style(|_| {
                                     iced::widget::text::Style {
-                                        color: Some(theme::ctp::TEXT),
+                                        color: Some(theme::palette::TEXT_MAIN),
                                     }
                                 }),
                             ]
@@ -535,16 +596,18 @@ impl CompilerExplorer {
                             .align_y(iced::Alignment::Center),
                         )
                         .width(Length::Fill)
-                        .padding(Padding::new(2.0).left(8.0).right(8.0))
+                        .padding(Padding::new(2.0).right(8.0))
                         .style(move |_| theme::code_line_bg(line_bg));
 
-                        col = col.push(mouse_area(line_container).on_enter(
-                            if color_offset.is_some() {
+                        let interactive_row = mouse_area(line_container)
+                            .on_enter(if color_offset.is_some() {
                                 Message::HoverSourceLine(Some(index))
                             } else {
                                 Message::HoverSourceLine(None)
-                            },
-                        ));
+                            })
+                            .on_press(Message::ClickSourceLine(index));
+
+                        col = col.push(interactive_row);
                     }
 
                     let interactive_col = mouse_area(col).on_exit(Message::HoverSourceLine(None));
@@ -556,21 +619,19 @@ impl CompilerExplorer {
                 PaneState::Ir => {
                     let mut col = column![].spacing(12);
 
-                    // =========================
-                    // 1. Expandable Variables Table
-                    // =========================
                     let mut var_col = column![
                         button(
                             row![
                                 text(if self.variables_expanded {
-                                    "▼"
+                                    "[-]"
                                 } else {
-                                    "▶"
+                                    "[+]"
                                 })
-                                .size(12)
+                                .size(11)
+                                .font(Font::MONOSPACE)
                                 .style(|_| {
                                     iced::widget::text::Style {
-                                        color: Some(theme::ctp::OVERLAY1),
+                                        color: Some(theme::palette::TEXT_DIMMED_1),
                                     }
                                 }),
                                 text("Variables")
@@ -580,7 +641,7 @@ impl CompilerExplorer {
                                         ..Font::MONOSPACE
                                     })
                                     .style(|_| iced::widget::text::Style {
-                                        color: Some(theme::ctp::SUBTEXT1),
+                                        color: Some(theme::palette::TEXT_MUTED_0),
                                     }),
                             ]
                             .spacing(8)
@@ -589,7 +650,7 @@ impl CompilerExplorer {
                         .on_press(Message::ToggleVariables)
                         .style(|_, _| button::Style {
                             background: None,
-                            text_color: theme::ctp::SUBTEXT1,
+                            text_color: theme::palette::TEXT_MUTED_0,
                             border: Border {
                                 color: Color::TRANSPARENT,
                                 width: 0.0,
@@ -611,21 +672,21 @@ impl CompilerExplorer {
                                         .font(Font::MONOSPACE)
                                         .size(12)
                                         .style(|_| iced::widget::text::Style {
-                                            color: Some(theme::ctp::OVERLAY1),
+                                            color: Some(theme::palette::TEXT_DIMMED_1),
                                         }),
                                     text("identifier")
                                         .width(Length::Fixed(160.0))
                                         .font(Font::MONOSPACE)
                                         .size(12)
                                         .style(|_| iced::widget::text::Style {
-                                            color: Some(theme::ctp::OVERLAY1),
+                                            color: Some(theme::palette::TEXT_DIMMED_1),
                                         }),
                                     text("type")
                                         .width(Length::Fill)
                                         .font(Font::MONOSPACE)
                                         .size(12)
                                         .style(|_| iced::widget::text::Style {
-                                            color: Some(theme::ctp::OVERLAY1),
+                                            color: Some(theme::palette::TEXT_DIMMED_1),
                                         }),
                                 ]
                                 .spacing(12)
@@ -644,21 +705,21 @@ impl CompilerExplorer {
                                             .font(Font::MONOSPACE)
                                             .size(13)
                                             .style(|_| iced::widget::text::Style {
-                                                color: Some(theme::ctp::SKY),
+                                                color: Some(theme::palette::ACCENT_BLUE),
                                             }),
                                         text(&v.identifier)
                                             .width(Length::Fixed(160.0))
                                             .font(Font::MONOSPACE)
                                             .size(13)
                                             .style(|_| iced::widget::text::Style {
-                                                color: Some(theme::ctp::TEXT),
+                                                color: Some(theme::palette::TEXT_MAIN),
                                             }),
                                         text(&v.ty)
                                             .width(Length::Fill)
                                             .font(Font::MONOSPACE)
                                             .size(13)
                                             .style(|_| iced::widget::text::Style {
-                                                color: Some(theme::ctp::SUBTEXT0),
+                                                color: Some(theme::palette::TEXT_MUTED_1),
                                             }),
                                     ]
                                     .spacing(12)
@@ -666,9 +727,9 @@ impl CompilerExplorer {
                                 )
                                 .padding(Padding::new(6.0).left(8.0).right(8.0))
                                 .style(|_| container::Style {
-                                    background: Some(Background::Color(theme::ctp::BASE)),
+                                    background: Some(Background::Color(theme::palette::BG_MAIN)),
                                     border: Border {
-                                        color: theme::ctp::SURFACE0,
+                                        color: theme::palette::BG_SURFACE_0,
                                         width: 1.0,
                                         radius: 4.0.into(),
                                     },
@@ -680,16 +741,16 @@ impl CompilerExplorer {
                     }
                     col = col.push(var_col);
 
-                    // =========================
-                    // 2. Expandable Values Table
-                    // =========================
                     let mut val_col = column![
                         button(
                             row![
-                                text(if self.values_expanded { "▼" } else { "▶" })
-                                    .size(12)
-                                    .style(|_| iced::widget::text::Style {
-                                        color: Some(theme::ctp::OVERLAY1),
+                                text(if self.values_expanded { "[-]" } else { "[+]" })
+                                    .size(11)
+                                    .font(Font::MONOSPACE)
+                                    .style(|_| {
+                                        iced::widget::text::Style {
+                                            color: Some(theme::palette::TEXT_DIMMED_1),
+                                        }
                                     }),
                                 text("Values")
                                     .size(14)
@@ -698,7 +759,7 @@ impl CompilerExplorer {
                                         ..Font::MONOSPACE
                                     })
                                     .style(|_| iced::widget::text::Style {
-                                        color: Some(theme::ctp::SUBTEXT1),
+                                        color: Some(theme::palette::TEXT_MUTED_0),
                                     }),
                             ]
                             .spacing(8)
@@ -707,7 +768,7 @@ impl CompilerExplorer {
                         .on_press(Message::ToggleValues)
                         .style(|_, _| button::Style {
                             background: None,
-                            text_color: theme::ctp::SUBTEXT1,
+                            text_color: theme::palette::TEXT_MUTED_0,
                             border: Border {
                                 color: Color::TRANSPARENT,
                                 width: 0.0,
@@ -729,14 +790,14 @@ impl CompilerExplorer {
                                         .font(Font::MONOSPACE)
                                         .size(12)
                                         .style(|_| iced::widget::text::Style {
-                                            color: Some(theme::ctp::OVERLAY1),
+                                            color: Some(theme::palette::TEXT_DIMMED_1),
                                         }),
                                     text("type")
                                         .width(Length::Fill)
                                         .font(Font::MONOSPACE)
                                         .size(12)
                                         .style(|_| iced::widget::text::Style {
-                                            color: Some(theme::ctp::OVERLAY1),
+                                            color: Some(theme::palette::TEXT_DIMMED_1),
                                         }),
                                 ]
                                 .spacing(12)
@@ -755,14 +816,14 @@ impl CompilerExplorer {
                                             .font(Font::MONOSPACE)
                                             .size(13)
                                             .style(|_| iced::widget::text::Style {
-                                                color: Some(theme::ctp::SKY),
+                                                color: Some(theme::palette::ACCENT_BLUE),
                                             }),
                                         text(&v.ty)
                                             .width(Length::Fill)
                                             .font(Font::MONOSPACE)
                                             .size(13)
                                             .style(|_| iced::widget::text::Style {
-                                                color: Some(theme::ctp::TEXT),
+                                                color: Some(theme::palette::TEXT_MAIN),
                                             }),
                                     ]
                                     .spacing(12)
@@ -770,9 +831,9 @@ impl CompilerExplorer {
                                 )
                                 .padding(Padding::new(6.0).left(8.0).right(8.0))
                                 .style(|_| container::Style {
-                                    background: Some(Background::Color(theme::ctp::BASE)),
+                                    background: Some(Background::Color(theme::palette::BG_MAIN)),
                                     border: Border {
-                                        color: theme::ctp::SURFACE0,
+                                        color: theme::palette::BG_SURFACE_0,
                                         width: 1.0,
                                         radius: 4.0.into(),
                                     },
@@ -784,9 +845,6 @@ impl CompilerExplorer {
                     }
                     col = col.push(val_col);
 
-                    // =========================
-                    // 3. Block & Instruction Render
-                    // =========================
                     let mut instr_col = column![].spacing(0);
 
                     for instr in &self.ir_instructions {
@@ -827,12 +885,13 @@ impl CompilerExplorer {
                         for element in &instr.elements {
                             let is_highlighted = Some(element) == self.hovered_element.as_ref();
 
-                            let text_color = if instr.kind == loader::InstructionKind::Terminator {
-                                theme::ctp::RED
-                            } else if is_highlighted {
-                                theme::ctp::YELLOW
+                            let text_color = if is_highlighted {
+                                theme::palette::ACCENT_YELLOW
                             } else {
-                                theme::ctp::TEXT
+                                match instr.kind {
+                                    InstructionKind::Terminator => theme::palette::ACCENT_RED,
+                                    _ => theme::palette::TEXT_MAIN,
+                                }
                             };
 
                             let base_text = text(element.stringify().to_string())
@@ -889,7 +948,7 @@ impl CompilerExplorer {
                                                 .on_press(Message::NavigateTo(target_name.clone()))
                                                 .style(|_, _| button::Style {
                                                     background: None,
-                                                    text_color: theme::ctp::SKY,
+                                                    text_color: theme::palette::ACCENT_BLUE,
                                                     border: Border::default(),
                                                     shadow: Shadow::default(),
                                                     snap: false,
@@ -940,7 +999,7 @@ impl CompilerExplorer {
                                     .align_y(iced::Alignment::Center),
                                 text(&instr.description).size(12).style(|_| {
                                     iced::widget::text::Style {
-                                        color: Some(theme::ctp::SUBTEXT0),
+                                        color: Some(theme::palette::TEXT_MUTED_1),
                                     }
                                 }),
                                 tooltip::Position::Right,
@@ -961,7 +1020,7 @@ impl CompilerExplorer {
                         mouse_area(instr_col).on_exit(Message::HoverSourceLine(None));
                     col = col.push(interactive_instr_col);
 
-                    container(scrollable(col))
+                    container(scrollable(col).id(Id::new("ir_scroll")))
                         .padding(12)
                         .style(|_| theme::base_panel())
                         .into()
@@ -971,7 +1030,6 @@ impl CompilerExplorer {
         .width(Length::FillPortion(3))
         .on_resize(10.0, Message::Resized);
 
-        // ===== Main Layout =====
         let content = row![pane_grid, sidebar].spacing(0);
 
         column![header, content].spacing(0).into()

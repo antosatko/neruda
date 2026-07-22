@@ -2,50 +2,43 @@
 
 use iced::{Background, Border, Color, Shadow, Vector, widget::container};
 
-/// Catppuccin Mocha — soothing pastel dark theme.
-/// Perfect for developer tools and code editors.
-pub mod ctp {
+/// Custom original dark theme palette.
+/// Designed for optimal contrast and readability in developer tools.
+pub mod palette {
     use iced::Color;
 
-    // ===== Accents =====
-    pub const ROSEWATER: Color = Color::from_rgb(0.961, 0.878, 0.863);
-    pub const FLAMINGO: Color = Color::from_rgb(0.949, 0.804, 0.804);
-    pub const PINK: Color = Color::from_rgb(0.961, 0.761, 0.906);
-    pub const MAUVE: Color = Color::from_rgb(0.796, 0.651, 0.969);
-    pub const RED: Color = Color::from_rgb(0.953, 0.545, 0.659);
-    pub const MAROON: Color = Color::from_rgb(0.922, 0.627, 0.675);
-    pub const PEACH: Color = Color::from_rgb(0.980, 0.702, 0.529);
-    pub const YELLOW: Color = Color::from_rgb(0.976, 0.886, 0.686);
-    pub const GREEN: Color = Color::from_rgb(0.651, 0.890, 0.631);
-    pub const TEAL: Color = Color::from_rgb(0.580, 0.886, 0.835);
-    pub const SKY: Color = Color::from_rgb(0.537, 0.863, 0.922);
-    pub const SAPPHIRE: Color = Color::from_rgb(0.455, 0.780, 0.925);
-    pub const BLUE: Color = Color::from_rgb(0.537, 0.706, 0.980);
-    pub const LAVENDER: Color = Color::from_rgb(0.706, 0.745, 0.996);
-
     // ===== Neutrals =====
-    pub const TEXT: Color = Color::from_rgb(0.804, 0.839, 0.957);
-    pub const SUBTEXT1: Color = Color::from_rgb(0.729, 0.761, 0.871);
-    pub const SUBTEXT0: Color = Color::from_rgb(0.651, 0.678, 0.784);
-    pub const OVERLAY2: Color = Color::from_rgb(0.576, 0.600, 0.698);
-    pub const OVERLAY1: Color = Color::from_rgb(0.498, 0.518, 0.612);
-    pub const OVERLAY0: Color = Color::from_rgb(0.424, 0.439, 0.525);
-    pub const SURFACE2: Color = Color::from_rgb(0.345, 0.357, 0.439);
-    pub const SURFACE1: Color = Color::from_rgb(0.271, 0.278, 0.353);
-    pub const SURFACE0: Color = Color::from_rgb(0.192, 0.196, 0.267);
-    pub const BASE: Color = Color::from_rgb(0.118, 0.118, 0.180);
-    pub const MANTLE: Color = Color::from_rgb(0.094, 0.094, 0.145);
-    pub const CRUST: Color = Color::from_rgb(0.067, 0.067, 0.106);
+    pub const BG_MAIN: Color = Color::from_rgb(0.09, 0.10, 0.12);
+    pub const BG_SIDEBAR: Color = Color::from_rgb(0.12, 0.13, 0.15);
+    pub const BG_HEADER: Color = Color::from_rgb(0.06, 0.07, 0.08);
+    pub const BG_SURFACE_0: Color = Color::from_rgb(0.16, 0.17, 0.20);
+    pub const BG_SURFACE_1: Color = Color::from_rgb(0.20, 0.22, 0.25);
+
+    pub const TEXT_MAIN: Color = Color::from_rgb(0.90, 0.91, 0.93);
+    pub const TEXT_MUTED_0: Color = Color::from_rgb(0.75, 0.77, 0.80);
+    pub const TEXT_MUTED_1: Color = Color::from_rgb(0.60, 0.63, 0.68);
+    pub const TEXT_DIMMED_1: Color = Color::from_rgb(0.45, 0.48, 0.53);
+    pub const TEXT_DIMMED_2: Color = Color::from_rgb(0.35, 0.38, 0.43);
+
+    // ===== Accents =====
+    pub const ACCENT_BLUE: Color = Color::from_rgb(0.40, 0.65, 0.95);
+    pub const ACCENT_GREEN: Color = Color::from_rgb(0.35, 0.80, 0.55);
+    pub const ACCENT_ORANGE: Color = Color::from_rgb(0.95, 0.60, 0.35);
+    pub const ACCENT_PINK: Color = Color::from_rgb(0.90, 0.45, 0.75);
+    pub const ACCENT_CYAN: Color = Color::from_rgb(0.25, 0.75, 0.85);
+    pub const ACCENT_PURPLE: Color = Color::from_rgb(0.70, 0.55, 0.95);
+    pub const ACCENT_RED: Color = Color::from_rgb(0.95, 0.35, 0.45);
+    pub const ACCENT_YELLOW: Color = Color::from_rgb(0.90, 0.80, 0.40);
 }
 
 /// 6-color accent palette for source↔IR line mapping.
 pub const ACCENT: [Color; 6] = [
-    ctp::BLUE,
-    ctp::GREEN,
-    ctp::PEACH,
-    ctp::PINK,
-    ctp::TEAL,
-    ctp::MAUVE,
+    palette::ACCENT_BLUE,
+    palette::ACCENT_GREEN,
+    palette::ACCENT_ORANGE,
+    palette::ACCENT_PINK,
+    palette::ACCENT_CYAN,
+    palette::ACCENT_PURPLE,
 ];
 
 /// Full-opacity block indicator colors.
@@ -83,11 +76,11 @@ pub fn accent_dim(idx: usize) -> Color {
 
 pub fn base_panel() -> container::Style {
     container::Style {
-        background: Some(Background::Color(ctp::BASE)),
+        background: Some(Background::Color(palette::BG_MAIN)),
         border: Border {
-            color: ctp::SURFACE0,
+            color: palette::BG_SURFACE_0,
             width: 1.0,
-            radius: 8.0.into(),
+            radius: 0.0.into(),
         },
         ..Default::default()
     }
@@ -95,7 +88,7 @@ pub fn base_panel() -> container::Style {
 
 pub fn sidebar_panel() -> container::Style {
     container::Style {
-        background: Some(Background::Color(ctp::MANTLE)),
+        background: Some(Background::Color(palette::BG_SIDEBAR)),
         border: Border::default(),
         ..Default::default()
     }
@@ -103,9 +96,9 @@ pub fn sidebar_panel() -> container::Style {
 
 pub fn header_bar() -> container::Style {
     container::Style {
-        background: Some(Background::Color(ctp::CRUST)),
+        background: Some(Background::Color(palette::BG_HEADER)),
         border: Border {
-            color: ctp::SURFACE0,
+            color: palette::BG_SURFACE_0,
             width: 1.0,
             radius: 0.0.into(),
         },
@@ -123,9 +116,9 @@ pub fn code_line_bg(highlight: Option<Color>) -> container::Style {
 
 pub fn tooltip_box() -> container::Style {
     container::Style {
-        background: Some(Background::Color(ctp::SURFACE0)),
+        background: Some(Background::Color(palette::BG_SURFACE_0)),
         border: Border {
-            color: ctp::OVERLAY0,
+            color: palette::TEXT_DIMMED_2,
             width: 1.0,
             radius: 8.0.into(),
         },
@@ -140,9 +133,9 @@ pub fn tooltip_box() -> container::Style {
 
 pub fn table_header() -> container::Style {
     container::Style {
-        background: Some(Background::Color(ctp::SURFACE0)),
+        background: Some(Background::Color(palette::BG_SURFACE_0)),
         border: Border {
-            color: ctp::SURFACE1,
+            color: palette::BG_SURFACE_1,
             width: 1.0,
             radius: 6.0.into(),
         },

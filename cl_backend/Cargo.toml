@@ -1,0 +1,10 @@
+[package]
+name = "cl_backend"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+cranelift = { version = "0.134.2", features = ["module"] }
+ir = { path = "../ir" }
+smol_str.workspace = true
+target-lexicon = "0.13.5"

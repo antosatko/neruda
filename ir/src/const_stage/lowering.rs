@@ -1181,8 +1181,8 @@ impl ast::Type {
                 if identifier_path.path.len() == 1
                     && let Some(ident) = identifier_path.path.first()
                 {
-                    if let Some(ty) = PrimitiveType::from_str(&ident.inner) {
-                        AnyTypeKey::Primitive(ty)
+                    if let Some(ty) = AnyTypeKey::from_str(&ident.inner) {
+                        ty
                     } else if let Some(ty) = ctx.generic_ctx.get(ident) {
                         AnyTypeKey::Generic(*ty)
                     } else {

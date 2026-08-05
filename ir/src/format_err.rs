@@ -255,6 +255,11 @@ impl Errors {
                 format!("Could not dereference type '{}'", ty.stringify(&ctx.types)),
                 format!("Could not dereference"),
             ),
+            Errors::TypeIsUnsized(ty) => (
+                "430",
+                format!("Could get the size of type '{}'", ty.stringify(&ctx.types)),
+                format!("Type is unsized"),
+            ),
         }
     }
 }

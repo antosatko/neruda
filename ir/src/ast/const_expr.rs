@@ -269,6 +269,7 @@ impl AnyTypeKey {
                 };
                 Ok(value)
             }
+            AnyTypeKey::Vector(vec) => todo!(),
             AnyTypeKey::Tuple(key) => {
                 let this = ctx.types.tuples.get_unchecked(key);
                 let mut elements = Vec::with_capacity(this.parameters.len());

@@ -82,7 +82,6 @@ fn generate_instr_elements(instr: &Instruction) -> Vec<IrElement> {
             Text(" = deref ".into()),
             Value { id: src },
         ],
-        Instruction::Exit(val) => vec![Text("exit ".into()), Value { id: val }],
     }
 }
 
@@ -112,9 +111,8 @@ fn generate_terminator_elements(term: &Terminator) -> Vec<IrElement> {
             Text(", ".into()),
             Block(else_block),
         ],
-        Terminator::Eval(val) => vec![Text("eval ".into()), Value { id: val }],
         Terminator::Unreachable => vec![Text("unreachable".into())],
-        Terminator::Exit(val) => vec![Text("exit ".into()), Value { id: val }],
+        Terminator::Exit(code) => vec![Text(format!("exit {code}"))],
     }
 }
 
@@ -131,7 +129,6 @@ fn instruction_description(instr: &Instruction) -> &'static str {
         Instruction::AddressOfVar { .. } => "Get the memory address of a variable",
         Instruction::AddressOfVal { .. } => "Get the memory address of a value",
         Instruction::Deref { .. } => "Dereference a pointer to a value",
-        Instruction::Exit(_) => "Terminate execution",
     }
 }
 
@@ -140,7 +137,6 @@ fn terminator_description(term: &Terminator) -> &'static str {
         Terminator::Return(_) => "Return from function",
         Terminator::Jump(..) => "Jump to block",
         Terminator::Branch { .. } => "Conditional branch",
-        Terminator::Eval(_) => "Evaluate the block to value",
         Terminator::Unreachable => "Unreachable path",
         Terminator::Exit(_) => "Terminate execution",
     }
@@ -328,7 +324,17 @@ pub fn load_project(dir_path: &Path) -> Result<LoadedProject, String> {
                             let mut ui_instructions = Vec::new();
                             for (b_idx, block) in ir.blocks.arena().iter_pairs() {
                                 ui_instructions.push(UiIrInstruction {
-                                    elements: vec![IrElement::Block(b_idx)],
+                                    elements: match block.value.parameter {
+                                        None => vec![IrElement::Block(b_idx)],
+                                        Some(param) => {
+                                            vec![
+                                                IrElement::Block(b_idx),
+                                                IrElement::Text(" (".into()),
+                                                IrElement::Value { id: param },
+                                                IrElement::Text(")".into()),
+                                            ]
+                                        }
+                                    },
                                     source_line_index: None,
                                     block_idx: b_idx.id(),
                                     description: "Block Label".into(),

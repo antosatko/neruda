@@ -149,13 +149,15 @@ pub enum PrimitiveType {
     U128,
     F32,
     F64,
-    F32x2,
-    F64x2,
-    F32x4,
-    F64x4,
     Char,
     Bool,
     EntityRef,
+}
+
+#[derive(PartialEq, Debug, Copy, Clone, Hash, Eq)]
+pub struct Vector {
+    pub element: PrimitiveType,
+    pub lanes: u16,
 }
 
 #[derive(PartialEq, Debug, Copy, Clone, Hash, Eq)]
@@ -173,6 +175,7 @@ pub enum AnyTypeKey {
     Polymorph(PolymorphKey),
     Generic(GenericKey),
     Morphed(MorphedKey),
+    Vector(Vector),
     Void,
     Never,
 }
@@ -272,32 +275,44 @@ impl AutoTypes {
     }
 }
 
-impl PrimitiveType {
+impl AnyTypeKey {
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
-            "i8" => Some(Self::I8),
-            "i16" => Some(Self::I16),
-            "i32" => Some(Self::I32),
-            "i64" => Some(Self::I64),
-            "i128" => Some(Self::I128),
-            "u8" => Some(Self::U8),
-            "u16" => Some(Self::U16),
-            "u32" => Some(Self::U32),
-            "u64" => Some(Self::U64),
-            "u128" => Some(Self::U128),
-            "f32" => Some(Self::F32),
-            "f64" => Some(Self::F64),
-            "f32x2" => Some(Self::F32x2),
-            "f64x2" => Some(Self::F64x2),
-            "f32x4" => Some(Self::F32x4),
-            "f64x4" => Some(Self::F64x4),
-            "char" => Some(Self::Char),
-            "bool" => Some(Self::Bool),
-            "entity" => Some(Self::EntityRef),
-            _ => None,
+            "i8" => Some(AnyTypeKey::Primitive(PrimitiveType::I8)),
+            "i16" => Some(AnyTypeKey::Primitive(PrimitiveType::I16)),
+            "i32" => Some(AnyTypeKey::Primitive(PrimitiveType::I32)),
+            "i64" => Some(AnyTypeKey::Primitive(PrimitiveType::I64)),
+            "i128" => Some(AnyTypeKey::Primitive(PrimitiveType::I128)),
+            "u8" => Some(AnyTypeKey::Primitive(PrimitiveType::U8)),
+            "u16" => Some(AnyTypeKey::Primitive(PrimitiveType::U16)),
+            "u32" => Some(AnyTypeKey::Primitive(PrimitiveType::U32)),
+            "u64" => Some(AnyTypeKey::Primitive(PrimitiveType::U64)),
+            "u128" => Some(AnyTypeKey::Primitive(PrimitiveType::U128)),
+            "f32" => Some(AnyTypeKey::Primitive(PrimitiveType::F32)),
+            "f64" => Some(AnyTypeKey::Primitive(PrimitiveType::F64)),
+            "char" => Some(AnyTypeKey::Primitive(PrimitiveType::Char)),
+            "bool" => Some(AnyTypeKey::Primitive(PrimitiveType::Bool)),
+            "entity" => Some(AnyTypeKey::Primitive(PrimitiveType::EntityRef)),
+            _ => {
+                let (element, lanes) = s.split_once("x")?;
+                let lanes = lanes.parse().ok()?;
+                let element = match AnyTypeKey::from_str(element)? {
+                    AnyTypeKey::Primitive(ty) => ty,
+                    _ => return None,
+                };
+                Some(AnyTypeKey::Vector(Vector { element, lanes }))
+            }
         }
     }
+}
 
+impl Vector {
+    pub fn stringify(&self) -> String {
+        format!("{}x{}", self.element.stringify(), self.lanes)
+    }
+}
+
+impl PrimitiveType {
     pub fn stringify(&self) -> &'static str {
         match self {
             PrimitiveType::I8 => "i8",
@@ -312,10 +327,6 @@ impl PrimitiveType {
             PrimitiveType::U128 => "u128",
             PrimitiveType::F32 => "f32",
             PrimitiveType::F64 => "f64",
-            PrimitiveType::F32x2 => "f32x2",
-            PrimitiveType::F64x2 => "f64x2",
-            PrimitiveType::F32x4 => "f32x4",
-            PrimitiveType::F64x4 => "f64x4",
             PrimitiveType::Char => "char",
             PrimitiveType::Bool => "bool",
             PrimitiveType::EntityRef => "entity",
@@ -375,10 +386,6 @@ impl PrimitiveType {
             }),
             PrimitiveType::Char => ConstValue::Char(0 as char),
             PrimitiveType::Bool => ConstValue::Bool(false),
-            PrimitiveType::F32x2 => todo!(),
-            PrimitiveType::F64x2 => todo!(),
-            PrimitiveType::F32x4 => todo!(),
-            PrimitiveType::F64x4 => todo!(),
             PrimitiveType::EntityRef => todo!(),
         }
     }
@@ -692,7 +699,8 @@ impl AnyTypeKey {
             AnyTypeKey::Primitive(_)
             | AnyTypeKey::Enum(_)
             | AnyTypeKey::Void
-            | AnyTypeKey::Never => *self,
+            | AnyTypeKey::Never
+            | AnyTypeKey::Vector(_) => *self,
             AnyTypeKey::Generic(key) => match types.substitutions.get(&key) {
                 Some(s) => {
                     dbg!(*s)
@@ -797,6 +805,7 @@ impl AnyTypeKey {
             AnyTypeKey::Trait(key) => Cow::Owned(types.traits.get_unchecked(key).stringify()),
             AnyTypeKey::ModuleRef(key) => Cow::Owned(types.modules.get_unchecked(key).stringify()),
             AnyTypeKey::Named(key) => Cow::Owned(types.named.get_unchecked(key).stringify(types)),
+            AnyTypeKey::Vector(vec) => Cow::Owned(vec.stringify()),
             AnyTypeKey::Void => Cow::Borrowed("()"),
             AnyTypeKey::Never => Cow::Borrowed("!"),
         }

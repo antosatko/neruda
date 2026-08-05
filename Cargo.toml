@@ -16,3 +16,4 @@ arena-scope = { git = "https://github.com/antosatko/arena-scope" }
 clap = { version = "4.6.0", features = ["derive"] }
 parser = { path = "parser" }
 ir = { path = "ir" }
+cl_backend = { path = "cl_backend" }

@@ -81,3 +81,5 @@ function nevimco(in: i32): i32 {
 
     return 6 + a + in / five
 }
+
+function takes_vector(vec: u8x4): u8x4 => vec

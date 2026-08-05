@@ -29,6 +29,7 @@ pub struct Variable {
     pub value: ValueKey,
     pub used: bool,
     pub mutated: bool,
+    pub needs_address: bool,
 }
 
 #[derive(Debug)]
@@ -77,6 +78,7 @@ pub struct BasicBlock {
     instructions: Vec<Span<Instruction>>,
     terminator: Option<Terminator>,
     instr_lock: bool,
+    pub parameter: Option<ValueKey>,
 }
 
 #[derive(Debug, Clone)]
@@ -96,6 +98,16 @@ pub type ValueKey = Key<ValueTag>;
 #[derive(Debug, Clone, Copy)]
 pub struct Value {
     pub ty: AnyTypeKey,
+    pub needs_address: bool,
+}
+
+impl Value {
+    pub fn new(ty: AnyTypeKey) -> Self {
+        Self {
+            ty,
+            needs_address: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -148,7 +160,6 @@ pub enum Instruction {
         src: ValueKey,
         dst: ValueKey,
     },
-    Exit(ValueKey),
 }
 
 #[derive(Debug, Clone)]
@@ -160,9 +171,8 @@ pub enum Terminator {
         then_block: BlockKey,
         else_block: BlockKey,
     },
-    Eval(ValueKey),
     Unreachable,
-    Exit(ValueKey),
+    Exit(u8),
 }
 
 impl BasicBlock {

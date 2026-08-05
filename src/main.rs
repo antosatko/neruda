@@ -1,3 +1,4 @@
+use cl_backend::CLLoweringCtx;
 use clap::{Parser, ValueEnum};
 use ir::{
     const_stage::{
@@ -172,10 +173,15 @@ fn main() {
                         IrCache::Single(k) => *k.get_done(),
                     })
                     .unwrap();
-                let interpret = Interpreter::new(ir_ctx.ir_cache);
-                interpret
-                    .interpret_function(main, Vec::with_capacity(0))
-                    .unwrap();
+
+                let mut cl_be = CLLoweringCtx::init(&ir_ctx);
+                cl_be.lower();
+                match cli.output {
+                    Some(out) => {
+                        cl_be.emit(out);
+                    }
+                    None => (),
+                }
             }
         }
         EmitTarget::Asm => println!("Running back-end... generating Assembly."),

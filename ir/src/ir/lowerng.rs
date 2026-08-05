@@ -212,6 +212,7 @@ impl Context {
                                 ty,
                                 used: false,
                                 mutated: false,
+                                needs_address: false,
                             };
                             let ir = self.ir_cache.get_mut_unchecked(ir);
                             let dst = ir.variables.push(var);
@@ -448,9 +449,14 @@ impl Context {
                 let val =
                     self.load_addr(ir, block_ctx, addr, &Some(returns), expression.location)?;
                 let ir = self.ir_cache.get_mut_unchecked(ir);
-                ir.blocks
-                    .get_mut_unchecked()
-                    .terminate(Terminator::Eval(val), false);
+                let this_block = ir.blocks.current_key().unwrap();
+                match ir.blocks.arena().get_unchecked(&this_block).parent {
+                    Some(_) => todo!("theres some work to do"),
+                    None => ir
+                        .blocks
+                        .get_mut_unchecked()
+                        .terminate(Terminator::Return(Some(val)), false),
+                }
             }
         }
         Ok(())
@@ -527,7 +533,7 @@ impl Context {
                         if l_prim == r_prim =>
                     {
                         let ir = self.ir_cache.get_mut_unchecked(ir);
-                        let dst = ir.values.push(Value { ty: left_ty });
+                        let dst = ir.values.push(Value::new(left_ty));
                         ir.blocks.get_mut_unchecked().extend(
                             [Instruction::BinOp {
                                 op: *op.deref(),
@@ -639,14 +645,14 @@ impl Context {
                         Postfix::Ref => match addr {
                             Addr::Var(var) => {
                                 let ir = self.ir_cache.get_mut_unchecked(ir);
-                                let var_obj = ir.variables.get_unchecked(&var);
+                                let var_obj = ir.variables.get_mut_unchecked(&var);
+                                var_obj.needs_address = true;
+                                var_obj.used = true;
                                 let ty = self
                                     .types
                                     .references
                                     .push_unique(RefType { inner: var_obj.ty });
-                                let dst = ir.values.push(Value {
-                                    ty: AnyTypeKey::Reference(ty),
-                                });
+                                let dst = ir.values.push(Value::new(AnyTypeKey::Reference(ty)));
                                 ir.blocks
                                     .get_mut_unchecked()
                                     .extend([Instruction::AddressOfVar { var, dst }], op.location);
@@ -654,14 +660,13 @@ impl Context {
                             }
                             Addr::Value(val) => {
                                 let ir = self.ir_cache.get_mut_unchecked(ir);
-                                let val_obj = ir.values.get_unchecked(&val);
+                                let val_obj = ir.values.get_mut_unchecked(&val);
+                                val_obj.needs_address = true;
                                 let ty = self
                                     .types
                                     .references
                                     .push_unique(RefType { inner: val_obj.ty });
-                                let dst = ir.values.push(Value {
-                                    ty: AnyTypeKey::Reference(ty),
-                                });
+                                let dst = ir.values.push(Value::new(AnyTypeKey::Reference(ty)));
                                 ir.blocks
                                     .get_mut_unchecked()
                                     .extend([Instruction::AddressOfVal { val, dst }], op.location);
@@ -718,7 +723,7 @@ impl Context {
                                     arg_values.push(val);
                                 }
                                 let self_ir = self.ir_cache.get_mut_unchecked(ir);
-                                let dst = self_ir.values.push(Value { ty: result });
+                                let dst = self_ir.values.push(Value::new(result));
                                 self_ir.blocks.get_mut_unchecked().extend(
                                     [Instruction::Call {
                                         fun: ir_key,
@@ -825,22 +830,8 @@ impl Context {
         match addr {
             Addr::Never => {
                 let ir = self.ir_cache.get_mut_unchecked(ir);
-                let code_const = ConstValue::Number(Number {
-                    size: Some(4),
-                    value: NumberValue::Int(1),
-                });
-                let code_value = ir.values.push(Value {
-                    ty: AnyTypeKey::Primitive(crate::const_stage::types::PrimitiveType::I32),
-                });
                 let blk = ir.blocks.get_mut_unchecked();
-                blk.extend(
-                    [Instruction::LoadConst {
-                        src: code_const,
-                        dst: code_value,
-                    }],
-                    span,
-                );
-                blk.terminate(Terminator::Exit(code_value), true);
+                blk.terminate(Terminator::Exit(11), true);
                 blk.lock_instructions(true);
 
                 Ok(ir.void)
@@ -855,7 +846,7 @@ impl Context {
                         span,
                     })?;
                 }
-                let dst = ir.values.push(Value { ty });
+                let dst = ir.values.push(Value::new(ty));
                 let instr = ir.blocks.get_mut_unchecked();
                 instr.extend([Instruction::LoadVar { src: key, dst }], span);
                 let var = ir.variables.get_mut_unchecked(&key);
@@ -881,7 +872,7 @@ impl Context {
                 match obj {
                     AnyObjectKey::Function(_) => {
                         let ir = self.ir_cache.get_mut_unchecked(ir);
-                        let dst = ir.values.push(Value { ty });
+                        let dst = ir.values.push(Value::new(ty));
                         ir.blocks
                             .get_mut_unchecked()
                             .extend([Instruction::AddressOfObj { obj, dst }], span);
@@ -921,7 +912,7 @@ impl Context {
                 let function = self.ir_cache.get_unchecked(&fun);
                 let ty = function.type_of.unwrap();
                 let ir = self.ir_cache.get_mut_unchecked(ir);
-                let dst = ir.values.push(Value { ty });
+                let dst = ir.values.push(Value::new(ty));
                 ir.blocks
                     .get_mut_unchecked()
                     .extend([Instruction::AddressOfFun { fun, dst }], span);
@@ -942,7 +933,7 @@ impl Context {
             Addr::MemoryRef { src, inner_ty: _ } => {
                 let ir = self.ir_cache.get_mut_unchecked(ir);
                 let ty = ir.values.get_unchecked(&src).ty;
-                let dst = ir.values.push(Value { ty });
+                let dst = ir.values.push(Value::new(ty));
                 ir.blocks
                     .get_mut_unchecked()
                     .extend([Instruction::Deref { src, dst }], span);
@@ -957,20 +948,19 @@ impl FunctionIr {
         let mut instructions: Stack<BasicBlock> = Default::default();
         let blocks_entry = instructions.push(BasicBlock::default());
         let mut values = Arena::default();
-        let void = values.push(Value {
-            ty: AnyTypeKey::Void,
-        });
+        let void = values.push(Value::new(AnyTypeKey::Void));
         let mut variables = Arena::new();
         let mut parameters = Vec::new();
         for (ident, ty) in &fun.data.params {
             let ty = *ty.get_done();
-            let value = values.push(Value { ty });
+            let value = values.push(Value::new(ty));
             let variable = Variable {
                 identifier: ident.clone(),
                 ty,
                 value,
                 mutated: false,
                 used: false,
+                needs_address: false,
             };
             let variable = variables.push(variable);
             parameters.push((ident.deref().clone(), variable));
@@ -1001,9 +991,7 @@ impl FunctionIr {
         let mut instructions: Stack<BasicBlock> = Default::default();
         let blocks_entry = instructions.push(BasicBlock::default());
         let mut values = Arena::default();
-        let void = values.push(Value {
-            ty: AnyTypeKey::Void,
-        });
+        let void = values.push(Value::new(AnyTypeKey::Void));
         let mut variables = Arena::new();
         let mut parameters = Vec::new();
         let fun = ctx.objects.functions.get_unchecked(&fun_key);
@@ -1031,13 +1019,14 @@ impl FunctionIr {
                     module,
                     span: ident.location,
                 })?;
-            let value = values.push(Value { ty });
+            let value = values.push(Value::new(ty));
             let variable = Variable {
                 identifier: ident.clone(),
                 ty,
                 value,
                 mutated: false,
                 used: false,
+                needs_address: false,
             };
             let variable = variables.push(variable);
             parameters.push((ident.deref().clone(), variable));
@@ -1075,13 +1064,14 @@ impl FunctionIr {
         let mut parameters = Vec::new();
         for (ident, ty) in &fun.data.params {
             let ty = *ty.get_done();
-            let value = self.values.push(Value { ty });
+            let value = self.values.push(Value::new(ty));
             let variable = Variable {
                 identifier: ident.clone(),
                 ty,
                 value,
                 mutated: false,
                 used: false,
+                needs_address: false,
             };
             let variable = self.variables.push(variable);
             parameters.push((ident.deref().clone(), variable));
@@ -1108,7 +1098,7 @@ fn load_const(
             span,
         })?,
     };
-    let dst = ir.values.push(Value { ty });
+    let dst = ir.values.push(Value::new(ty));
     ir.blocks.get_mut_unchecked().extend(
         [Instruction::LoadConst {
             src: const_val.clone(),

@@ -542,6 +542,8 @@ name = "cl_backend"
 version = "0.1.0"
 dependencies = [
  "cranelift",
+ "cranelift-module",
+ "cranelift-object",
  "ir",
  "smol_str 0.3.6",
  "target-lexicon",
@@ -765,6 +767,7 @@ dependencies = [
  "cranelift-codegen",
  "cranelift-frontend",
  "cranelift-module",
+ "cranelift-object",
 ]
 
 [[package]]
@@ -899,10 +902,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "cranelift-object"
+version = "0.134.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ef16bb4647b1f9b8ca0e8f0a8354165310551943af44d42aa9ec3307f172c7de"
+dependencies = [
+ "anyhow",
+ "cranelift-codegen",
+ "cranelift-control",
+ "cranelift-module",
+ "gimli",
+ "log",
+ "object",
+ "target-lexicon",
+]
+
+[[package]]
 name = "cranelift-srcgen"
 version = "0.134.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4155f8a1afdef96a0272c67804926eee4ef35f9708ab22ad6878d4c9543df596"
+
+[[package]]
+name = "crc32fast"
+version = "1.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9481c1c90cbf2ac953f07c8d4a58aa3945c425b7185c9154d67a65e4230da511"
+dependencies = [
+ "cfg-if",
+]
 
 [[package]]
 name = "crossbeam-utils"
@@ -2265,6 +2293,7 @@ dependencies = [
 name = "neruda"
 version = "0.1.0"
 dependencies = [
+ "cl_backend",
  "clap",
  "ir",
  "parser",
@@ -2679,6 +2708,18 @@ dependencies = [
  "objc2 0.5.2",
  "objc2-core-location",
  "objc2-foundation 0.2.2",
+]
+
+[[package]]
+name = "object"
+version = "0.39.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2e5a6c098c7a3b6547378093f5cc30bc54fd361ce711e05293a5cc589562739b"
+dependencies = [
+ "crc32fast",
+ "hashbrown 0.17.1",
+ "indexmap",
+ "memchr",
 ]
 
 [[package]]

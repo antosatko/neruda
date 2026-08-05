@@ -87,6 +87,7 @@ pub enum Errors {
     Todo(&'static str),
     UnresolvedFunctionReference,
     CouldNotDeref(AnyTypeKey),
+    TypeIsUnsized(AnyTypeKey),
 }
 
 #[derive(Debug)]

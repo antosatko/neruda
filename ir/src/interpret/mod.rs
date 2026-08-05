@@ -56,14 +56,7 @@ impl Interpreter {
             };
 
             match terminator {
-                Some(Terminator::Exit(code)) => {
-                    let value = frame.get_value(code)?;
-                    if let InterpreterValue::Number(n) = value {
-                        exit(n as _)
-                    } else {
-                        unreachable!("value '{value:?}' is not int")
-                    }
-                }
+                Some(Terminator::Exit(code)) => exit(code as _),
                 Some(Terminator::Return(value)) => {
                     return match value {
                         Some(value) => Ok(frame.get_value(value)?),
@@ -75,8 +68,6 @@ impl Interpreter {
                 Some(Terminator::Jump(target, _)) => {
                     block = target;
                 }
-
-                Some(Terminator::Eval(value)) => return frame.get_value(value),
 
                 Some(Terminator::Branch {
                     condition,
@@ -215,15 +206,6 @@ impl Interpreter {
 
             Instruction::AddressOfFun { fun, dst } => {
                 frame.values.insert(*dst, InterpreterValue::Function(*fun));
-            }
-
-            Instruction::Exit(key) => {
-                let val = frame.get_value(*key)?;
-                if let InterpreterValue::Number(n) = val {
-                    exit(n as _)
-                } else {
-                    unreachable!("bla bla")
-                }
             }
         }
 

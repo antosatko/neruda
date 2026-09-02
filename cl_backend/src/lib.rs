@@ -20,8 +20,9 @@ use ir::{
         ConstValueKey, Context,
         types::{AnyTypeKey, PrimitiveType, Types, Vector},
     },
-    ir::{FunctionIrKey, ValueKey},
+    ir::{FunctionIrKey, ValueKey, VariableKey},
 };
+use smol_str::ToSmolStr;
 
 use crate::layouts::Layouts;
 
@@ -126,9 +127,14 @@ impl<'a> CLLoweringCtx<'a> {
             println!("{:?}", fun_key);
             dbg!(&sig);
 
+            let label = match fun.get_label(self.ctx) {
+                Some(l) => l.to_string(),
+                None => format!("fun_{}", fun_key.id()),
+            };
+
             let id = self
                 .module
-                .declare_function(&format!("fun_{}", fun_key.id()), Linkage::Export, &sig)
+                .declare_function(&label, Linkage::Export, &sig)
                 .unwrap();
 
             self.functions.insert(fun_key, id);
@@ -207,6 +213,11 @@ impl<'a> CLLoweringCtx<'a> {
                                 (ir::ast::Operator::Mul, false) => builder.ins().imul(l, r),
                                 (ir::ast::Operator::Div, false) => builder.ins().sdiv(l, r),
                                 (ir::ast::Operator::Mod, false) => todo!(),
+                                (ir::ast::Operator::Add, true) => builder.ins().fadd(l, r),
+                                (ir::ast::Operator::Sub, true) => builder.ins().fsub(l, r),
+                                (ir::ast::Operator::Mul, true) => builder.ins().fmul(l, r),
+                                (ir::ast::Operator::Div, true) => builder.ins().fdiv(l, r),
+                                (ir::ast::Operator::Mod, true) => todo!(),
                                 (ir::ast::Operator::Eq, false) => {
                                     builder.ins().icmp(IntCC::Equal, l, r)
                                 }
@@ -227,12 +238,17 @@ impl<'a> CLLoweringCtx<'a> {
                                 }
                                 (ir::ast::Operator::And, false) => todo!(),
                                 (ir::ast::Operator::Or, false) => todo!(),
-                                (ir::ast::Operator::Assign, false) => todo!(),
-                                (ir::ast::Operator::AddAssign, false) => todo!(),
-                                (ir::ast::Operator::SubAssign, false) => todo!(),
-                                (ir::ast::Operator::MulAssign, false) => todo!(),
-                                (ir::ast::Operator::DivAssign, false) => todo!(),
-                                (ir::ast::Operator::ModAssign, false) => todo!(),
+                                (
+                                    ir::ast::Operator::ModAssign
+                                    | ir::ast::Operator::DivAssign
+                                    | ir::ast::Operator::MulAssign
+                                    | ir::ast::Operator::SubAssign
+                                    | ir::ast::Operator::Assign
+                                    | ir::ast::Operator::AddAssign,
+                                    _,
+                                ) => {
+                                    unreachable!("assigment should never leak into cranelift stage")
+                                }
                                 (ir::ast::Operator::BitOr, false) => todo!(),
                                 (ir::ast::Operator::BitAnd, false) => todo!(),
                                 _ => unreachable!(),
@@ -242,13 +258,14 @@ impl<'a> CLLoweringCtx<'a> {
                         ir::ir::Instruction::UnaryOp { op, src, dst } => todo!(),
 
                         ir::ir::Instruction::StoreVar { dst, src } => {
-                            let local = &locals[dst.id()];
-                            let val = load_value_into_ssa(&mut builder, &value_map[src], self.ctx);
-                            builder.ins().stack_store(
-                                self.frontend_config.pointer_type(),
-                                val,
-                                local.slot,
-                                0,
+                            store_local_value(
+                                &self.ctx,
+                                &self.frontend_config,
+                                &mut builder,
+                                &locals,
+                                &value_map,
+                                dst,
+                                src,
                             );
                         }
 
@@ -315,12 +332,8 @@ impl<'a> CLLoweringCtx<'a> {
                         ir::ir::Instruction::Deref { src, dst } => todo!(),
                     }
                 }
-                match block
-                    .terminator()
-                    .as_ref()
-                    .expect("Block must be terminated")
-                {
-                    ir::ir::Terminator::Return(key) => {
+                match block.terminator().as_ref() {
+                    Some(ir::ir::Terminator::Return(key)) => {
                         match key {
                             Some(key) => {
                                 let load_value_into_ssa =
@@ -330,16 +343,16 @@ impl<'a> CLLoweringCtx<'a> {
                             None => builder.ins().return_(&[]),
                         };
                     }
-                    ir::ir::Terminator::Jump(key, _key1) => {
+                    Some(ir::ir::Terminator::Jump(key, _key1)) => {
                         // Our target blocks do not declare parameters,
                         // so passing arguments here throws validation errors in Cranelift.
                         builder.ins().jump(blocks[key.id()], &[]);
                     }
-                    ir::ir::Terminator::Branch {
+                    Some(ir::ir::Terminator::Branch {
                         condition,
                         then_block,
                         else_block,
-                    } => {
+                    }) => {
                         let ssav =
                             load_value_into_ssa(&mut builder, &value_map[condition], self.ctx);
                         builder.ins().brif(
@@ -350,16 +363,17 @@ impl<'a> CLLoweringCtx<'a> {
                             &[],
                         );
                     }
-                    ir::ir::Terminator::Unreachable => {
+                    Some(ir::ir::Terminator::Unreachable) => {
                         builder
                             .ins()
                             .trap(TrapCode::user(10).expect("bad user trapcode"));
                     }
-                    ir::ir::Terminator::Exit(key) => {
+                    Some(ir::ir::Terminator::Exit(key)) => {
                         builder
                             .ins()
                             .trap(TrapCode::user(*key).expect("bad user trapcode"));
                     }
+                    None => (),
                 };
             }
 
@@ -377,6 +391,22 @@ impl<'a> CLLoweringCtx<'a> {
 
         self.module.clear_context(&mut ctx);
     }
+}
+
+fn store_local_value(
+    ctx: &Context,
+    frontend: &TargetFrontendConfig,
+    builder: &mut FunctionBuilder<'_>,
+    locals: &Vec<Local>,
+    value_map: &HashMap<ValueKey, ValueLocation>,
+    dst: &VariableKey,
+    src: &ValueKey,
+) {
+    let local = &locals[dst.id()];
+    let val = load_value_into_ssa(builder, &value_map[src], ctx);
+    builder
+        .ins()
+        .stack_store(frontend.pointer_type(), val, local.slot, 0);
 }
 
 fn convert_type(types: &Types, frontend_config: &TargetFrontendConfig, ty: AnyTypeKey) -> Type {

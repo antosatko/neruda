@@ -10,7 +10,7 @@ pub mod lowerng;
 use crate::{
     ast::{Operator, Span, SpanIndex, UnaryOp},
     const_stage::{
-        ConstValueKey, Errors,
+        ConstValueKey, Context, Errors,
         objects::{AnyObjectKey, FunctionObjKey},
         types::{AnyTypeKey, PrimitiveType},
     },
@@ -235,5 +235,15 @@ impl BlockCtx {
             Some(l) => todo!(),
             None => todo!(),
         }
+    }
+}
+
+impl FunctionIr {
+    pub fn get_label<'a>(&self, ctx: &'a Context) -> Option<&'a str> {
+        let obj = match self.source {
+            Some(key) => ctx.objects.functions.get_unchecked(&key),
+            None => return None,
+        };
+        Some(&obj.identifier)
     }
 }

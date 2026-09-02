@@ -8,11 +8,39 @@ pub function foo(a: i32): i32 {
     if a > 50 {
         return 100
     } else {
+        a = a + 10
         return danda(a) + 6
     }
     return _
 }
 
+pub function fib(n: i32): i32 {
+    if n <= 1 {
+        return n
+    }
+	var _0 = 0
+	var _1 = 1
+	loop {
+	    var current = _0 + _1
+		_0 = _1
+		_1 = current
+	    if n == 2 {
+			return current
+		}
+		n = n - 1
+	}
+	return _
+}
+
+pub function loops(a: i32) {
+    loop {
+        if a <= 0 {
+            return
+        }
+        a = a - 1
+    }
+}
+
 function danda(a: i32): i32 {
-    return a + -6
+    return a + 6
 }

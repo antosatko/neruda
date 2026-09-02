@@ -2,6 +2,7 @@ import argparse
 import subprocess
 import sys
 import time
+import os
 from pathlib import Path
 
 
@@ -53,7 +54,6 @@ def run_project():
 
     run_command([str(EXE_FILE)])
 
-
 def explore():
     command = [
         "cargo",
@@ -63,14 +63,22 @@ def explore():
         "../dev/test",
     ]
 
-    subprocess.Popen(
-        command,
-        cwd=IR_EXPLORER_DIR,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        creationflags=subprocess.CREATE_NO_WINDOW,
-    )
+    print(f"$ {' '.join(command)}")
+
+    kwargs = {
+        "cwd": IR_EXPLORER_DIR,
+        "stdin": subprocess.DEVNULL,
+        "stdout": subprocess.DEVNULL,
+        "stderr": subprocess.DEVNULL,
+    }
+
+    if sys.platform == "win32":
+        kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+    else:
+        # Detach from the terminal/session that launched this script.
+        kwargs["start_new_session"] = True
+
+    subprocess.Popen(command, **kwargs)
 
 def install_lsp():
     command = [

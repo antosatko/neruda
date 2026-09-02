@@ -32,7 +32,6 @@ impl Context {
         Ok(())
     }
 
-    #[track_caller]
     pub fn lower_function(
         &mut self,
         key: &FunctionObjKey,
@@ -84,7 +83,7 @@ impl Context {
             None => (),
         }
 
-        match self
+        let falls_through = match self
             .ast
             .get(&module.path)
             .unwrap()
@@ -97,21 +96,25 @@ impl Context {
                 self.lower_block(&ir_key, &mut block_ctx, &body, &mod_key)?
             }
             _ => unreachable!(),
-        }
+        };
         let ir = self.ir_cache.get_mut_unchecked(&ir_key);
         ir.variables.shrink();
         ir.values.shrink();
 
         let fun = self.objects.functions.get_unchecked(key);
-        match ir.blocks.get_mut_unchecked().terminator {
-            Some(_) => (),
-            None => match fun.data.return_type.get_done() {
+        match (falls_through, &ir.blocks.get_mut_unchecked().terminator) {
+            (false, _) | (true, Some(_)) => (),
+            (true, None) => match fun.data.return_type.get_done() {
                 AnyTypeKey::Void => {
                     ir.blocks
                         .get_mut_unchecked()
                         .terminate(Terminator::Return(None), false);
                 }
-                _ => todo!("tu musim vybouchnout, protoze jsi zapomnel return"),
+                _ => Err(Error {
+                    inner: Errors::Todo("Either you forgot return or I have to improve my thing"),
+                    module: mod_key,
+                    span: SpanIndex::default(),
+                })?,
             },
         }
 
@@ -149,12 +152,33 @@ impl Context {
         block_ctx: &mut BlockCtx,
         block: &Span<Body>,
         module: &ModuleKey,
-    ) -> Result<(), Error> {
-        match block.deref() {
+    ) -> Result<bool, Error> {
+        Ok(match block.deref() {
             Body::Block(block) => {
                 block_ctx.variables.push();
+                let mut falls_through = true;
                 let mut it = block.iter();
                 while let Some(st) = it.next() {
+                    let current = self
+                        .ir_cache
+                        .get_unchecked(ir)
+                        .blocks
+                        .current_key()
+                        .unwrap();
+                    if self
+                        .ir_cache
+                        .get_unchecked(ir)
+                        .blocks
+                        .arena()
+                        .get_unchecked(&current)
+                        .value
+                        .terminator
+                        .is_some()
+                    {
+                        self.dead_code(module, &mut it);
+                        falls_through = false;
+                        break;
+                    }
                     match st.deref() {
                         ast::Statement::Var {
                             ident,
@@ -270,23 +294,29 @@ impl Context {
                             ir.blocks
                                 .get_mut_unchecked()
                                 .terminate(Terminator::Return(val), false);
-                            return Ok(());
+                            return Ok(false);
                         }
                         ast::Statement::Invoke { .. } => (),
                         ast::Statement::Expr { expression } => {
                             self.lower_expression(ir, block_ctx, expression, &None)?;
                         }
                         ast::Statement::Loop { label, body } => {
+                            let current = self
+                                .ir_cache
+                                .get_unchecked(ir)
+                                .blocks
+                                .current_key()
+                                .unwrap();
                             let ir_obj = self.ir_cache.get_mut_unchecked(ir);
-                            let closing_block = ir_obj.blocks.current_key().unwrap();
                             let break_block = ir_obj.blocks.push(BasicBlock::default());
                             let continue_block = ir_obj.blocks.push(BasicBlock::default());
                             ir_obj
                                 .blocks
                                 .arena_mut()
-                                .get_mut_unchecked(&closing_block)
+                                .get_mut_unchecked(&current)
                                 .value
                                 .terminate(Terminator::Jump(continue_block, None), false);
+
                             block_ctx.control_stack.push(ControlFrame {
                                 kind: ControlFrameKind::Loop {
                                     break_block,
@@ -294,13 +324,40 @@ impl Context {
                                 },
                                 label: label.as_ref().map(|s| s.deref().clone()),
                             });
-                            self.lower_block(ir, block_ctx, body, module)?;
-                            let ir_obj = self.ir_cache.get_mut_unchecked(ir);
-                            ir_obj
+
+                            ir_obj.blocks.restore(continue_block);
+                            let body_falls_through =
+                                self.lower_block(ir, block_ctx, body, module)?;
+                            let body_end = self
+                                .ir_cache
+                                .get_unchecked(ir)
                                 .blocks
-                                .get_mut_unchecked()
-                                .terminate(Terminator::Jump(continue_block, None), false);
-                            ir_obj.blocks.pop();
+                                .current_key()
+                                .unwrap();
+                            if body_falls_through
+                                && self
+                                    .ir_cache
+                                    .get_unchecked(ir)
+                                    .blocks
+                                    .arena()
+                                    .get_unchecked(&body_end)
+                                    .value
+                                    .terminator
+                                    .is_none()
+                            {
+                                self.ir_cache
+                                    .get_mut_unchecked(ir)
+                                    .blocks
+                                    .arena_mut()
+                                    .get_mut_unchecked(&body_end)
+                                    .value
+                                    .terminate(Terminator::Jump(continue_block, None), false);
+                            }
+
+                            self.ir_cache
+                                .get_mut_unchecked(ir)
+                                .blocks
+                                .restore(break_block);
                             block_ctx.control_stack.pop();
                         }
                         ast::Statement::Break { label } => {
@@ -320,6 +377,8 @@ impl Context {
                                 .get_mut_unchecked()
                                 .terminate(Terminator::Jump(break_block, None), false);
                             self.dead_code(module, &mut it);
+                            falls_through = false;
+                            break;
                         }
                         ast::Statement::Continue { label } => {
                             let (label, span) = match label {
@@ -340,6 +399,8 @@ impl Context {
                                 .get_mut_unchecked()
                                 .terminate(Terminator::Jump(break_block, None), false);
                             self.dead_code(module, &mut it);
+                            falls_through = false;
+                            break;
                         }
                         ast::Statement::If {
                             condition,
@@ -348,121 +409,239 @@ impl Context {
                             else_block,
                         } => {
                             let cond_expect = Some(AnyTypeKey::Primitive(PrimitiveType::Bool));
-                            let cond =
-                                self.lower_expression(ir, block_ctx, condition, &cond_expect)?;
-                            let mut cond_val = self.load_addr(
-                                ir,
-                                block_ctx,
-                                cond,
-                                &cond_expect,
-                                condition.location,
-                            )?;
-
-                            let ir_obj = self.ir_cache.get_mut_unchecked(ir);
-                            let mut closing_cond_block = ir_obj.blocks.current_key().unwrap();
-
-                            let ir_obj = self.ir_cache.get_mut_unchecked(ir);
-                            let final_blk = ir_obj.blocks.push(BasicBlock::default());
-
-                            let mut then_blk = ir_obj.blocks.push(BasicBlock::default());
-                            self.lower_block(ir, block_ctx, then_block, module)?;
-                            let ir_obj = self.ir_cache.get_mut_unchecked(ir);
-                            ir_obj
+                            let mut condition_block = self
+                                .ir_cache
+                                .get_unchecked(ir)
                                 .blocks
-                                .get_mut_unchecked()
-                                .terminate(Terminator::Jump(final_blk, None), false);
-                            ir_obj.blocks.pop();
+                                .current_key()
+                                .unwrap();
+                            let mut condition_value = {
+                                let addr =
+                                    self.lower_expression(ir, block_ctx, condition, &cond_expect)?;
+                                self.load_addr(
+                                    ir,
+                                    block_ctx,
+                                    addr,
+                                    &cond_expect,
+                                    condition.location,
+                                )?
+                            };
 
-                            for else_if in else_if {
-                                let ir_obj = self.ir_cache.get_mut_unchecked(ir);
-                                let cond_blk = ir_obj.blocks.push(BasicBlock::default());
-                                ir_obj
+                            let final_block = self
+                                .ir_cache
+                                .get_mut_unchecked(ir)
+                                .blocks
+                                .push(BasicBlock::default());
+
+                            let mut then_block_key = self
+                                .ir_cache
+                                .get_mut_unchecked(ir)
+                                .blocks
+                                .push(BasicBlock::default());
+                            self.ir_cache
+                                .get_mut_unchecked(ir)
+                                .blocks
+                                .restore(then_block_key);
+                            let mut any_branch_falls_through =
+                                self.lower_block(ir, block_ctx, then_block, module)?;
+                            let then_end = self
+                                .ir_cache
+                                .get_unchecked(ir)
+                                .blocks
+                                .current_key()
+                                .unwrap();
+                            if any_branch_falls_through
+                                && self
+                                    .ir_cache
+                                    .get_unchecked(ir)
+                                    .blocks
+                                    .arena()
+                                    .get_unchecked(&then_end)
+                                    .value
+                                    .terminator
+                                    .is_none()
+                            {
+                                self.ir_cache
+                                    .get_mut_unchecked(ir)
                                     .blocks
                                     .arena_mut()
-                                    .get_mut_unchecked(&closing_cond_block)
+                                    .get_mut_unchecked(&then_end)
+                                    .value
+                                    .terminate(Terminator::Jump(final_block, None), false);
+                            } else {
+                                any_branch_falls_through = false;
+                            }
+
+                            for else_if in else_if {
+                                let next_condition_block = self
+                                    .ir_cache
+                                    .get_mut_unchecked(ir)
+                                    .blocks
+                                    .push(BasicBlock::default());
+                                let next_then_block = self
+                                    .ir_cache
+                                    .get_mut_unchecked(ir)
+                                    .blocks
+                                    .push(BasicBlock::default());
+
+                                self.ir_cache
+                                    .get_mut_unchecked(ir)
+                                    .blocks
+                                    .restore(condition_block);
+                                self.ir_cache
+                                    .get_mut_unchecked(ir)
+                                    .blocks
+                                    .arena_mut()
+                                    .get_mut_unchecked(&condition_block)
                                     .value
                                     .terminate(
                                         Terminator::Branch {
-                                            condition: cond_val,
-                                            then_block: then_blk,
-                                            else_block: cond_blk,
+                                            condition: condition_value,
+                                            then_block: then_block_key,
+                                            else_block: next_condition_block,
                                         },
                                         false,
                                     );
-                                closing_cond_block = cond_blk;
 
+                                self.ir_cache
+                                    .get_mut_unchecked(ir)
+                                    .blocks
+                                    .restore(next_condition_block);
                                 let addr = self.lower_expression(
                                     ir,
                                     block_ctx,
                                     &else_if.condition,
                                     &cond_expect,
                                 )?;
-                                cond_val = self.load_addr(
+                                condition_value = self.load_addr(
                                     ir,
                                     block_ctx,
                                     addr,
                                     &cond_expect,
                                     else_if.condition.location,
                                 )?;
-                                let ir_obj = self.ir_cache.get_mut_unchecked(ir);
-                                then_blk = ir_obj.blocks.push(BasicBlock::default());
-                                self.lower_block(ir, block_ctx, &else_if.block, module)?;
-                                let ir_obj = self.ir_cache.get_mut_unchecked(ir);
-                                ir_obj
+
+                                self.ir_cache
+                                    .get_mut_unchecked(ir)
                                     .blocks
-                                    .get_mut_unchecked()
-                                    .terminate(Terminator::Jump(final_blk, None), false);
-                                ir_obj.blocks.pop();
+                                    .restore(next_then_block);
+                                let branch_falls_through =
+                                    self.lower_block(ir, block_ctx, &else_if.block, module)?;
+                                let branch_end = self
+                                    .ir_cache
+                                    .get_unchecked(ir)
+                                    .blocks
+                                    .current_key()
+                                    .unwrap();
+                                if branch_falls_through
+                                    && self
+                                        .ir_cache
+                                        .get_unchecked(ir)
+                                        .blocks
+                                        .arena()
+                                        .get_unchecked(&branch_end)
+                                        .value
+                                        .terminator
+                                        .is_none()
+                                {
+                                    self.ir_cache
+                                        .get_mut_unchecked(ir)
+                                        .blocks
+                                        .arena_mut()
+                                        .get_mut_unchecked(&branch_end)
+                                        .value
+                                        .terminate(Terminator::Jump(final_block, None), false);
+                                }
+                                any_branch_falls_through |= branch_falls_through;
+
+                                condition_block = next_condition_block;
+                                then_block_key = next_then_block;
                             }
 
-                            let ir_obj = self.ir_cache.get_mut_unchecked(ir);
-                            match else_block {
+                            let mut else_target = final_block;
+                            let else_falls_through = match else_block {
                                 Some(else_block) => {
-                                    let else_blk = ir_obj.blocks.push(BasicBlock::default());
-                                    self.lower_block(ir, block_ctx, &else_block.block, module)?;
-                                    let ir_obj = self.ir_cache.get_mut_unchecked(ir);
-                                    ir_obj
+                                    let else_block_key = self
+                                        .ir_cache
+                                        .get_mut_unchecked(ir)
                                         .blocks
-                                        .get_mut_unchecked()
-                                        .terminate(Terminator::Jump(final_blk, None), false);
-                                    ir_obj
+                                        .push(BasicBlock::default());
+                                    else_target = else_block_key;
+                                    self.ir_cache
+                                        .get_mut_unchecked(ir)
                                         .blocks
-                                        .arena_mut()
-                                        .get_mut_unchecked(&closing_cond_block)
-                                        .value
-                                        .terminate(
-                                            Terminator::Branch {
-                                                condition: cond_val,
-                                                then_block: then_blk,
-                                                else_block: else_blk,
-                                            },
-                                            false,
-                                        );
-                                    ir_obj.blocks.pop();
+                                        .restore(else_block_key);
+                                    let branch_falls_through =
+                                        self.lower_block(ir, block_ctx, &else_block.block, module)?;
+                                    let else_end = self
+                                        .ir_cache
+                                        .get_unchecked(ir)
+                                        .blocks
+                                        .current_key()
+                                        .unwrap();
+                                    if branch_falls_through
+                                        && self
+                                            .ir_cache
+                                            .get_unchecked(ir)
+                                            .blocks
+                                            .arena()
+                                            .get_unchecked(&else_end)
+                                            .value
+                                            .terminator
+                                            .is_none()
+                                    {
+                                        self.ir_cache
+                                            .get_mut_unchecked(ir)
+                                            .blocks
+                                            .arena_mut()
+                                            .get_mut_unchecked(&else_end)
+                                            .value
+                                            .terminate(Terminator::Jump(final_block, None), false);
+                                    }
+                                    branch_falls_through
                                 }
-                                None => {
-                                    ir_obj
-                                        .blocks
-                                        .arena_mut()
-                                        .get_mut_unchecked(&closing_cond_block)
-                                        .value
-                                        .terminate(
-                                            Terminator::Branch {
-                                                condition: cond_val,
-                                                then_block: then_blk,
-                                                else_block: final_blk,
-                                            },
-                                            false,
-                                        );
-                                }
+                                None => true,
                             };
-                            let ir_obj = self.ir_cache.get_mut_unchecked(ir);
-                            ir_obj.blocks.restore(final_blk);
+                            any_branch_falls_through |= else_falls_through;
+
+                            self.ir_cache
+                                .get_mut_unchecked(ir)
+                                .blocks
+                                .restore(condition_block);
+                            self.ir_cache
+                                .get_mut_unchecked(ir)
+                                .blocks
+                                .arena_mut()
+                                .get_mut_unchecked(&condition_block)
+                                .value
+                                .terminate(
+                                    Terminator::Branch {
+                                        condition: condition_value,
+                                        then_block: then_block_key,
+                                        else_block: else_target,
+                                    },
+                                    false,
+                                );
+
+                            self.ir_cache
+                                .get_mut_unchecked(ir)
+                                .blocks
+                                .restore(final_block);
+                            falls_through = any_branch_falls_through;
+                            if !falls_through {
+                                // Both sides terminate, so there is no continuation block.
+                                // Stop this block immediately; callers inspect the returned
+                                // flow result and therefore cannot accidentally emit into the
+                                // unreachable merge block.
+                                self.dead_code(module, &mut it);
+                                break;
+                            }
                         }
                         _ => todo!("{:?}", st),
                     }
                 }
                 block_ctx.variables.pop();
+                falls_through
             }
             Body::Statement(expression) => {
                 let returns = self.ir_cache.get_mut_unchecked(ir).returns.unwrap();
@@ -478,9 +657,9 @@ impl Context {
                         .get_mut_unchecked()
                         .terminate(Terminator::Return(Some(val)), false),
                 }
+                false
             }
-        }
-        Ok(())
+        })
     }
 
     fn dead_code(
@@ -549,32 +728,76 @@ impl Context {
                     module,
                     span: r.location,
                 })?;
-                let left_value = self.load_addr(ir, block_ctx, left_addr, &None, l.location)?;
-                let right_value = self.load_addr(ir, block_ctx, right_addr, &None, r.location)?;
-                let result_ty =
-                    op.result_type(left_ty, right_ty, &self.types)
-                        .map_err(|inner| Error {
-                            inner,
-                            module,
-                            span: expr.location,
-                        })?;
+                match op.deref() {
+                    ast::Operator::Assign
+                    | ast::Operator::ModAssign
+                    | ast::Operator::DivAssign
+                    | ast::Operator::MulAssign
+                    | ast::Operator::SubAssign
+                    | ast::Operator::AddAssign => {
+                        let right_value =
+                            self.load_addr(ir, block_ctx, right_addr, &None, r.location)?;
+                        let result_type = right_ty;
+                        match left_addr {
+                            Addr::Var(key) => {
+                                let ir = self.ir_cache.get_mut_unchecked(ir);
+                                ir.blocks.get_mut_unchecked().extend(
+                                    [Instruction::StoreVar {
+                                        dst: key,
+                                        src: right_value,
+                                    }],
+                                    op.location,
+                                );
+                                Ok(left_addr)
+                            }
+                            Addr::Value(key) => todo!(),
+                            Addr::Object(any_object_key) => todo!(),
+                            Addr::Function(key) => todo!(),
+                            Addr::UnresolvedFunction(key) => todo!(),
+                            Addr::MemoryRef { src, inner_ty } => todo!(),
+                            Addr::Field { src, idx } => todo!(),
+                            Addr::Never => todo!(),
+                        }
+                    }
+                    ast::Operator::BitAnd
+                    | ast::Operator::BitOr
+                    | ast::Operator::Assign
+                    | ast::Operator::Or => Err(Error {
+                        inner: Errors::Todo("Operator unsupported"),
+                        span: op.location,
+                        module,
+                    }),
+                    _ => {
+                        let left_value =
+                            self.load_addr(ir, block_ctx, left_addr, &None, l.location)?;
+                        let right_value =
+                            self.load_addr(ir, block_ctx, right_addr, &None, r.location)?;
+                        let result_ty =
+                            op.result_type(left_ty, right_ty, &self.types)
+                                .map_err(|inner| Error {
+                                    inner,
+                                    module,
+                                    span: expr.location,
+                                })?;
 
-                let ir = self.ir_cache.get_mut_unchecked(ir);
-                let dst = ir.values.push(Value::new(result_ty));
-                ir.blocks.get_mut_unchecked().extend(
-                    [Instruction::BinOp {
-                        op: *op.deref(),
-                        l: left_value,
-                        r: right_value,
-                        dst,
-                        ty: match left_ty {
-                            AnyTypeKey::Primitive(ty) => ty,
-                            _ => unreachable!(),
-                        },
-                    }],
-                    op.location,
-                );
-                Ok(Addr::Value(dst))
+                        let ir = self.ir_cache.get_mut_unchecked(ir);
+                        let dst = ir.values.push(Value::new(result_ty));
+                        ir.blocks.get_mut_unchecked().extend(
+                            [Instruction::BinOp {
+                                op: *op.deref(),
+                                l: left_value,
+                                r: right_value,
+                                dst,
+                                ty: match left_ty {
+                                    AnyTypeKey::Primitive(ty) => ty,
+                                    _ => unreachable!(),
+                                },
+                            }],
+                            op.location,
+                        );
+                        Ok(Addr::Value(dst))
+                    }
+                }
             }
             Expression::Value(val) => {
                 let mut addr = match val.literal.deref() {

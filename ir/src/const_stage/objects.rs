@@ -7,7 +7,7 @@ use smol_str::SmolStr;
 use crate::{
     ast::{self, AccessModifiers, ConstValue, Span},
     const_stage::{
-        Context, Errors,
+        ConstValueKey, Context, Errors,
         types::{AnyTypeKey, ConstraintKey, FunctionKey, ModuleKey, NamedTypeKey, TraitKey},
     },
     ir::{FunctionIr, FunctionIrKey},
@@ -45,7 +45,7 @@ pub type ConstObjKey = Key<ConstObjTag>;
 pub type ConstObjArena = Arena<AnyObject<ConstObj>, ConstObjTag>;
 #[derive(Debug)]
 pub struct ConstObj {
-    pub value: InitState<ConstValue, ()>,
+    pub value: InitState<ConstValueKey, ()>,
     pub ty: InitState<AnyTypeKey, ()>,
 }
 
@@ -85,7 +85,7 @@ pub type ResourceObjArena = Arena<AnyObject<ResourceObj>, ResourceObjTag>;
 pub struct ResourceObj {
     pub ty: InitState<AnyTypeKey, ()>,
     pub optional: bool,
-    pub default: InitState<Option<ConstValue>, ()>,
+    pub default: InitState<Option<ConstValueKey>, ()>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash)]

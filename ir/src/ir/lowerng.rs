@@ -9,7 +9,7 @@ use crate::{
         SpanIndex, Type,
     },
     const_stage::{
-        Context, Diagnostic, Error, Errors, Warning, Warnings,
+        ConstValueKey, Constants, Context, Diagnostic, Error, Errors, Warning, Warnings,
         lowering::{ConstEvalResult, apply_generic_arguments},
         objects::{AnyObject, AnyObjectKey, FunctionObj, FunctionObjKey, InitState, IrCache},
         types::{AnyTypeKey, ModuleKey, PrimitiveType, RefType},
@@ -103,6 +103,18 @@ impl Context {
         ir.values.shrink();
 
         let fun = self.objects.functions.get_unchecked(key);
+        match ir.blocks.get_mut_unchecked().terminator {
+            Some(_) => (),
+            None => match fun.data.return_type.get_done() {
+                AnyTypeKey::Void => {
+                    ir.blocks
+                        .get_mut_unchecked()
+                        .terminate(Terminator::Return(None), false);
+                }
+                _ => todo!("tu musim vybouchnout, protoze jsi zapomnel return"),
+            },
+        }
+
         if let IrCache::Single(_) = &fun.data.ir {
             for (var_key, var) in ir.variables.iter_pairs() {
                 if !var.used && var.identifier.deref() != "_" {
@@ -186,6 +198,7 @@ impl Context {
                                             *module,
                                             default,
                                             ty.location,
+                                            &self.constants,
                                         )?),
                                         ty_low,
                                     )
@@ -222,10 +235,10 @@ impl Context {
                             block_ctx.variables.insert(ident.deref().clone(), dst);
                         }
                         ast::Statement::Return { expression } => {
-                            let returns = self.ir_cache.get_mut_unchecked(ir).returns.unwrap();
+                            let returns = self.ir_cache.get_mut_unchecked(ir).returns;
                             self.dead_code(module, &mut it);
-                            let val = match expression {
-                                Some(expr) => {
+                            let val = match (returns, expression) {
+                                (Some(returns), Some(expr)) => {
                                     let addr =
                                         self.lower_expression(ir, block_ctx, expr, &Some(returns))?;
                                     Some(self.load_addr(
@@ -236,7 +249,7 @@ impl Context {
                                         expr.location,
                                     )?)
                                 }
-                                None => match returns {
+                                (Some(returns), None) => match returns {
                                     AnyTypeKey::Void => None,
                                     _ => Err(Error {
                                         inner: Errors::ExpectedReturnExpression(block_ctx.source),
@@ -244,6 +257,14 @@ impl Context {
                                         span: st.location,
                                     })?,
                                 },
+                                (None, Some(expr)) => match returns {
+                                    _ => Err(Error {
+                                        inner: Errors::InvalidExpression,
+                                        module: *module,
+                                        span: expr.location,
+                                    })?,
+                                },
+                                (None, None) => None,
                             };
                             let ir = self.ir_cache.get_mut_unchecked(ir);
                             ir.blocks
@@ -501,12 +522,14 @@ impl Context {
             .module;
         match expr.const_eval(self, module, &None, expect) {
             ConstEvalResult::Value(const_val) => {
+                let key = self.constants.push(const_val);
                 return Ok(Addr::Value(load_const(
                     self.ir_cache.get_mut_unchecked(ir),
                     expect,
                     module,
-                    &const_val,
+                    &key,
                     expr.location,
+                    &self.constants,
                 )?));
             }
             ConstEvalResult::Error(err) => Err(err)?,
@@ -528,37 +551,30 @@ impl Context {
                 })?;
                 let left_value = self.load_addr(ir, block_ctx, left_addr, &None, l.location)?;
                 let right_value = self.load_addr(ir, block_ctx, right_addr, &None, r.location)?;
-                match (left_ty, right_ty) {
-                    (AnyTypeKey::Primitive(l_prim), AnyTypeKey::Primitive(r_prim))
-                        if l_prim == r_prim =>
-                    {
-                        let ir = self.ir_cache.get_mut_unchecked(ir);
-                        let dst = ir.values.push(Value::new(left_ty));
-                        ir.blocks.get_mut_unchecked().extend(
-                            [Instruction::BinOp {
-                                op: *op.deref(),
-                                l: left_value,
-                                r: right_value,
-                                dst,
-                            }],
-                            op.location,
-                        );
-                        Ok(Addr::Value(dst))
-                    }
-                    (AnyTypeKey::Primitive(_), AnyTypeKey::Primitive(_)) => Err(Error {
-                        inner: Errors::TypeMismatch {
-                            expected: left_ty,
-                            got: right_ty,
+                let result_ty =
+                    op.result_type(left_ty, right_ty, &self.types)
+                        .map_err(|inner| Error {
+                            inner,
+                            module,
+                            span: expr.location,
+                        })?;
+
+                let ir = self.ir_cache.get_mut_unchecked(ir);
+                let dst = ir.values.push(Value::new(result_ty));
+                ir.blocks.get_mut_unchecked().extend(
+                    [Instruction::BinOp {
+                        op: *op.deref(),
+                        l: left_value,
+                        r: right_value,
+                        dst,
+                        ty: match left_ty {
+                            AnyTypeKey::Primitive(ty) => ty,
+                            _ => unreachable!(),
                         },
-                        module,
-                        span: r.location,
-                    }),
-                    _ => Err(Error {
-                        inner: Errors::Undefined("Binary operation on non primitive types"),
-                        module,
-                        span: l.location + r.location,
-                    }),
-                }
+                    }],
+                    op.location,
+                );
+                Ok(Addr::Value(dst))
             }
             Expression::Value(val) => {
                 let mut addr = match val.literal.deref() {
@@ -836,6 +852,15 @@ impl Context {
 
                 Ok(ir.void)
             }
+            Addr::Field { src, idx } => {
+                src;
+                idx;
+                Err(Error {
+                    inner: Errors::Todo("implement field access"),
+                    module,
+                    span,
+                })
+            }
             Addr::Var(key) => {
                 let ir = self.ir_cache.get_mut_unchecked(ir);
                 let ty = ir.variables.get_unchecked(&key).ty;
@@ -887,7 +912,7 @@ impl Context {
                             .value
                             .get_done();
                         let ir = self.ir_cache.get_mut_unchecked(ir);
-                        load_const(ir, expect, module, value, span)
+                        load_const(ir, expect, module, value, span, &self.constants)
                     }
                     _ => Err(Error {
                         inner: Errors::Undefined("Referencing arbitrary objects"),
@@ -1079,7 +1104,10 @@ impl FunctionIr {
         self.parameters = parameters;
         self.source = Some(fun_key);
         self.type_of = Some(AnyTypeKey::Function(*fun.data.type_of.get_done()));
-        self.returns = Some(*fun.data.return_type.get_done());
+        self.returns = match fun.data.return_type.get_done() {
+            AnyTypeKey::Void => None,
+            ty => Some(*ty),
+        }
     }
 }
 
@@ -1087,12 +1115,14 @@ fn load_const(
     ir: &mut FunctionIr,
     expect: &Option<AnyTypeKey>,
     module: arena::Key<crate::const_stage::types::ModuleTag>,
-    const_val: &ast::ConstValue,
+    const_key: &ConstValueKey,
     span: SpanIndex,
+    constants: &Constants,
 ) -> Result<ValueKey, Diagnostic<Errors>> {
+    let const_value = constants.data.get_unchecked(const_key);
     let ty = match expect {
         Some(ty) => *ty,
-        None => const_val.type_of().map_err(|inner| Error {
+        None => const_value.type_of().map_err(|inner| Error {
             inner,
             module,
             span,
@@ -1101,7 +1131,7 @@ fn load_const(
     let dst = ir.values.push(Value::new(ty));
     ir.blocks.get_mut_unchecked().extend(
         [Instruction::LoadConst {
-            src: const_val.clone(),
+            src: const_key.clone(),
             dst,
         }],
         span,
@@ -1134,6 +1164,13 @@ impl Addr {
                     .get_done(),
             )),
             Addr::Never => Ok(AnyTypeKey::Never),
+            Addr::Field { src, idx } => {
+                let parent = src.type_of(ctx, ir)?;
+                let dst_ty = parent
+                    .field_by_idx(*idx, &ctx.types)
+                    .expect("Field not found anymore");
+                todo!()
+            }
         }
     }
 }

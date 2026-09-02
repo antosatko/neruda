@@ -20,7 +20,6 @@ use crate::const_stage::types::{
     PolymorphType, PrimitiveType, RefType, StructType, TraitType, TupleType,
 };
 use crate::const_stage::{Context, Diagnostic, Error, Errors};
-use crate::ir::FunctionIr;
 
 impl Context {
     pub(crate) fn lower_import_stage(&mut self) -> Result<(), Error> {
@@ -457,7 +456,7 @@ impl Context {
                         (Some(ty), Some(expr)) => {
                             let ty = ty.lower(self, mod_key)?;
                             let default = match expr.const_eval(self, mod_key, &None, &Some(ty)) {
-                                ConstEvalResult::Value(v) => v,
+                                ConstEvalResult::Value(v) => self.constants.push(v),
                                 ConstEvalResult::Error(err) | ConstEvalResult::NotConst(err) => {
                                     return Err(err);
                                 }
@@ -479,14 +478,15 @@ impl Context {
                             (type_lowered, default)
                         }
                         (None, Some(default)) => {
-                            let default_val = match default.const_eval(self, mod_key, &None, &None)
+                            let (ty_opt, default_val) = match default
+                                .const_eval(self, mod_key, &None, &None)
                             {
-                                ConstEvalResult::Value(v) => v,
+                                ConstEvalResult::Value(v) => (v.type_of(), self.constants.push(v)),
                                 ConstEvalResult::Error(err) | ConstEvalResult::NotConst(err) => {
                                     return Err(err);
                                 }
                             };
-                            let ty = default_val.type_of().map_err(|e| Error {
+                            let ty = ty_opt.map_err(|e| Error {
                                 inner: e,
                                 module: mod_key,
                                 span: default.location,
@@ -669,8 +669,9 @@ impl Context {
                         return Err(err);
                     }
                 };
+                let c_key = self.constants.push(v);
                 let obj = self.objects.constants.get_mut_unchecked(obj_key);
-                obj.data.value = InitState::Done(v);
+                obj.data.value = InitState::Done(c_key);
                 self.objects.constants.get_mut_unchecked(obj_key)
             } else {
                 self.objects.constants.get_mut_unchecked(&const_key)
@@ -959,7 +960,7 @@ impl ast::Expression {
                                     });
                                 };
                                 let obj = ctx.objects.constants.get_unchecked(&obj_key);
-                                match &obj.data {
+                                let c_key = match &obj.data {
                                     ConstObj {
                                         value: InitState::Done(v),
                                         ty: _,
@@ -987,7 +988,8 @@ impl ast::Expression {
                                             _ => unreachable!(),
                                         }
                                     }
-                                }
+                                };
+                                ctx.constants.data.get_unchecked(&c_key).clone()
                             }
                             Err(e) => {
                                 if identifier_path.path.path.len() == 1 {
@@ -1256,13 +1258,19 @@ impl ast::Type {
                                     return Err(err);
                                 }
                             },
-                            None => repr.const_default(ctx).map_err(|e| Error {
-                                inner: e,
-                                module,
-                                span: ident.location,
-                            })?,
+                            None => {
+                                let c = repr.const_default(ctx).map_err(|e| Error {
+                                    inner: e,
+                                    module,
+                                    span: ident.location,
+                                })?;
+                                ctx.constants.data.get_unchecked(&c).clone()
+                            }
                         };
-                        variants.push((ident.inner.as_ref().clone(), value.clone()));
+                        variants.push((
+                            ident.inner.as_ref().clone(),
+                            ctx.constants.push(value.clone()),
+                        ));
                         Some(value)
                     }
                     None => None,
@@ -1308,7 +1316,10 @@ impl ast::Type {
                                 })?,
                             },
                         };
-                        variants.push((ident.inner.as_ref().clone(), value.clone()));
+                        variants.push((
+                            ident.inner.as_ref().clone(),
+                            ctx.constants.push(value.clone()),
+                        ));
                         prev_value = value;
                     }
                 }
@@ -1320,10 +1331,10 @@ impl ast::Type {
                     let const_obj = AnyObject {
                         data: ConstObj {
                             ty: InitState::Done(AnyTypeKey::Enum(key)),
-                            value: InitState::Done(ConstValue::EnumVariant {
+                            value: InitState::Done(ctx.constants.push(ConstValue::EnumVariant {
                                 parent: AnyTypeKey::Enum(key),
                                 variant: ident.clone(),
-                            }),
+                            })),
                         },
                         ast_object: None,
                         access: ast::AccessModifiers::Public,

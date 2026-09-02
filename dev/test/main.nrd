@@ -1,0 +1,18 @@
+type Vec<T> = struct {
+    data: &[T]
+    len: u32
+    cap: u32
+}
+
+pub function foo(a: i32): i32 {
+    if a > 50 {
+        return 100
+    } else {
+        return danda(a) + 6
+    }
+    return _
+}
+
+function danda(a: i32): i32 {
+    return a + -6
+}

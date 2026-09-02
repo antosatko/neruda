@@ -5,8 +5,8 @@ use std::ops::Deref;
 use crate::ast::{
     ConstValue, Expression, Literal, Number, NumberValue, Operator, Span, SpanIndex, UnaryOp, Value,
 };
-use crate::const_stage::Context;
 use crate::const_stage::types::AnyTypeKey;
+use crate::const_stage::{ConstValueKey, Context};
 use crate::const_stage::{Diagnostic, Error, Errors, types::ModuleKey};
 
 impl Expression {
@@ -209,7 +209,12 @@ impl ConstValue {
                             .find(|(ident, _)| ident == variant)
                             .cloned()
                         {
-                            Some((_, actual_value)) => actual_value.implicit_cast(ctx, target)?,
+                            Some((_, actual_value_key)) => ctx
+                                .constants
+                                .data
+                                .get_unchecked(&actual_value_key)
+                                .clone()
+                                .implicit_cast(ctx, target)?,
                             None => unreachable!("variant {variant} not found"),
                         }
                     }
@@ -253,34 +258,41 @@ impl NumberValue {
 }
 
 impl AnyTypeKey {
-    pub fn const_default(&self, ctx: &mut Context) -> Result<ConstValue, Errors> {
+    pub fn const_default(&self, ctx: &mut Context) -> Result<ConstValueKey, Errors> {
         match self {
-            AnyTypeKey::Primitive(primitive_type) => Ok(primitive_type.default()),
+            AnyTypeKey::Primitive(primitive_type) => {
+                Ok(ctx.constants.push(primitive_type.default()))
+            }
             AnyTypeKey::Array(key) => {
                 let this = ctx.types.arrays.get_unchecked(key);
                 let elem_type = this.element_type;
                 let size = this.size.ok_or(Errors::UndefinedDefault(elem_type))?;
                 let val = elem_type.const_default(ctx)?;
+                let val = ctx.constants.data.get_unchecked(&val);
                 let value = ConstValue::Array {
                     elements: repeat_with(|| Span::new(val.clone(), SpanIndex::default()))
                         .take(size)
                         .collect(),
                     ty: *self,
                 };
-                Ok(value)
+                Ok(ctx.constants.push(value))
             }
             AnyTypeKey::Vector(vec) => todo!(),
             AnyTypeKey::Tuple(key) => {
                 let this = ctx.types.tuples.get_unchecked(key);
                 let mut elements = Vec::with_capacity(this.parameters.len());
                 for elem in this.parameters.clone() {
-                    elements.push(Span::new(elem.const_default(ctx)?, SpanIndex::default()));
+                    let key = elem.const_default(ctx)?;
+                    elements.push(Span::new(
+                        ctx.constants.data.get_unchecked(&key).clone(),
+                        SpanIndex::default(),
+                    ));
                 }
                 let value = ConstValue::Tuple {
                     elements,
                     ty: *self,
                 };
-                Ok(value)
+                Ok(ctx.constants.push(value))
             }
             AnyTypeKey::Struct(key) => {
                 let this = ctx.types.structures.get_unchecked(key);
@@ -289,7 +301,10 @@ impl AnyTypeKey {
                 for (ident, ty, default) in this.parameters.clone() {
                     let val = match default {
                         Some(val) => val,
-                        None => ty.const_default(ctx)?,
+                        None => {
+                            let key = ty.const_default(ctx)?;
+                            ctx.constants.data.get_unchecked(&key).clone()
+                        }
                     };
                     fields.push(Span::new(
                         (Span::new(ident, sp_idx), Span::new(val, sp_idx)),
@@ -300,7 +315,7 @@ impl AnyTypeKey {
                     fields,
                     ty: Some(*self),
                 };
-                Ok(value)
+                Ok(ctx.constants.push(value))
             }
             AnyTypeKey::Named(key) => ctx
                 .types

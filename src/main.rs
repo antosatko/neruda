@@ -1,11 +1,8 @@
 use cl_backend::CLLoweringCtx;
 use clap::{Parser, ValueEnum};
-use ir::{
-    const_stage::{
-        Context,
-        objects::{IrCache, Objects},
-    },
-    interpret::Interpreter,
+use ir::const_stage::{
+    Context,
+    objects::{IrCache, Objects},
 };
 use parser::{
     grammar::gen_parser,
@@ -163,16 +160,6 @@ fn main() {
                         _ => (),
                     };
                 }
-                let main = ir_ctx
-                    .objects
-                    .functions
-                    .iter()
-                    .find(|f| f.identifier == "main")
-                    .map(|f| match &f.data.ir {
-                        IrCache::Polymorphic(_) => todo!(),
-                        IrCache::Single(k) => *k.get_done(),
-                    })
-                    .unwrap();
 
                 let mut cl_be = CLLoweringCtx::init(&ir_ctx);
                 cl_be.lower();

@@ -5,9 +5,9 @@ use arena_scope::ScopeTree;
 use smol_str::{SmolStr, ToSmolStr};
 
 use crate::{
-    ast::{ConstValue, Number, NumberValue},
+    ast::{ConstValue, Number, NumberValue, Operator},
     const_stage::{
-        Errors,
+        ConstValueKey, Errors,
         objects::{AnyObjectKey, FunctionObjKey, InitState, Module},
     },
 };
@@ -67,7 +67,7 @@ pub struct EnumTag;
 #[derive(PartialEq, Debug, Clone)]
 pub struct EnumType {
     pub repr: AnyTypeKey,
-    pub variants: Vec<(SmolStr, ConstValue)>,
+    pub variants: Vec<(SmolStr, ConstValueKey)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash)]
@@ -494,7 +494,7 @@ impl EnumType {
     pub fn stringify(&self, types: &Types) -> String {
         let mut out = format!("enum: {} {} ", self.repr.stringify(types), "{");
         for (ident, value) in &self.variants {
-            out.push_str(&format!("{ident}: {}; ", value.stringify()));
+            out.push_str(&format!("{ident} "));
         }
         out.push('}');
         out
@@ -810,10 +810,86 @@ impl AnyTypeKey {
             AnyTypeKey::Never => Cow::Borrowed("!"),
         }
     }
+
+    pub fn field_by_idx(&self, index: usize, types: &Types) -> Result<AnyTypeKey, ()> {
+        match &self.unwrap_full(types) {
+            AnyTypeKey::Tuple(key) => {
+                let this = types.tuples.get_unchecked(key);
+                this.parameters.get(index).cloned().ok_or(())
+            }
+            AnyTypeKey::Struct(key) => {
+                let this = types.structures.get_unchecked(key);
+                this.parameters
+                    .get(index)
+                    .cloned()
+                    .ok_or(())
+                    .map(|(_, a, _)| a)
+            }
+            // references get auto unwrapped
+            AnyTypeKey::Reference(key) => {
+                let this = types.references.get_unchecked(key);
+                this.inner.field_by_idx(index, types)
+            }
+            _ => Err(()),
+        }
+    }
 }
 
 impl Substitutions {
     pub fn get(&self, generic: &GenericKey) -> Option<&AnyTypeKey> {
         self.dirty.get(generic).or(self.stack.get(generic))
+    }
+}
+
+impl Operator {
+    pub fn result_type(
+        &self,
+        l: AnyTypeKey,
+        r: AnyTypeKey,
+        types: &Types,
+    ) -> Result<AnyTypeKey, Errors> {
+        let l = l.unwrap_full(types);
+        let r = r.unwrap_full(types);
+        match self {
+            Operator::Add | Operator::Sub | Operator::Mul | Operator::Div | Operator::Mod => {
+                if l != r {
+                    return Err(Errors::TypeMismatch {
+                        expected: l,
+                        got: r,
+                    });
+                }
+                match l {
+                    AnyTypeKey::Primitive(_) => Ok(l),
+                    got => Err(Errors::NonPrimitiveType { got }),
+                }
+            }
+            Operator::Eq
+            | Operator::NEq
+            | Operator::Gr
+            | Operator::Le
+            | Operator::GrEq
+            | Operator::LeEq
+            | Operator::And
+            | Operator::Or => {
+                if l != r {
+                    return Err(Errors::TypeMismatch {
+                        expected: l,
+                        got: r,
+                    });
+                }
+                match l {
+                    AnyTypeKey::Primitive(_) => Ok(AnyTypeKey::Primitive(PrimitiveType::Bool)),
+                    got => Err(Errors::NonPrimitiveType { got }),
+                }
+            }
+            Operator::Assign => Ok(AnyTypeKey::Void),
+            Operator::AddAssign => Ok(AnyTypeKey::Void),
+            Operator::SubAssign => Ok(AnyTypeKey::Void),
+            Operator::MulAssign => Ok(AnyTypeKey::Void),
+            Operator::DivAssign => Ok(AnyTypeKey::Void),
+            Operator::ModAssign => Ok(AnyTypeKey::Void),
+            Operator::BitOr => Ok(AnyTypeKey::Void),
+            Operator::BitAnd => Ok(AnyTypeKey::Void),
+        }
     }
 }

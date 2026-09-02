@@ -260,6 +260,11 @@ impl Errors {
                 format!("Could get the size of type '{}'", ty.stringify(&ctx.types)),
                 format!("Type is unsized"),
             ),
+            Errors::InvalidExpression => (
+                "431",
+                format!("Unexpected expresion"),
+                format!("Invalid expression"),
+            ),
         }
     }
 }

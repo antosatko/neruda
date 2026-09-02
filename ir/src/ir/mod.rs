@@ -8,11 +8,11 @@ use smol_str::SmolStr;
 pub mod lowerng;
 
 use crate::{
-    ast::{ConstValue, Operator, Span, SpanIndex, UnaryOp},
+    ast::{Operator, Span, SpanIndex, UnaryOp},
     const_stage::{
-        Errors,
+        ConstValueKey, Errors,
         objects::{AnyObjectKey, FunctionObjKey},
-        types::AnyTypeKey,
+        types::{AnyTypeKey, PrimitiveType},
     },
 };
 
@@ -89,6 +89,7 @@ pub enum Addr {
     Function(FunctionIrKey),
     UnresolvedFunction(FunctionObjKey),
     MemoryRef { src: ValueKey, inner_ty: AnyTypeKey },
+    Field { src: Box<Addr>, idx: usize },
     Never,
 }
 
@@ -113,7 +114,7 @@ impl Value {
 #[derive(Debug, Clone)]
 pub enum Instruction {
     LoadConst {
-        src: ConstValue,
+        src: ConstValueKey,
         dst: ValueKey,
     },
     BinOp {
@@ -121,6 +122,7 @@ pub enum Instruction {
         l: ValueKey,
         r: ValueKey,
         dst: ValueKey,
+        ty: PrimitiveType,
     },
     UnaryOp {
         op: UnaryOp,

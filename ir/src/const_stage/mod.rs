@@ -4,6 +4,7 @@ pub mod types;
 
 use std::{collections::HashMap, sync::Arc};
 
+use arena::{Arena, Key};
 use arena_scope::ScopeTree;
 use smol_str::SmolStr;
 
@@ -88,6 +89,7 @@ pub enum Errors {
     UnresolvedFunctionReference,
     CouldNotDeref(AnyTypeKey),
     TypeIsUnsized(AnyTypeKey),
+    InvalidExpression,
 }
 
 #[derive(Debug)]
@@ -105,6 +107,16 @@ pub struct Context {
     pub generic_ctx: GContext,
     pub module_map: HashMap<Vec<SmolStr>, ModuleKey>,
     pub ir_cache: FunctionIrArena,
+    pub constants: Constants,
+}
+
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq, Default)]
+pub struct ConstValueTag;
+pub type ConstValueKey = Key<ConstValueTag>;
+
+#[derive(Debug, Default)]
+pub struct Constants {
+    pub data: Arena<ConstValue, ConstValueTag>,
 }
 
 impl Context {
@@ -119,8 +131,9 @@ impl Context {
             diagnostics: Diagnostics::default(),
             ast,
             generic_ctx: ScopeTree::default(),
-            module_map: HashMap::with_capacity(0),
+            module_map: HashMap::default(),
             ir_cache: Default::default(),
+            constants: Default::default(),
         };
 
         if let Err(e) = this.lower_import_stage() {
@@ -138,8 +151,13 @@ impl Context {
         if let Err(e) = this.lower_ir() {
             return Err((this, e));
         }
-        // next stages here
 
         Ok(this)
+    }
+}
+
+impl Constants {
+    pub fn push(&mut self, c: ConstValue) -> ConstValueKey {
+        self.data.push_unique(c)
     }
 }

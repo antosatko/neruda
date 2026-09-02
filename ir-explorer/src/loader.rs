@@ -17,9 +17,15 @@ fn generate_instr_elements(instr: &Instruction) -> Vec<IrElement> {
         Instruction::LoadConst { src, dst } => vec![
             Value { id: dst },
             Text(" = const ".into()),
-            Text(src.stringify().to_string()),
+            Text(format!("key_{}", src.id())),
         ],
-        Instruction::BinOp { op, l, r, dst } => vec![
+        Instruction::BinOp {
+            op,
+            l,
+            r,
+            dst,
+            ty: _,
+        } => vec![
             Value { id: dst },
             Text(" = ".into()),
             Value { id: l },

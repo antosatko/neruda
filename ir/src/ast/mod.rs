@@ -12,7 +12,7 @@ use arena::{Arena, Key};
 use smol_str::{SmolStr, ToSmolStr};
 
 use crate::const_stage::{
-    Errors,
+    ConstValueKey, Errors,
     types::{AnyTypeKey, PrimitiveType},
 };
 

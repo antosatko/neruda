@@ -11,7 +11,6 @@ pub function foo(a: i32): i32 {
         a = a + 10
         return danda(a) + 6
     }
-    return _
 }
 
 pub function fib(n: i32): i32 {
@@ -20,16 +19,14 @@ pub function fib(n: i32): i32 {
     }
 	var _0 = 0
 	var _1 = 1
-	loop {
-	    var current = _0 + _1
+	var current = _0 + _1
+	while n > 2 {
 		_0 = _1
 		_1 = current
-	    if n == 2 {
-			return current
-		}
+        current = _0 + _1
 		n = n - 1
 	}
-	return _
+	return current
 }
 
 pub function loops(a: i32) {

@@ -360,6 +360,131 @@ impl Context {
                                 .restore(break_block);
                             block_ctx.control_stack.pop();
                         }
+                        ast::Statement::While {
+                            label,
+                            condition,
+                            body,
+                        } => {
+                            let entry_block = self
+                                .ir_cache
+                                .get_unchecked(ir)
+                                .blocks
+                                .current_key()
+                                .unwrap();
+
+                            let condition_block = self
+                                .ir_cache
+                                .get_mut_unchecked(ir)
+                                .blocks
+                                .push(BasicBlock::default());
+
+                            let body_block = self
+                                .ir_cache
+                                .get_mut_unchecked(ir)
+                                .blocks
+                                .push(BasicBlock::default());
+
+                            let break_block = self
+                                .ir_cache
+                                .get_mut_unchecked(ir)
+                                .blocks
+                                .push(BasicBlock::default());
+
+                            self.ir_cache
+                                .get_mut_unchecked(ir)
+                                .blocks
+                                .arena_mut()
+                                .get_mut_unchecked(&entry_block)
+                                .value
+                                .terminate(Terminator::Jump(condition_block, None), false);
+
+                            self.ir_cache
+                                .get_mut_unchecked(ir)
+                                .blocks
+                                .restore(condition_block);
+
+                            let cond_expect = Some(AnyTypeKey::Primitive(PrimitiveType::Bool));
+
+                            let condition_value = {
+                                let addr =
+                                    self.lower_expression(ir, block_ctx, condition, &cond_expect)?;
+
+                                self.load_addr(
+                                    ir,
+                                    block_ctx,
+                                    addr,
+                                    &cond_expect,
+                                    condition.location,
+                                )?
+                            };
+
+                            self.ir_cache
+                                .get_mut_unchecked(ir)
+                                .blocks
+                                .arena_mut()
+                                .get_mut_unchecked(&condition_block)
+                                .value
+                                .terminate(
+                                    Terminator::Branch {
+                                        condition: condition_value,
+                                        then_block: body_block,
+                                        else_block: break_block,
+                                    },
+                                    false,
+                                );
+
+                            block_ctx.control_stack.push(ControlFrame {
+                                kind: ControlFrameKind::Loop {
+                                    break_block,
+                                    continue_block: condition_block,
+                                },
+                                label: label.as_ref().map(|s| s.deref().clone()),
+                            });
+
+                            self.ir_cache
+                                .get_mut_unchecked(ir)
+                                .blocks
+                                .restore(body_block);
+
+                            let body_falls_through =
+                                self.lower_block(ir, block_ctx, body, module)?;
+
+                            let body_end = self
+                                .ir_cache
+                                .get_unchecked(ir)
+                                .blocks
+                                .current_key()
+                                .unwrap();
+
+                            if body_falls_through
+                                && self
+                                    .ir_cache
+                                    .get_unchecked(ir)
+                                    .blocks
+                                    .arena()
+                                    .get_unchecked(&body_end)
+                                    .value
+                                    .terminator
+                                    .is_none()
+                            {
+                                self.ir_cache
+                                    .get_mut_unchecked(ir)
+                                    .blocks
+                                    .arena_mut()
+                                    .get_mut_unchecked(&body_end)
+                                    .value
+                                    .terminate(Terminator::Jump(condition_block, None), false);
+                            }
+
+                            block_ctx.control_stack.pop();
+
+                            self.ir_cache
+                                .get_mut_unchecked(ir)
+                                .blocks
+                                .restore(break_block);
+
+                            falls_through = true;
+                        }
                         ast::Statement::Break { label } => {
                             let (label, span) = match label {
                                 Some(l) => (Some(l.deref().clone()), l.location),

@@ -46,10 +46,12 @@ def run_project():
     run_command([
         "rustc",
         str(RUST_FILE),
-        "-C",
-        f"link-arg={OBJECT_FILE}",
-        "-o",
-        str(EXE_FILE),
+        "-C", "opt-level=3",
+        "-C", "overflow-checks=off",
+        "-C", f"link-arg={OBJECT_FILE}",
+        "-C", "lto=fat",
+        "-C", "codegen-units=1",
+        "-o", str(EXE_FILE),
     ])
 
     run_command([str(EXE_FILE)])

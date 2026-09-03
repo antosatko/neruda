@@ -57,8 +57,9 @@ impl<'a> CLLoweringCtx<'a> {
     pub fn init(ctx: &'a Context) -> Self {
         let mut fb_ctx = FunctionBuilderContext::new();
         let mut flag_builder = settings::builder();
+        //flag_builder.set("opt_level", "speed").unwrap();
         let flags = settings::Flags::new(flag_builder);
-
+        println!("opt_level = {:?}", flags.opt_level());
         let isa_builder = isa::lookup(target_lexicon::Triple::host()).unwrap();
         let isa = isa_builder.finish(flags).unwrap();
 
@@ -124,8 +125,6 @@ impl<'a> CLLoweringCtx<'a> {
                     sig.returns.push(AbiParam::new(vt));
                 }
             }
-            println!("{:?}", fun_key);
-            dbg!(&sig);
 
             let label = match fun.get_label(self.ctx) {
                 Some(l) => l.to_string(),
@@ -380,11 +379,10 @@ impl<'a> CLLoweringCtx<'a> {
             // finalize now expects frontend config
             builder.finalize(self.frontend_config);
         }
-        println!("finalizing '{fun_key:?}'");
+        println!("func: {}", ctx.func);
         match self.module.define_function(func_id, &mut ctx) {
             Ok(_) => (),
             Err(e) => {
-                println!("func: {}", ctx.func);
                 panic!("Unrecoverable cranelift err: {:?}", e)
             }
         }

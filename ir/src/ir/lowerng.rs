@@ -39,31 +39,46 @@ impl Context {
     ) -> Result<FunctionIrKey, Error> {
         let fun = self.objects.functions.get_unchecked(key);
         let mod_key = fun.module;
+
+        if let IrCache::Single(state) = &fun.data.ir {
+            match state {
+                InitState::Progress(ir) | InitState::Done(ir) => return Ok(*ir),
+                InitState::Uninitialized => (),
+            }
+        }
+
         let backup_ir = FunctionIr::new_polymorphic(self, *key, generic_arguments)?;
         let ty = backup_ir.type_of.unwrap();
-        dbg!("creating probably redundant ir");
+
         let fun = self.objects.functions.get_mut_unchecked(key);
         let ir_key = match &mut fun.data.ir {
             IrCache::Single(InitState::Progress(p)) => *p,
             IrCache::Single(InitState::Done(p)) => return Ok(*p),
+
             IrCache::Single(InitState::Uninitialized) => {
                 let ir = self.ir_cache.push(FunctionIr::new(fun, *key));
                 fun.data.ir = IrCache::Single(InitState::Progress(ir));
                 ir
             }
+
             IrCache::Polymorphic(cache) => match generic_arguments {
                 Some(_) => match cache.get(&ty) {
-                    Some(InitState::Done(ir)) => return Ok(*ir),
+                    Some(InitState::Progress(ir)) | Some(InitState::Done(ir)) => return Ok(*ir),
+
                     _ => {
                         let key = self.ir_cache.push(backup_ir);
-                        cache.insert(ty, InitState::Done(key));
+                        cache.insert(ty, InitState::Progress(key));
+
                         key
                     }
                 },
+
                 None => unreachable!("generic inference is not my concern"),
             },
+
             _ => unreachable!("yup its just like that"),
         };
+
         let fun = self.objects.functions.get_unchecked(key);
         let ast_obj = match &fun.ast_object {
             Some(o) => o,

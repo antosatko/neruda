@@ -4,6 +4,7 @@ type Vec<T> = struct {
     cap: u32
 }
 
+
 pub function foo(a: i32): i32 {
     if a > 50 {
         return 100
@@ -27,6 +28,27 @@ pub function fib(n: i32): i32 {
 		n = n - 1
 	}
 	return current
+}
+
+pub function id(v: i32): i32 {
+	return v
+}
+
+pub function fact(n: i32): i32 {
+var _n = n - 1
+    if n <= 1 {
+        return n
+    }
+    return n * fact(_n)
+}
+
+pub function fib_rec(n: i32) : i32 {
+    if n <= 1 {
+        return n
+    }
+    var _1 = n - 1
+    var _2 = n - 2
+    return fib_rec(_1) + fib_rec(_2)
 }
 
 pub function loops(a: i32) {

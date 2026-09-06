@@ -35,11 +35,11 @@ pub function id(v: i32): i32 {
 }
 
 pub function fact(n: i32): i32 {
-var _n = n - 1
+    var _n = n - 1
     if n <= 1 {
         return n
     }
-    return n * fact(_n)
+    return n * fact(n - 1)
 }
 
 pub function fib_rec(n: i32) : i32 {

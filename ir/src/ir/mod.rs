@@ -6,6 +6,7 @@ use arena_scope::{
 use smol_str::SmolStr;
 
 pub mod lowerng;
+pub mod post_lowering_pass;
 
 use crate::{
     ast::{Operator, Span, SpanIndex, UnaryOp},
@@ -100,6 +101,7 @@ pub type ValueKey = Key<ValueTag>;
 pub struct Value {
     pub ty: AnyTypeKey,
     pub needs_address: bool,
+    pub used: bool,
 }
 
 impl Value {
@@ -107,6 +109,7 @@ impl Value {
         Self {
             ty,
             needs_address: false,
+            used: false,
         }
     }
 }

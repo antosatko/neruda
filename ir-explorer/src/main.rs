@@ -18,6 +18,7 @@ enum PaneState {
 }
 
 struct CompilerExplorer {
+    project_path: PathBuf,
     project: Option<loader::LoadedProject>,
     source_lines: Vec<String>,
     ir_variables: Vec<loader::UiVariable>,
@@ -53,6 +54,7 @@ enum Message {
     Resized(pane_grid::ResizeEvent),
     ToggleVariables,
     ToggleValues,
+    Refresh,
 }
 
 fn build_line_colors(instructions: &[loader::UiIrInstruction]) -> HashMap<usize, usize> {
@@ -80,6 +82,7 @@ impl CompilerExplorer {
         let project = loader::load_project(&project_path).ok();
 
         let mut explorer = Self {
+            project_path: project_path.clone(),
             project,
             source_lines: vec![],
             ir_variables: vec![],
@@ -125,8 +128,52 @@ impl CompilerExplorer {
         (explorer, Task::none())
     }
 
+    fn subscription(&self) -> iced::Subscription<Message> {
+        iced::event::listen_with(|event, _status, _window| {
+            if let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, .. }) = event {
+                if matches!(
+                    key,
+                    iced::keyboard::Key::Named(iced::keyboard::key::Named::F5)
+                ) {
+                    return Some(Message::Refresh);
+                }
+            }
+            None
+        })
+    }
+
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
+            Message::Refresh => {
+                self.project = loader::load_project(&self.project_path).ok();
+                if let Some(ref proj) = self.project {
+                    let target = self
+                        .current_target
+                        .clone()
+                        .filter(|t| proj.details.contains_key(t))
+                        .or_else(|| proj.details.keys().next().cloned());
+
+                    if let Some(ref t) = target {
+                        if let Some(details) = proj.details.get(t) {
+                            self.current_target = Some(t.clone());
+                            self.source_lines = details.source_lines.clone();
+                            self.ir_variables = details.ir_variables.clone();
+                            self.ir_values = details.ir_values.clone();
+                            self.ir_instructions = details.ir_instructions.clone();
+                            self.active_lines = build_line_colors(&details.ir_instructions);
+                            self.active_color_index = details.color_index;
+                        }
+                    } else {
+                        self.current_target = None;
+                        self.source_lines.clear();
+                        self.ir_variables.clear();
+                        self.ir_values.clear();
+                        self.ir_instructions.clear();
+                        self.active_lines.clear();
+                    }
+                }
+                Task::none()
+            }
             Message::ToggleModule(id) => {
                 if self.collapsed_modules.contains(&id) {
                     self.collapsed_modules.remove(&id);
@@ -258,6 +305,20 @@ impl CompilerExplorer {
                 .style(|_| iced::widget::text::Style {
                     color: Some(theme::palette::ACCENT_PURPLE),
                 }),
+            button(text("Refresh").size(14))
+                .on_press(Message::Refresh)
+                .style(|_, _| button::Style {
+                    background: Some(Background::Color(theme::palette::BG_SURFACE_0)),
+                    text_color: theme::palette::TEXT_MAIN,
+                    border: Border {
+                        color: Color::TRANSPARENT,
+                        width: 0.0,
+                        radius: 4.0.into(),
+                    },
+                    shadow: Shadow::default(),
+                    snap: false,
+                })
+                .padding(Padding::new(4.0).left(8.0).right(8.0)),
         ]
         .spacing(12)
         .align_y(iced::Alignment::Center);
@@ -697,45 +758,63 @@ impl CompilerExplorer {
                         .spacing(2);
 
                         for v in &self.ir_variables {
-                            table = table.push(
-                                container(
-                                    row![
-                                        text(format!("{}", v.id.id()))
-                                            .width(Length::Fixed(50.0))
-                                            .font(Font::MONOSPACE)
-                                            .size(13)
-                                            .style(|_| iced::widget::text::Style {
-                                                color: Some(theme::palette::ACCENT_BLUE),
-                                            }),
-                                        text(&v.identifier)
-                                            .width(Length::Fixed(160.0))
-                                            .font(Font::MONOSPACE)
-                                            .size(13)
-                                            .style(|_| iced::widget::text::Style {
-                                                color: Some(theme::palette::TEXT_MAIN),
-                                            }),
-                                        text(&v.ty)
-                                            .width(Length::Fill)
-                                            .font(Font::MONOSPACE)
-                                            .size(13)
-                                            .style(|_| iced::widget::text::Style {
-                                                color: Some(theme::palette::TEXT_MUTED_1),
-                                            }),
-                                    ]
-                                    .spacing(12)
-                                    .align_y(iced::Alignment::Center),
-                                )
-                                .padding(Padding::new(6.0).left(8.0).right(8.0))
-                                .style(|_| container::Style {
-                                    background: Some(Background::Color(theme::palette::BG_MAIN)),
-                                    border: Border {
-                                        color: theme::palette::BG_SURFACE_0,
-                                        width: 1.0,
-                                        radius: 4.0.into(),
+                            let is_highlighted = self.hovered_element.as_ref()
+                                == Some(&loader::IrElement::Variable { id: v.id });
+                            let row_bg = if is_highlighted {
+                                theme::palette::BG_SURFACE_0
+                            } else {
+                                theme::palette::BG_MAIN
+                            };
+
+                            let var_row_content = container(
+                                row![
+                                    text(format!("{}", v.id.id()))
+                                        .width(Length::Fixed(50.0))
+                                        .font(Font::MONOSPACE)
+                                        .size(13)
+                                        .style(|_| iced::widget::text::Style {
+                                            color: Some(theme::palette::ACCENT_BLUE),
+                                        }),
+                                    text(&v.identifier)
+                                        .width(Length::Fixed(160.0))
+                                        .font(Font::MONOSPACE)
+                                        .size(13)
+                                        .style(|_| iced::widget::text::Style {
+                                            color: Some(theme::palette::TEXT_MAIN),
+                                        }),
+                                    text(&v.ty)
+                                        .width(Length::Fill)
+                                        .font(Font::MONOSPACE)
+                                        .size(13)
+                                        .style(|_| iced::widget::text::Style {
+                                            color: Some(theme::palette::TEXT_MUTED_1),
+                                        }),
+                                ]
+                                .spacing(12)
+                                .align_y(iced::Alignment::Center),
+                            )
+                            .padding(Padding::new(6.0).left(8.0).right(8.0))
+                            .style(move |_| container::Style {
+                                background: Some(Background::Color(row_bg)),
+                                border: Border {
+                                    color: if is_highlighted {
+                                        theme::palette::ACCENT_YELLOW
+                                    } else {
+                                        theme::palette::BG_SURFACE_0
                                     },
-                                    ..Default::default()
-                                }),
-                            );
+                                    width: if is_highlighted { 1.5 } else { 1.0 },
+                                    radius: 4.0.into(),
+                                },
+                                ..Default::default()
+                            });
+
+                            let interactive_var_row = mouse_area(var_row_content)
+                                .on_enter(Message::HoverElement(Some(
+                                    loader::IrElement::Variable { id: v.id },
+                                )))
+                                .on_exit(Message::HoverElement(None));
+
+                            table = table.push(interactive_var_row);
                         }
                         var_col = var_col.push(table);
                     }
@@ -808,38 +887,56 @@ impl CompilerExplorer {
                         .spacing(2);
 
                         for v in &self.ir_values {
-                            table = table.push(
-                                container(
-                                    row![
-                                        text(format!("{}", v.id.id()))
-                                            .width(Length::Fixed(50.0))
-                                            .font(Font::MONOSPACE)
-                                            .size(13)
-                                            .style(|_| iced::widget::text::Style {
-                                                color: Some(theme::palette::ACCENT_BLUE),
-                                            }),
-                                        text(&v.ty)
-                                            .width(Length::Fill)
-                                            .font(Font::MONOSPACE)
-                                            .size(13)
-                                            .style(|_| iced::widget::text::Style {
-                                                color: Some(theme::palette::TEXT_MAIN),
-                                            }),
-                                    ]
-                                    .spacing(12)
-                                    .align_y(iced::Alignment::Center),
-                                )
-                                .padding(Padding::new(6.0).left(8.0).right(8.0))
-                                .style(|_| container::Style {
-                                    background: Some(Background::Color(theme::palette::BG_MAIN)),
-                                    border: Border {
-                                        color: theme::palette::BG_SURFACE_0,
-                                        width: 1.0,
-                                        radius: 4.0.into(),
+                            let is_highlighted = self.hovered_element.as_ref()
+                                == Some(&loader::IrElement::Value { id: v.id });
+                            let row_bg = if is_highlighted {
+                                theme::palette::BG_SURFACE_0
+                            } else {
+                                theme::palette::BG_MAIN
+                            };
+
+                            let val_row_content = container(
+                                row![
+                                    text(format!("{}", v.id.id()))
+                                        .width(Length::Fixed(50.0))
+                                        .font(Font::MONOSPACE)
+                                        .size(13)
+                                        .style(|_| iced::widget::text::Style {
+                                            color: Some(theme::palette::ACCENT_BLUE),
+                                        }),
+                                    text(&v.ty)
+                                        .width(Length::Fill)
+                                        .font(Font::MONOSPACE)
+                                        .size(13)
+                                        .style(|_| iced::widget::text::Style {
+                                            color: Some(theme::palette::TEXT_MAIN),
+                                        }),
+                                ]
+                                .spacing(12)
+                                .align_y(iced::Alignment::Center),
+                            )
+                            .padding(Padding::new(6.0).left(8.0).right(8.0))
+                            .style(move |_| container::Style {
+                                background: Some(Background::Color(row_bg)),
+                                border: Border {
+                                    color: if is_highlighted {
+                                        theme::palette::ACCENT_YELLOW
+                                    } else {
+                                        theme::palette::BG_SURFACE_0
                                     },
-                                    ..Default::default()
-                                }),
-                            );
+                                    width: if is_highlighted { 1.5 } else { 1.0 },
+                                    radius: 4.0.into(),
+                                },
+                                ..Default::default()
+                            });
+
+                            let interactive_val_row = mouse_area(val_row_content)
+                                .on_enter(Message::HoverElement(Some(loader::IrElement::Value {
+                                    id: v.id,
+                                })))
+                                .on_exit(Message::HoverElement(None));
+
+                            table = table.push(interactive_val_row);
                         }
                         val_col = val_col.push(table);
                     }
@@ -1047,5 +1144,6 @@ pub fn main() -> iced::Result {
         CompilerExplorer::view,
     )
     .title("Compiler Explorer")
+    .subscription(CompilerExplorer::subscription)
     .run()
 }

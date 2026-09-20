@@ -265,6 +265,14 @@ impl Errors {
                 format!("Unexpected expresion"),
                 format!("Invalid expression"),
             ),
+            Errors::InvalidAssign(subject, ty) => (
+                "432",
+                format!(
+                    "Can not assign to {subject} of type '{}'",
+                    ty.stringify(&ctx.types)
+                ),
+                format!("Runtime value assign"),
+            ),
         }
     }
 }

@@ -3,9 +3,8 @@ use std::{collections::HashMap, fs::File, io::Write, ops::Deref, path::Path, syn
 use cranelift::{
     codegen::{
         ir::{
-            AbiParam, BlockArg, Function, InstBuilder, Signature, StackSlot, StackSlotData,
-            StackSlotKind, TrapCode, Type, UserExternalName, UserFuncName,
-            condcodes::CondCode,
+            AbiParam, InstBuilder, Signature, StackSlot, StackSlotData, StackSlotKind, TrapCode,
+            Type, UserFuncName,
             types::{F32, F64, I8, I8X4, I16, I32, I64, I128, INVALID},
         },
         isa::{TargetFrontendConfig, TargetIsa},
@@ -13,7 +12,7 @@ use cranelift::{
     frontend::{FunctionBuilder, FunctionBuilderContext},
     prelude::*,
 };
-use cranelift_module::{FuncId, Init, Linkage, Module};
+use cranelift_module::{FuncId, Linkage, Module};
 use cranelift_object::{ObjectBuilder, ObjectModule};
 use ir::{
     const_stage::{
@@ -22,7 +21,6 @@ use ir::{
     },
     ir::{FunctionIrKey, ValueKey, VariableKey},
 };
-use smol_str::ToSmolStr;
 
 use crate::layouts::Layouts;
 

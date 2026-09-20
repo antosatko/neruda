@@ -2,9 +2,7 @@ use std::hint::black_box;
 use std::time::Instant;
 
 extern "C" {
-    fn foo(a: i32) -> i32;
     fn fact(a: i32) -> i32;
-    fn loops(a: i32);
     fn fib(n: i32) -> i32;
     fn fib_rec(n: i32) -> i32;
 }
@@ -35,29 +33,25 @@ fn fib_rust_rec(n: i32) -> i32 {
 
 fn main() {
     unsafe {
-        println!("foo(42) => {}", foo(42));
-        println!("foo(67) => {}", foo(67));
-        println!("loops(700) not trap anymore");
-        loops(700);
         println!(
-            "fib sequence recursive: {:?}",
+            "fact sequence recursive: {:?}",
             (1..10)
                 .into_iter()
                 .map(|n| (n, fact(n)))
                 .collect::<Vec<_>>()
         );
 
-        println!("perf test fib(10000)");
         println!("fact(6) => {}", fact(6));
+        println!("perf test fib(40)");
         let start = Instant::now();
-        for _ in 0..100 {
-            black_box(fib_rust_rec(25));
+        for _ in 0..100_000_000 {
+            black_box(fib_rust(40));
         }
-        println!("rust => {}: {:?}", fib_rust_rec(25), start.elapsed());
+        println!("rust => {}: {:?}", fib_rust(25), start.elapsed());
         let start = Instant::now();
-        for _ in 0..100 {
-            black_box(fib_rec(25));
+        for _ in 0..100_000_000 {
+            black_box(fib(40));
         }
-        println!("neruda => {}: {:?}", fib_rec(25), start.elapsed());
+        println!("neruda => {}: {:?}", fib(25), start.elapsed());
     }
 }

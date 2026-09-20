@@ -4,10 +4,7 @@ use arena::Arena;
 use arena_scope::stack::Stack;
 
 use crate::{
-    ast::{
-        self, Body, ConstValue, Expression, Function, Number, NumberValue, Postfix, Span,
-        SpanIndex, Type,
-    },
+    ast::{self, Body, Expression, Function, Postfix, Span, SpanIndex, Type},
     const_stage::{
         ConstValueKey, Constants, Context, Diagnostic, Error, Errors, Warning, Warnings,
         lowering::{ConstEvalResult, apply_generic_arguments},
@@ -17,6 +14,7 @@ use crate::{
     ir::{
         Addr, BasicBlock, BlockCtx, ControlFrame, ControlFrameKind, FunctionIr, FunctionIrKey,
         Instruction, Terminator, Value, ValueKey, Variable,
+        post_lowering_pass::dead_code_elimination,
     },
 };
 
@@ -72,11 +70,8 @@ impl Context {
                         key
                     }
                 },
-
                 None => unreachable!("generic inference is not my concern"),
             },
-
-            _ => unreachable!("yup its just like that"),
         };
 
         let fun = self.objects.functions.get_unchecked(key);
@@ -133,18 +128,18 @@ impl Context {
             },
         }
 
-        if let IrCache::Single(_) = &fun.data.ir {
-            for (var_key, var) in ir.variables.iter_pairs() {
-                if !var.used && var.identifier.deref() != "_" {
-                    self.diagnostics.warnings.push(Diagnostic {
-                        inner: Warnings::VariableUnused {
-                            ir: ir_key,
-                            var: var_key,
-                        },
-                        module: mod_key,
-                        span: var.identifier.location,
-                    });
-                }
+        dead_code_elimination(self, &ir_key);
+        let ir = self.ir_cache.get_mut_unchecked(&ir_key);
+        for (var_key, var) in ir.variables.iter_pairs() {
+            if !var.used && var.identifier.deref() != "_" {
+                self.diagnostics.warnings.push(Diagnostic {
+                    inner: Warnings::VariableUnused {
+                        ir: ir_key,
+                        var: var_key,
+                    },
+                    module: mod_key,
+                    span: var.identifier.location,
+                });
             }
         }
 
@@ -888,25 +883,49 @@ impl Context {
                                     }],
                                     op.location,
                                 );
-                                Ok(left_addr)
+
+                                Ok(Addr::Value(right_value))
                             }
-                            Addr::Value(key) => todo!(),
-                            Addr::Object(any_object_key) => todo!(),
-                            Addr::Function(key) => todo!(),
-                            Addr::UnresolvedFunction(key) => todo!(),
-                            Addr::MemoryRef { src, inner_ty } => todo!(),
-                            Addr::Field { src, idx } => todo!(),
-                            Addr::Never => todo!(),
+                            Addr::Value(_) => Err(Error {
+                                inner: Errors::InvalidAssign("a runtime value", left_ty),
+                                module,
+                                span: op.location,
+                            }),
+                            Addr::Object(_) => Err(Error {
+                                inner: Errors::InvalidAssign("a static object", left_ty),
+                                module,
+                                span: op.location,
+                            }),
+                            Addr::Function(_) => Err(Error {
+                                inner: Errors::InvalidAssign("a function", left_ty),
+                                module,
+                                span: op.location,
+                            }),
+                            Addr::UnresolvedFunction(_) => Err(Error {
+                                inner: Errors::InvalidAssign("a function", left_ty),
+                                module,
+                                span: op.location,
+                            }),
+                            Addr::MemoryRef { src, inner_ty } => Err(Error {
+                                inner: Errors::Todo("assignment 654"),
+                                module,
+                                span: op.location,
+                            }),
+                            Addr::Field { src, idx } => Err(Error {
+                                inner: Errors::Todo("assignment 654"),
+                                module,
+                                span: op.location,
+                            }),
+                            Addr::Never => Ok(left_addr),
                         }
                     }
-                    ast::Operator::BitAnd
-                    | ast::Operator::BitOr
-                    | ast::Operator::Assign
-                    | ast::Operator::Or => Err(Error {
-                        inner: Errors::Todo("Operator unsupported"),
-                        span: op.location,
-                        module,
-                    }),
+                    ast::Operator::BitAnd | ast::Operator::BitOr | ast::Operator::Or => {
+                        Err(Error {
+                            inner: Errors::Todo("Operator unsupported"),
+                            span: op.location,
+                            module,
+                        })
+                    }
                     _ => {
                         let left_value =
                             self.load_addr(ir, block_ctx, left_addr, &None, l.location)?;
@@ -987,7 +1006,7 @@ impl Context {
                                     }
                                 }
                                 (any, None) => Addr::Object(any),
-                                _ => todo!("do smoething idk"),
+                                (any, Some(g)) => todo!("do smoething idk {}", any.ident(self)),
                             },
                             Err(e) => {
                                 if path.len() == 1 {
@@ -1026,7 +1045,6 @@ impl Context {
                                 let ir = self.ir_cache.get_mut_unchecked(ir);
                                 let var_obj = ir.variables.get_mut_unchecked(&var);
                                 var_obj.needs_address = true;
-                                var_obj.used = true;
                                 let ty = self
                                     .types
                                     .references
@@ -1449,22 +1467,24 @@ impl FunctionIr {
     }
 
     pub fn const_stage_update(&mut self, fun: &AnyObject<FunctionObj>, fun_key: FunctionObjKey) {
-        let mut parameters = Vec::new();
-        for (ident, ty) in &fun.data.params {
-            let ty = *ty.get_done();
-            let value = self.values.push(Value::new(ty));
-            let variable = Variable {
-                identifier: ident.clone(),
-                ty,
-                value,
-                mutated: false,
-                used: false,
-                needs_address: false,
-            };
-            let variable = self.variables.push(variable);
-            parameters.push((ident.deref().clone(), variable));
+        if self.variables.len() == 0 {
+            let mut parameters = Vec::new();
+            for (ident, ty) in &fun.data.params {
+                let ty = *ty.get_done();
+                let value = self.values.push(Value::new(ty));
+                let variable = Variable {
+                    identifier: ident.clone(),
+                    ty,
+                    value,
+                    mutated: false,
+                    used: false,
+                    needs_address: false,
+                };
+                let variable = self.variables.push(variable);
+                parameters.push((ident.deref().clone(), variable));
+            }
+            self.parameters = parameters;
         }
-        self.parameters = parameters;
         self.source = Some(fun_key);
         self.type_of = Some(AnyTypeKey::Function(*fun.data.type_of.get_done()));
         self.returns = match fun.data.return_type.get_done() {

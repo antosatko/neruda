@@ -90,6 +90,7 @@ pub enum Errors {
     CouldNotDeref(AnyTypeKey),
     TypeIsUnsized(AnyTypeKey),
     InvalidExpression,
+    InvalidAssign(&'static str, AnyTypeKey),
 }
 
 #[derive(Debug)]

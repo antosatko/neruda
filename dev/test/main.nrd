@@ -27,7 +27,7 @@ pub function fact(n: i32): i32 {
     return n * fact(n - 1)
 }
 
-pub function fib_rec(n: i32) : i32 {
+pub function fib_rec(n: i32): i32 {
     if n <= 1 {
         return n
     }

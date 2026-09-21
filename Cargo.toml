@@ -1,5 +1,5 @@
 [workspace]
-members = ["ir-explorer","ir", "lsp", "parser", "runtime", "cl_backend"]
+members = ["ir-explorer","ir", "lsp", "parser", "runtime", "cl-backend", "llvm-backend"]
 
 [package]
 name = "neruda"
@@ -16,4 +16,4 @@ arena-scope = { git = "https://github.com/antosatko/arena-scope" }
 clap = { version = "4.6.0", features = ["derive"] }
 parser = { path = "parser" }
 ir = { path = "ir" }
-cl_backend = { path = "cl_backend" }
+cl-backend = { path = "cl-backend" }

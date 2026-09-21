@@ -131,6 +131,7 @@ pub enum Instruction {
         op: UnaryOp,
         src: ValueKey,
         dst: ValueKey,
+        ty: PrimitiveType,
     },
     StoreVar {
         dst: VariableKey,

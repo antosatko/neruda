@@ -54,17 +54,13 @@ fn main() {
             let tokens = match parser.lexer.lex_utf8(&buf) {
                 Ok(tokens) => tokens,
                 Err(e) => {
-                    return e
-                        .print(&buf, Some(&cli.input))
-                        .expect("Unable to print lexing err");
+                    return e.print(&buf, Some(&cli.input)).unwrap();
                 }
             };
             let ast = match parser.parse(&tokens, &buf) {
                 Ok(tokens) => tokens,
                 Err(e) => {
-                    return e
-                        .print(&buf, Some(&cli.input))
-                        .expect("Unable to print parsing err");
+                    return e.print(&buf, Some(&cli.input)).unwrap();
                 }
             };
             let ModuleOk {

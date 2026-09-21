@@ -32,7 +32,12 @@ fn generate_instr_elements(instr: &Instruction) -> Vec<IrElement> {
             Operator(format!(" {:?} ", op)),
             Value { id: r },
         ],
-        Instruction::UnaryOp { op, src, dst } => vec![
+        Instruction::UnaryOp {
+            op,
+            src,
+            dst,
+            ty: _,
+        } => vec![
             Value { id: dst },
             Text(" = ".into()),
             Operator(format!("{:?} ", op)),

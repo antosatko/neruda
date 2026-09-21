@@ -4,7 +4,7 @@ use arena::Arena;
 use arena_scope::stack::Stack;
 
 use crate::{
-    ast::{self, Body, Expression, Function, Postfix, Span, SpanIndex, Type},
+    ast::{self, Body, Expression, Function, Postfix, Span, SpanIndex, Type, UnaryOp},
     const_stage::{
         ConstValueKey, Constants, Context, Diagnostic, Error, Errors, Warning, Warnings,
         lowering::{ConstEvalResult, apply_generic_arguments},
@@ -1192,6 +1192,64 @@ impl Context {
                             span: op.location,
                         })?,
                     };
+                }
+                for op in &val.unary {
+                    let ty = addr.type_of(self, ir).map_err(|inner| Error {
+                        inner,
+                        module,
+                        span: val.location,
+                    })?;
+                    match (op.deref(), ty) {
+                        (UnaryOp::Neg, AnyTypeKey::Primitive(PrimitiveType::Bool)) => {
+                            let value =
+                                self.load_addr(ir, block_ctx, addr, expect, val.location)?;
+                            let self_ir = self.ir_cache.get_mut_unchecked(ir);
+                            let dst = self_ir.values.push(Value {
+                                ty,
+                                needs_address: false,
+                                used: false,
+                            });
+
+                            self_ir.blocks.get_mut_unchecked().extend(
+                                [Instruction::UnaryOp {
+                                    op: UnaryOp::Neg,
+                                    src: value,
+                                    dst: dst,
+                                    ty: PrimitiveType::Bool,
+                                }],
+                                val.location,
+                            );
+                            addr = Addr::Value(dst);
+                        }
+                        (UnaryOp::Sub, AnyTypeKey::Primitive(numeric_ty))
+                            if numeric_ty.is_numeric() =>
+                        {
+                            let value =
+                                self.load_addr(ir, block_ctx, addr, expect, val.location)?;
+                            let self_ir = self.ir_cache.get_mut_unchecked(ir);
+                            let dst = self_ir.values.push(Value {
+                                ty,
+                                needs_address: false,
+                                used: false,
+                            });
+
+                            self_ir.blocks.get_mut_unchecked().extend(
+                                [Instruction::UnaryOp {
+                                    op: UnaryOp::Sub,
+                                    src: value,
+                                    dst: dst,
+                                    ty: numeric_ty,
+                                }],
+                                val.location,
+                            );
+                            addr = Addr::Value(dst);
+                        }
+                        (_, _) => Err(Error {
+                            inner: Errors::Todo("make the err type for failed unary ops"),
+                            module,
+                            span: op.location,
+                        })?,
+                    }
                 }
                 if let Some(expect) = expect {
                     let ty = addr.type_of(self, ir).map_err(|inner| Error {

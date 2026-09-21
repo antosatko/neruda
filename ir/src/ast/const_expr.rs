@@ -103,7 +103,7 @@ impl Expression {
                     value: NumberValue::Float(-n),
                     size,
                 }),
-                _ => todo!("nah"),
+                _ => Err(Cow::Borrowed(self))?,
             };
             new = replace;
         }

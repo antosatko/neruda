@@ -252,7 +252,18 @@ impl<'a> CLLoweringCtx<'a> {
                             };
                             value_map.insert(*dst, out.into());
                         }
-                        ir::ir::Instruction::UnaryOp { op, src, dst } => todo!(),
+                        ir::ir::Instruction::UnaryOp { op, src, dst, ty } => {
+                            let val = load_value_into_ssa(&mut builder, &value_map[src], self.ctx);
+                            let is_float = is_float(*ty);
+                            let out = match op {
+                                ir::ast::UnaryOp::Neg => todo!(),
+                                ir::ast::UnaryOp::Sub if is_float => builder.ins().fneg(val),
+                                ir::ast::UnaryOp::Sub => builder.ins().ineg(val),
+                                ir::ast::UnaryOp::Ref => unreachable!("depricated: ref"),
+                                ir::ast::UnaryOp::Deref => unreachable!("depricated: deref"),
+                            };
+                            value_map.insert(*dst, out.into());
+                        }
 
                         ir::ir::Instruction::StoreVar { dst, src } => {
                             store_local_value(

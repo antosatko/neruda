@@ -81,7 +81,12 @@ fn block_dead_code_elim(
                 mark_used!(l);
                 mark_used!(r);
             }
-            super::Instruction::UnaryOp { op: _, src, dst } => {
+            super::Instruction::UnaryOp {
+                op: _,
+                src,
+                dst,
+                ty: _,
+            } => {
                 if !values.get_unchecked(dst).used {
                     continue;
                 }

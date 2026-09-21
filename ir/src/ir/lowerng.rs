@@ -936,7 +936,7 @@ impl Context {
                                 .map_err(|inner| Error {
                                     inner,
                                     module,
-                                    span: expr.location,
+                                    span: r.location,
                                 })?;
 
                         let ir = self.ir_cache.get_mut_unchecked(ir);

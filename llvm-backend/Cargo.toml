@@ -5,3 +5,5 @@ edition = "2024"
 
 [dependencies]
 inkwell = { version = "0.10.0", features = ["llvm22-1"] }
+ir = { path = "../ir" }
+smol_str.workspace = true

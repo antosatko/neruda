@@ -2150,6 +2150,8 @@ name = "llvm-backend"
 version = "0.1.0"
 dependencies = [
  "inkwell",
+ "ir",
+ "smol_str 0.3.6",
 ]
 
 [[package]]

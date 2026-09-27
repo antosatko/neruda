@@ -17,3 +17,4 @@ clap = { version = "4.6.0", features = ["derive"] }
 parser = { path = "parser" }
 ir = { path = "ir" }
 cl-backend = { path = "cl-backend" }
+llvm-backend = { path = "llvm-backend" }

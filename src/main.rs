@@ -4,6 +4,7 @@ use ir::const_stage::{
     Context,
     objects::{IrCache, Objects},
 };
+use llvm_backend::{LLVMContext, LLVMLoweringContext};
 use parser::{
     grammar::gen_parser,
     lowering::{self, ModuleOk},
@@ -29,6 +30,15 @@ struct Cli {
 
     #[arg(short, long, value_enum, default_value_t = EmitTarget::Bin)]
     emit: EmitTarget,
+
+    #[arg(long, value_enum, default_value_t = Backend::Cl)]
+    backend: Backend,
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, Debug, ValueEnum)]
+enum Backend {
+    Cl,
+    Llvm,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]
@@ -157,13 +167,35 @@ fn main() {
                     };
                 }
 
-                let mut cl_be = CLLoweringCtx::init(&ir_ctx);
-                cl_be.lower();
-                match cli.output {
-                    Some(out) => {
-                        cl_be.emit(out);
+                match cli.backend {
+                    Backend::Cl => {
+                        let mut backend = CLLoweringCtx::init(&ir_ctx);
+                        backend.lower();
+
+                        if let Some(out) = cli.output {
+                            backend.emit(out);
+                        }
                     }
-                    None => (),
+                    Backend::Llvm => {
+                        let llvm = LLVMContext::create();
+                        let mut backend = LLVMLoweringContext::new(&ir_ctx, &llvm);
+
+                        backend.lower().expect("LLVM lowering failed");
+
+                        if let Some(out) = cli.output {
+                            let mut ir_out = out.clone();
+                            ir_out.set_extension("ll");
+
+                            backend
+                                .module()
+                                .print_to_file(&ir_out)
+                                .expect("Failed to write LLVM IR");
+
+                            backend
+                                .emit_object(&out)
+                                .expect("Failed to write LLVM object");
+                        }
+                    }
                 }
             }
         }

@@ -35,6 +35,8 @@ def compile_project():
         "-e",
         "ir",
         str(TEST_DIR),
+        "--backend",
+        "llvm",
         "-o",
         str(OBJECT_FILE),
     ])

@@ -1394,10 +1394,9 @@ impl Context {
                     span,
                 }),
             },
-            Addr::MemoryRef { src, inner_ty: _ } => {
+            Addr::MemoryRef { src, inner_ty } => {
                 let ir = self.ir_cache.get_mut_unchecked(ir);
-                let ty = ir.values.get_unchecked(&src).ty;
-                let dst = ir.values.push(Value::new(ty));
+                let dst = ir.values.push(Value::new(inner_ty));
                 ir.blocks
                     .get_mut_unchecked()
                     .extend([Instruction::Deref { src, dst }], span);

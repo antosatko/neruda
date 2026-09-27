@@ -5,6 +5,7 @@ extern "C" {
     fn fact(a: i32) -> i32;
     fn fib(n: i32) -> i32;
     fn fib_rec(n: i32) -> i32;
+    fn ptr_test(n: *const i32) -> i32;
 }
 
 fn fib_rust(mut n: i32) -> i32 {
@@ -53,5 +54,6 @@ fn main() {
             black_box(fib(40));
         }
         println!("neruda => {}: {:?}", fib(25), start.elapsed());
+        println!("ptr_test(&67) => {}", ptr_test(&67 as *const i32))
     }
 }

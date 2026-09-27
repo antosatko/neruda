@@ -2349,6 +2349,7 @@ dependencies = [
  "cl-backend",
  "clap",
  "ir",
+ "llvm-backend",
  "parser",
 ]
 

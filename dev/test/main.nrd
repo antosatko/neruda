@@ -33,3 +33,7 @@ pub function fib_rec(n: i32): i32 {
     }
     return fib_rec(n - 1) + fib_rec(n - 2)
 }
+
+pub function ptr_test(n: &i32): i32 {
+	return n.*
+}

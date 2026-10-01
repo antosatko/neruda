@@ -872,7 +872,6 @@ impl Context {
                     | ast::Operator::AddAssign => {
                         let right_value =
                             self.load_addr(ir, block_ctx, right_addr, &None, r.location)?;
-                        let result_type = right_ty;
                         match left_addr {
                             Addr::Var(key) => {
                                 let ir = self.ir_cache.get_mut_unchecked(ir);
@@ -1035,6 +1034,16 @@ impl Context {
                                 }
                             }
                         }
+                    }
+                    ast::Literal::Number(n) => {
+                        let fun = self.ir_cache.get_mut_unchecked(ir);
+                        let c = ast::ConstValue::Number(n.clone());
+                        let dst = fun.values.push(Value::new(c.type_of().unwrap()));
+                        let src = self.constants.push(c);
+                        fun.blocks
+                            .get_mut_unchecked()
+                            .extend([Instruction::LoadConst { src, dst }], val.location);
+                        Addr::Value(dst)
                     }
                     a => todo!("{a:?}"),
                 };

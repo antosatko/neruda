@@ -180,7 +180,7 @@ fn main() {
                         let llvm = LLVMContext::create();
                         let mut backend = LLVMLoweringContext::new(&ir_ctx, &llvm);
 
-                        backend.lower().expect("LLVM lowering failed");
+                        backend.lower();
 
                         if let Some(out) = cli.output {
                             let mut ir_out = out.clone();
@@ -191,9 +191,7 @@ fn main() {
                                 .print_to_file(&ir_out)
                                 .expect("Failed to write LLVM IR");
 
-                            backend
-                                .emit_object(&out)
-                                .expect("Failed to write LLVM object");
+                            backend.emit_object(&out);
                         }
                     }
                 }

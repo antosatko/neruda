@@ -35,5 +35,8 @@ pub function fib_rec(n: i32): i32 {
 }
 
 pub function ptr_test(n: &i32): i32 {
+    if n.* < 100 {
+        return ptr_test(420.&)
+    }
 	return n.*
 }

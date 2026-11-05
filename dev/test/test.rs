@@ -3,6 +3,7 @@ use std::time::Instant;
 
 extern "C" {
     fn fact(a: i32) -> i32;
+    fn main_test();
     fn fib(n: i32) -> i32;
     fn fib_rec(n: i32) -> i32;
     fn ptr_test(n: *const i32) -> i32;
@@ -34,6 +35,7 @@ fn fib_rust_rec(n: i32) -> i32 {
 
 fn main() {
     unsafe {
+        main_test();
         println!(
             "fact sequence recursive: {:?}",
             (1..10)

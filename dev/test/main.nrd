@@ -4,6 +4,8 @@ type Vec<T> = struct {
     cap: u32
 }
 
+type Vec2 = struct { x: i32 y: i32 }
+
 pub function fib(n: i32): i32 {
     if n <= 1 {
         return n
@@ -39,4 +41,9 @@ pub function ptr_test(n: &i32): i32 {
         return ptr_test(420.&)
     }
 	return n.*
+}
+
+pub function main_test() {
+    var a = struct Vec2 { x: 30 }
+    
 }

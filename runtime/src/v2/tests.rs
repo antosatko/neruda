@@ -36,9 +36,10 @@ fn build() {
 
     let entity_key = spwner.spawn(&mut world);
 
-    world.iter_query(q_velocity, |world| {
+    world.iter_query(q_velocity, |mut world| {
         assert_eq!(world.entity(), entity_key);
         assert_eq!(world.get_static(velocity), &(0.1, 0.2));
         assert!(world.get_flag(unit_flag));
+        world.remove_flag(unit_flag);
     });
 }

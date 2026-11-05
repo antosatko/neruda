@@ -347,7 +347,12 @@ impl<'w> WorldRef<'w> {
     }
 
     #[inline]
-    pub fn set_flag(&mut self, flag: FlagComponent) {
+    pub fn set_flag(&mut self, flag: FlagComponent, set: bool) {
+        self.archetype.fixed_columns[self.entity].1 |= (set as u32) << flag.0
+    }
+
+    #[inline]
+    pub fn add_flag(&mut self, flag: FlagComponent) {
         self.archetype.fixed_columns[self.entity].1 |= 1 << flag.0
     }
 

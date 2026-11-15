@@ -416,13 +416,9 @@ impl IndexedWalk for ir::ast::Span<Object> {
                                     spans.push(alias.inner.span(Types::Ident, line_index))
                                 }
                             }
-                            for (component, alias) in &select.exclude {
+                            for component in &select.exclude {
                                 for ident in &component.inner.path {
                                     spans.push(ident.span(Types::Type, line_index));
-                                }
-                                if let Alias(Some(alias)) = alias {
-                                    spans.push(alias.span_word(Types::Keyword, line_index, "as"));
-                                    spans.push(alias.inner.span(Types::Ident, line_index))
                                 }
                             }
                         }

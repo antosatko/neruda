@@ -415,7 +415,7 @@ fn clause_variant(
                         ..
                     })) => {
                         if mutable.is_none() {
-                            exclude.push((component_path, alias))
+                            exclude.push(component_path)
                         } else {
                             return Err(span(LoweringError::MutableExclusion, component));
                         }

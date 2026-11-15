@@ -5,7 +5,7 @@ use arena_scope::ScopeKey;
 use smol_str::SmolStr;
 
 use crate::{
-    ast::{self, AccessModifiers, ConstValue, Span},
+    ast::{self, AccessModifiers, Span},
     const_stage::{
         ConstValueKey, Context, Errors,
         types::{AnyTypeKey, ConstraintKey, FunctionKey, ModuleKey, NamedTypeKey, TraitKey},
@@ -75,6 +75,24 @@ pub type ComponentObjArena = Arena<AnyObject<ComponentObj>, ComponentObjTag>;
 #[derive(Debug)]
 pub struct ComponentObj {
     pub ty: InitState<AnyTypeKey, ()>,
+    pub usage: ComponentUsage,
+}
+
+#[derive(Debug)]
+/// Keeps track of usage of said component for optimal layout
+pub struct ComponentUsage {
+    /// Read-only access found
+    pub read: usize,
+    /// Read-Write access found
+    pub write: usize,
+    /// Component found in exclusion
+    pub exclude: usize,
+    /// Component is an action
+    pub action: usize,
+    /// Componend found as optional
+    pub optional: usize,
+    /// Component has 0 size
+    pub flag: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -102,6 +120,68 @@ pub struct FunctionObj {
     pub generic_scope: InitState<ScopeKey, ()>,
 }
 
+/*
+#[derive(Debug, Clone)]
+pub struct SelectClause {
+    pub foreign: Option<Keyword>,
+    pub ident: Span<SmolStr>,
+    pub docs: Vec<Span<SmolStr>>,
+    pub include: Vec<(Span<IdentifierPath>, Mutability, Alias)>,
+    pub exclude: Vec<(Span<IdentifierPath>, Alias)>,
+    pub optional: Vec<(Span<IdentifierPath>, Mutability, Alias)>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ActionClause {
+    pub ident: Span<SmolStr>,
+    pub docs: Vec<Span<SmolStr>>,
+    pub event: Vec<(Span<IdentifierPath>, Alias)>,
+}
+
+#[derive(Debug, Clone)]
+pub struct RestrictionClause {
+    pub expression: Span<Expression>,
+} */
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash)]
+pub struct SystemObjTag;
+pub type SystemObjKey = Key<SystemObjTag>;
+pub type SystemObjArena = Arena<AnyObject<SystemObj>, SystemObjTag>;
+#[derive(Debug)]
+pub struct SystemObj {
+    pub return_type: InitState<AnyTypeKey, ()>,
+    pub generic_scope: InitState<ScopeKey, ()>,
+    pub params: Vec<(Span<SmolStr>, InitState<AnyTypeKey, ()>)>,
+    pub query: Vec<QueryClauses>,
+}
+
+#[derive(Debug)]
+pub struct QueryRestrictionClause {}
+
+#[derive(Debug)]
+pub struct QueryActionClause {
+    pub ident: Span<SmolStr>,
+    pub event: Vec<(ComponentObjKey, SmolStr)>,
+}
+
+pub type Mutability = bool;
+
+#[derive(Debug)]
+pub struct QuerySelectClause {
+    pub foreign: bool,
+    pub ident: Span<SmolStr>,
+    pub include: Vec<(ComponentObjKey, Mutability, SmolStr)>,
+    pub exclude: Vec<ComponentObjKey>,
+    pub optional: Vec<(ComponentObjKey, Mutability, SmolStr)>,
+}
+
+#[derive(Debug)]
+pub enum QueryClauses {
+    Select(QuerySelectClause),
+    Action(QueryActionClause),
+    Restriction(QueryRestrictionClause),
+}
+
 #[derive(Debug)]
 pub enum IrCache {
     Single(InitState<FunctionIrKey>),
@@ -117,6 +197,7 @@ pub struct Objects {
     pub components: ComponentObjArena,
     pub functions: FunctionObjArena,
     pub resources: ResourceObjArena,
+    pub systems: SystemObjArena,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -128,6 +209,7 @@ pub enum AnyObjectKey {
     Component(ComponentObjKey),
     Function(FunctionObjKey),
     Resource(ResourceObjKey),
+    System(SystemObjKey),
 }
 
 #[derive(Debug)]
@@ -223,6 +305,7 @@ impl AnyObjectKey {
             AnyObjectKey::Component(key) => &ctx.objects.components.get_unchecked(key).identifier,
             AnyObjectKey::Function(key) => &ctx.objects.functions.get_unchecked(key).identifier,
             AnyObjectKey::Resource(key) => &ctx.objects.resources.get_unchecked(key).identifier,
+            AnyObjectKey::System(key) => &ctx.objects.systems.get_unchecked(key).identifier,
         }
     }
 
@@ -235,6 +318,7 @@ impl AnyObjectKey {
             AnyObjectKey::Component(key) => ctx.objects.components.get_unchecked(key).access,
             AnyObjectKey::Function(key) => ctx.objects.functions.get_unchecked(key).access,
             AnyObjectKey::Resource(key) => ctx.objects.resources.get_unchecked(key).access,
+            AnyObjectKey::System(key) => ctx.objects.systems.get_unchecked(key).access,
         }
     }
 
@@ -247,6 +331,7 @@ impl AnyObjectKey {
             AnyObjectKey::Component(key) => ctx.objects.components.get_unchecked(key).module,
             AnyObjectKey::Function(key) => ctx.objects.functions.get_unchecked(key).module,
             AnyObjectKey::Resource(key) => ctx.objects.resources.get_unchecked(key).module,
+            AnyObjectKey::System(key) => ctx.objects.systems.get_unchecked(key).module,
         }
     }
 
@@ -276,6 +361,7 @@ impl AnyObjectKey {
                 AnyTypeKey::Named(*ctx.objects.types.get_unchecked(ty).data.ty.get_done())
             }
             AnyObjectKey::Import(_) => Err(Errors::FailedTypeInfer)?,
+            AnyObjectKey::System(_) => todo!("decide what to do"),
         })
     }
 }
@@ -313,5 +399,11 @@ impl From<TraitObjKey> for AnyObjectKey {
 impl From<TypeAliasObjKey> for AnyObjectKey {
     fn from(value: TypeAliasObjKey) -> Self {
         AnyObjectKey::Type(value)
+    }
+}
+
+impl From<SystemObjKey> for AnyObjectKey {
+    fn from(value: SystemObjKey) -> Self {
+        AnyObjectKey::System(value)
     }
 }

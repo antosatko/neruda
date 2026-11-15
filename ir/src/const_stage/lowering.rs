@@ -11,8 +11,9 @@ use crate::ast::{
     SpanIndex, Type,
 };
 use crate::const_stage::objects::{
-    AnyObject, AnyObjectKey, ComponentObj, ComponentObjKey, ConstObj, ConstObjKey, FunctionObj,
-    FunctionObjKey, ImportObj, InitState, IrCache, Module, ResourceObj, ResourceObjKey, TraitObj,
+    AnyObject, AnyObjectKey, ComponentObj, ComponentObjKey, ComponentUsage, ConstObj, ConstObjKey,
+    FunctionObj, FunctionObjKey, ImportObj, InitState, IrCache, Module, QueryClauses,
+    QuerySelectClause, ResourceObj, ResourceObjKey, SystemObj, SystemObjKey, TraitObj,
     TypeAliasObj, TypeAliasObjKey,
 };
 use crate::const_stage::types::{
@@ -115,12 +116,13 @@ impl Context {
                         ident,
                         access,
                         generics,
+                        parameters,
                         ..
                     }) => {
                         let mut fun = AnyObject {
                             data: FunctionObj {
                                 return_type: InitState::Uninitialized,
-                                params: Vec::with_capacity(0),
+                                params: Vec::with_capacity(parameters.len()),
                                 generics: Vec::new(),
                                 type_of: InitState::Uninitialized,
                                 ir: IrCache::Single(InitState::Uninitialized),
@@ -141,13 +143,46 @@ impl Context {
                             self.objects.functions.push(fun).into(),
                         )
                     }
-                    ast::Object::Component { ident, access, .. } => (
+                    ast::Object::System {
+                        access,
+                        ident,
+                        query,
+                        ..
+                    } => (
+                        ident.deref().clone(),
+                        self.objects
+                            .systems
+                            .push(AnyObject {
+                                data: SystemObj {
+                                    return_type: InitState::Uninitialized,
+                                    generic_scope: InitState::Uninitialized,
+                                    params: Vec::with_capacity(0),
+                                    query: Vec::with_capacity(query.len()),
+                                },
+                                access: access.modifier,
+                                identifier: ident.inner.as_ref().clone(),
+                                ast_object: Some(obj_key),
+                                module: *module_key,
+                            })
+                            .into(),
+                    ),
+                    ast::Object::Component {
+                        ident, access, ty, ..
+                    } => (
                         ident.inner.as_ref().clone(),
                         self.objects
                             .components
                             .push(AnyObject {
                                 data: ComponentObj {
                                     ty: InitState::Uninitialized,
+                                    usage: ComponentUsage {
+                                        read: 0,
+                                        write: 0,
+                                        exclude: 0,
+                                        action: 0,
+                                        optional: 0,
+                                        flag: ty.is_none(),
+                                    },
                                 },
                                 access: access.modifier,
                                 identifier: ident.inner.as_ref().clone(),
@@ -199,7 +234,6 @@ impl Context {
                             })
                             .into(),
                     ),
-                    ast::Object::System { .. } => continue,
                     ast::Object::Const { ident, access, .. } => (
                         ident.inner.as_ref().clone(),
                         self.objects
@@ -404,6 +438,11 @@ impl Context {
         for resource_key in resource_keys {
             self.lower_resource_with_key(resource_key)?;
         }
+
+        let system_keys: Vec<SystemObjKey> = self.objects.systems.iter_keys().collect();
+        for system_key in system_keys {
+            self.lower_system_with_key(system_key)?;
+        }
         Ok(())
     }
 
@@ -419,6 +458,7 @@ impl Context {
             AnyObjectKey::Component(key) => self.lower_component_with_key(key).map(|_| ()),
             AnyObjectKey::Function(key) => self.lower_function_with_key(key).map(|_| ()),
             AnyObjectKey::Resource(key) => self.lower_resource_with_key(key).map(|_| ()),
+            AnyObjectKey::System(key) => self.lower_system_with_key(key).map(|_| ()),
         }
     }
 
@@ -511,6 +551,131 @@ impl Context {
                 _ => unreachable!(),
             },
         )
+    }
+
+    fn lower_system_with_key(
+        &mut self,
+        system_key: SystemObjKey,
+    ) -> Result<&mut AnyObject<SystemObj>, Diagnostic<Errors>> {
+        let obj = self.objects.systems.get_unchecked(&system_key);
+        let mod_key = obj.module;
+        let module = self.types.modules.get_unchecked(&mod_key);
+        let ast_obj = match &obj.ast_object {
+            Some(o) => o,
+            None => return Ok(self.objects.systems.get_mut_unchecked(&system_key)),
+        };
+        Ok(
+            match self
+                .ast
+                .get(&module.path)
+                .unwrap()
+                .objects
+                .get_unchecked(ast_obj)
+                .clone()
+                .deref()
+            {
+                ast::Object::System {
+                    access,
+                    ident,
+                    generics,
+                    docs,
+                    query,
+                    before,
+                    body,
+                    after,
+                } => {
+                    let identifier = ident.deref().clone();
+                    for clause in query {
+                        match clause.deref() {
+                            ast::Clauses::Select(select_clause) => {
+                                let mut include = Vec::new();
+                                let mut exclude = Vec::new();
+                                let mut optional = Vec::new();
+                                for (ident_path, mutability, alias) in &select_clause.include {
+                                    let component_key = self.find_component(mod_key, ident_path)?;
+                                    let c_obj =
+                                        self.objects.components.get_mut_unchecked(&component_key);
+                                    match mutability.0.is_some() {
+                                        true => c_obj.data.usage.write += 1,
+                                        false => c_obj.data.usage.read += 1,
+                                    }
+                                    include.push((
+                                        component_key,
+                                        mutability.0.is_some(),
+                                        match &alias.0 {
+                                            Some(alias) => alias.deref().deref().clone(),
+                                            None => c_obj.identifier.clone(),
+                                        },
+                                    ));
+                                }
+                                for (ident_path, mutability, alias) in &select_clause.optional {
+                                    let component_key = self.find_component(mod_key, ident_path)?;
+                                    let c_obj =
+                                        self.objects.components.get_mut_unchecked(&component_key);
+                                    c_obj.data.usage.optional += 1;
+                                    match mutability.0.is_some() {
+                                        true => c_obj.data.usage.write += 1,
+                                        false => c_obj.data.usage.read += 1,
+                                    }
+                                    optional.push((
+                                        component_key,
+                                        mutability.0.is_some(),
+                                        match &alias.0 {
+                                            Some(alias) => alias.deref().deref().clone(),
+                                            None => c_obj.identifier.clone(),
+                                        },
+                                    ));
+                                }
+                                for ident_path in &select_clause.exclude {
+                                    let component_key = self.find_component(mod_key, ident_path)?;
+                                    let c_obj =
+                                        self.objects.components.get_mut_unchecked(&component_key);
+                                    c_obj.data.usage.exclude += 1;
+                                    exclude.push(component_key);
+                                }
+                                let clause = QuerySelectClause {
+                                    ident: select_clause.ident.clone(),
+                                    foreign: select_clause.foreign.is_some(),
+                                    include,
+                                    exclude,
+                                    optional,
+                                };
+                                let obj = self.objects.systems.get_mut_unchecked(&system_key);
+                                dbg!(&clause);
+                                obj.data.query.push(QueryClauses::Select(clause));
+                            }
+                            ast::Clauses::Action((clause, _)) => Err(Error {
+                                inner: Errors::Todo("Decide whether actions make sense"),
+                                module: mod_key,
+                                span: clause.ident.location,
+                            })?,
+                            ast::Clauses::Restriction(restriction_clause) => todo!(),
+                        }
+                    }
+                    let sys = self.objects.systems.get_mut_unchecked(&system_key);
+                    sys
+                }
+                _ => unreachable!(),
+            },
+        )
+    }
+
+    fn find_component(
+        &mut self,
+        mod_key: Key<ModuleTag>,
+        ident_path: &Span<ast::IdentifierPath>,
+    ) -> Result<Key<super::objects::ComponentObjTag>, Diagnostic<Errors>> {
+        let thingy =
+            self.resolve_const_path(&ident_path.path, mod_key, ident_path.location, &None)?;
+        let component_key = match thingy {
+            AnyObjectKey::Component(key) => key,
+            key => Err(Error {
+                span: ident_path.location,
+                module: mod_key,
+                inner: Errors::ExpectedComponent(key),
+            })?,
+        };
+        Ok(component_key)
     }
 
     fn lower_function_with_key(

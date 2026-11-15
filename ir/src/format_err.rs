@@ -273,6 +273,11 @@ impl Errors {
                 ),
                 format!("Runtime value assign"),
             ),
+            Errors::ExpectedComponent(obj) => (
+                "433",
+                format!("Expected a component, instead found '{}'", obj.ident(ctx)),
+                format!("Expected component"),
+            ),
         }
     }
 }

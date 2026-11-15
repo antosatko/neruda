@@ -143,6 +143,7 @@ fn main() {
                     components: _,
                     functions,
                     resources: _,
+                    systems,
                 } = &ir_ctx.objects;
                 for fun in functions.iter() {
                     println!("Function: {}", fun.identifier);

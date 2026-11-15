@@ -265,7 +265,7 @@ pub struct SelectClause {
     pub ident: Span<SmolStr>,
     pub docs: Vec<Span<SmolStr>>,
     pub include: Vec<(Span<IdentifierPath>, Mutability, Alias)>,
-    pub exclude: Vec<(Span<IdentifierPath>, Alias)>,
+    pub exclude: Vec<Span<IdentifierPath>>,
     pub optional: Vec<(Span<IdentifierPath>, Mutability, Alias)>,
 }
 

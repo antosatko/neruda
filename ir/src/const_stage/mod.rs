@@ -91,6 +91,7 @@ pub enum Errors {
     TypeIsUnsized(AnyTypeKey),
     InvalidExpression,
     InvalidAssign(&'static str, AnyTypeKey),
+    ExpectedComponent(AnyObjectKey),
 }
 
 #[derive(Debug)]

@@ -376,7 +376,6 @@ impl IndexedWalk for ir::ast::Span<Object> {
                 for clause in query {
                     match clause.inner.as_ref() {
                         ir::ast::Clauses::Select(select) => {
-                            spans.push(select.ident.span(Types::Ident, line_index));
                             if let Some(foreign) = &select.foreign {
                                 spans.push(foreign.0.span_word(
                                     Types::Keyword,
@@ -384,43 +383,8 @@ impl IndexedWalk for ir::ast::Span<Object> {
                                     "foreign",
                                 ));
                             }
-                            for (component, mutability, alias) in &select.include {
-                                for ident in &component.inner.path {
-                                    spans.push(ident.span(Types::Type, line_index));
-                                }
-                                if let Some(mutability) = &mutability.0 {
-                                    spans.push(mutability.span_word(
-                                        Types::Keyword,
-                                        line_index,
-                                        "mut",
-                                    ));
-                                }
-                                if let Alias(Some(alias)) = alias {
-                                    spans.push(alias.span_word(Types::Keyword, line_index, "as"));
-                                    spans.push(alias.inner.span(Types::Ident, line_index))
-                                }
-                            }
-                            for (component, mutability, alias) in &select.optional {
-                                for ident in &component.inner.path {
-                                    spans.push(ident.span(Types::Type, line_index));
-                                }
-                                if let Some(mutability) = &mutability.0 {
-                                    spans.push(mutability.span_word(
-                                        Types::Keyword,
-                                        line_index,
-                                        "mut",
-                                    ));
-                                }
-                                if let Alias(Some(alias)) = alias {
-                                    spans.push(alias.span_word(Types::Keyword, line_index, "as"));
-                                    spans.push(alias.inner.span(Types::Ident, line_index))
-                                }
-                            }
-                            for component in &select.exclude {
-                                for ident in &component.inner.path {
-                                    spans.push(ident.span(Types::Type, line_index));
-                                }
-                            }
+                            spans.push(select.ident.span(Types::Ident, line_index));
+                            select.bundle.index(line_index, spans);
                         }
                         ir::ast::Clauses::Action((action, keyword)) => {
                             spans.push(action.ident.span(Types::Ident, line_index));
@@ -453,6 +417,40 @@ impl IndexedWalk for ir::ast::Span<Object> {
                 if let Some(alias) = &alias.0 {
                     spans.push(alias.span_word(Types::Keyword, line_index, "as"));
                 }
+            }
+        }
+    }
+}
+
+impl IndexedWalk for ir::ast::Bundle {
+    fn index(&self, line_index: &LineIndex, spans: &mut Vec<Span>) {
+        for (component, mutability, alias) in &self.include {
+            for ident in &component.inner.path {
+                spans.push(ident.span(Types::Type, line_index));
+            }
+            if let Some(mutability) = &mutability.0 {
+                spans.push(mutability.span_word(Types::Keyword, line_index, "mut"));
+            }
+            if let Alias(Some(alias)) = alias {
+                spans.push(alias.span_word(Types::Keyword, line_index, "as"));
+                spans.push(alias.inner.span(Types::Ident, line_index))
+            }
+        }
+        for (component, mutability, alias) in &self.optional {
+            for ident in &component.inner.path {
+                spans.push(ident.span(Types::Type, line_index));
+            }
+            if let Some(mutability) = &mutability.0 {
+                spans.push(mutability.span_word(Types::Keyword, line_index, "mut"));
+            }
+            if let Alias(Some(alias)) = alias {
+                spans.push(alias.span_word(Types::Keyword, line_index, "as"));
+                spans.push(alias.inner.span(Types::Ident, line_index))
+            }
+        }
+        for component in &self.exclude {
+            for ident in &component.inner.path {
+                spans.push(ident.span(Types::Type, line_index));
             }
         }
     }
@@ -588,6 +586,14 @@ impl IndexedWalk for ir::ast::Span<Statement> {
                 }
             }
             Statement::Expr { expression } => expression.index(line_index, spans),
+            Statement::Match { expression, arms } => {
+                spans.push(self.span_word(Types::Keyword, line_index, "match"));
+                expression.index(line_index, spans);
+                for (bundle, branch) in arms {
+                    bundle.index(line_index, spans);
+                    branch.index(line_index, spans);
+                }
+            }
         }
     }
 }

@@ -38,14 +38,19 @@ pub function ptr_test(n: &i32): i32 {
     if n.* < 100 {
         return ptr_test(420.&)
     }
+    match sadfs {
+        (a + a) => _
+    }
 	return n.*
 }
 
 component Danda
 
-system MujSystem(a: i32) [
-    e: mut Danda,
-    where e.Danda < 5,
-] {
+system a(a: a) => _
 
-}
+// system MujSystem(a: i32) [
+//     e: mut Danda,
+//     where e.Danda < 5,
+// ] {
+//
+// }

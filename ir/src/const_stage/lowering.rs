@@ -591,7 +591,8 @@ impl Context {
                                 let mut include = Vec::new();
                                 let mut exclude = Vec::new();
                                 let mut optional = Vec::new();
-                                for (ident_path, mutability, alias) in &select_clause.include {
+                                for (ident_path, mutability, alias) in &select_clause.bundle.include
+                                {
                                     let component_key = self.find_component(mod_key, ident_path)?;
                                     let c_obj =
                                         self.objects.components.get_mut_unchecked(&component_key);
@@ -608,7 +609,9 @@ impl Context {
                                         },
                                     ));
                                 }
-                                for (ident_path, mutability, alias) in &select_clause.optional {
+                                for (ident_path, mutability, alias) in
+                                    &select_clause.bundle.optional
+                                {
                                     let component_key = self.find_component(mod_key, ident_path)?;
                                     let c_obj =
                                         self.objects.components.get_mut_unchecked(&component_key);
@@ -626,7 +629,7 @@ impl Context {
                                         },
                                     ));
                                 }
-                                for ident_path in &select_clause.exclude {
+                                for ident_path in &select_clause.bundle.exclude {
                                     let component_key = self.find_component(mod_key, ident_path)?;
                                     let c_obj =
                                         self.objects.components.get_mut_unchecked(&component_key);

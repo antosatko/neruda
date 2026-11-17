@@ -260,13 +260,18 @@ pub enum Clauses {
 }
 
 #[derive(Debug, Clone)]
+pub struct Bundle {
+    pub include: Vec<(Span<IdentifierPath>, Mutability, Alias)>,
+    pub exclude: Vec<Span<IdentifierPath>>,
+    pub optional: Vec<(Span<IdentifierPath>, Mutability, Alias)>,
+}
+
+#[derive(Debug, Clone)]
 pub struct SelectClause {
     pub foreign: Option<Keyword>,
     pub ident: Span<SmolStr>,
     pub docs: Vec<Span<SmolStr>>,
-    pub include: Vec<(Span<IdentifierPath>, Mutability, Alias)>,
-    pub exclude: Vec<Span<IdentifierPath>>,
-    pub optional: Vec<(Span<IdentifierPath>, Mutability, Alias)>,
+    pub bundle: Bundle,
 }
 
 #[derive(Debug, Clone)]
@@ -350,6 +355,11 @@ pub enum Statement {
 
     Invoke {
         invocations: Vec<Span<(Span<IdentifierLiteral>, Vec<Span<Expression>>)>>,
+    },
+
+    Match {
+        expression: Span<Expression>,
+        arms: Vec<(Span<Bundle>, Span<Body>)>,
     },
 }
 

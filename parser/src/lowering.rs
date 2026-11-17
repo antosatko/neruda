@@ -8,12 +8,12 @@ use ruparse::{
 use smol_str::SmolStr;
 
 use ir::ast::{
-    Access, AccessModifiers, ActionClause, Alias, Associativity, Body, Clauses, Diagnostics, Else,
-    ElseIf, ExprItem, Expression, Function, GenericParameter, IdentifierLiteral, IdentifierPath,
-    Keyword, Literal, LoweringError, LoweringWarning, Module, Mutability, Object, Operator,
-    Parameter, PathSelector, PathSelectorEndOptions, Postfix, RestrictionClause, SelectClause,
-    Span, SpanIndex, Statement, Type, TypeLiteral, UnaryOp, Value, char_literal, numeric_literal,
-    string_literal,
+    Access, AccessModifiers, ActionClause, Alias, Associativity, Body, Bundle, Clauses,
+    Diagnostics, Else, ElseIf, ExprItem, Expression, Function, GenericParameter, IdentifierLiteral,
+    IdentifierPath, Keyword, Literal, LoweringError, LoweringWarning, Module, Mutability, Object,
+    Operator, Parameter, PathSelector, PathSelectorEndOptions, Postfix, RestrictionClause,
+    SelectClause, Span, SpanIndex, Statement, Type, TypeLiteral, UnaryOp, Value, char_literal,
+    numeric_literal, string_literal,
 };
 
 #[derive(Debug, Clone)]
@@ -391,46 +391,17 @@ fn clause_variant(
         "select" => {
             let ident = expect_ident(src, clause, diagnostics);
             let docs = docstrings(src, clause);
-            let mut include = Vec::new();
-            let mut exclude = Vec::new();
-            let mut optional = Vec::new();
             let foreign = clause
                 .try_get_node("foreign")
                 .as_ref()
                 .map(|n| Keyword(span((), &n)));
-            for component in clause.get_list("components") {
-                let mutable = component
-                    .try_get_node("mutable")
-                    .as_ref()
-                    .map(|m| span((), m));
-                let component_path = ident_path(src, component.expect_node("component"));
-                let alias = alias(src, component.try_get_node("alias"), diagnostics);
-                match component.try_get_node("modifier") {
-                    Some(Nodes::Token(Token {
-                        kind: TokenKinds::Token("?"),
-                        ..
-                    })) => optional.push((component_path, Mutability(mutable), alias)),
-                    Some(Nodes::Token(Token {
-                        kind: TokenKinds::Token("!"),
-                        ..
-                    })) => {
-                        if mutable.is_none() {
-                            exclude.push(component_path)
-                        } else {
-                            return Err(span(LoweringError::MutableExclusion, component));
-                        }
-                    }
-                    _ => include.push((component_path, Mutability(mutable), alias)),
-                }
-            }
+            let bundle = bundle(src, clause, diagnostics)?;
             Ok(span(
                 Clauses::Select(SelectClause {
                     foreign,
                     ident,
                     docs,
-                    include,
-                    exclude,
-                    optional,
+                    bundle,
                 }),
                 clause,
             ))
@@ -463,6 +434,46 @@ fn clause_variant(
         }
         name => unreachable!("clause {name} unknown"),
     }
+}
+
+fn bundle(
+    src: &str,
+    clause: &Nodes<'_>,
+    diagnostics: &mut Diagnostics,
+) -> Result<Bundle, Span<LoweringError>> {
+    let mut include = Vec::new();
+    let mut exclude = Vec::new();
+    let mut optional = Vec::new();
+    for component in clause.get_list("components") {
+        let mutable = component
+            .try_get_node("mutable")
+            .as_ref()
+            .map(|m| span((), m));
+        let component_path = ident_path(src, component.expect_node("component"));
+        let alias = alias(src, component.try_get_node("alias"), diagnostics);
+        match component.try_get_node("modifier") {
+            Some(Nodes::Token(Token {
+                kind: TokenKinds::Token("?"),
+                ..
+            })) => optional.push((component_path, Mutability(mutable), alias)),
+            Some(Nodes::Token(Token {
+                kind: TokenKinds::Token("!"),
+                ..
+            })) => {
+                if mutable.is_none() {
+                    exclude.push(component_path)
+                } else {
+                    return Err(span(LoweringError::MutableExclusion, component));
+                }
+            }
+            _ => include.push((component_path, Mutability(mutable), alias)),
+        }
+    }
+    Ok(Bundle {
+        include,
+        exclude,
+        optional,
+    })
 }
 
 fn alias(src: &str, node: &Option<Nodes>, diagnostics: &mut Diagnostics) -> Alias {
@@ -621,6 +632,20 @@ fn block(
                 }
 
                 span(Statement::Invoke { invocations }, stmt_node)
+            }
+
+            "match" => {
+                let expression = expression(src, stmt_node.expect_node("expression"), diagnostics)?;
+                let mut arms = Vec::new();
+                for arm in stmt_node.get_list("arms") {
+                    let bndl_node = arm.expect_node("bundle");
+                    let bundle = span(bundle(src, bndl_node, diagnostics)?, bndl_node);
+                    let branch = body(src, arm.expect_node("branch"), diagnostics)?;
+
+                    arms.push((bundle, branch));
+                }
+
+                span(Statement::Match { expression, arms }, stmt_node)
             }
 
             other => stmt_node.ice(&format!("Unhandled statement type: {}", other)),

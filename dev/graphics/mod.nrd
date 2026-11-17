@@ -1,5 +1,4 @@
 import mod::dev::algo
-import main
 
 using algo::*
 

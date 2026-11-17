@@ -37,6 +37,7 @@ const KEYWORDS: &[&'static str] = &[
     "for",
     "using",
     "pub",
+    "match",
 ];
 
 const KEYWORDS_NON_BLOCKING: &[&'static str] = &["where", "on", "import"];
@@ -1171,6 +1172,31 @@ pub fn gen_parser<'src>() -> Parser<'static> {
         ])
         .build();
 
+    let match_arm = parser
+        .grammar
+        .new_node("match arm")
+        .rules([
+            is(token("(")).commit(),
+            is(node("bundle")).set("bundle"),
+            is(token(")")),
+            is(code_body).set("branch"),
+        ])
+        .variables([node_var("bundle"), node_var("branch")])
+        .build();
+
+    let match_st = parser
+        .grammar
+        .new_node("match")
+        .rules([
+            is(keyword("match")).commit(),
+            is(expression).set("expression"),
+            is(token("{")),
+            while_(match_arm).set("arms"),
+            is(token("}")),
+        ])
+        .variables([node_var("expression"), list_var("arms")])
+        .build();
+
     let while_st = parser
         .grammar
         .new_node("while")
@@ -1221,6 +1247,7 @@ pub fn gen_parser<'src>() -> Parser<'static> {
             loop_st,
             if_st,
             while_st,
+            match_st,
             invoke_st,
             expression_st,
         ])
@@ -1339,6 +1366,18 @@ pub fn gen_parser<'src>() -> Parser<'static> {
         ])
         .build();
 
+    let clause_select_bundle = parser
+        .grammar
+        .new_node("bundle")
+        .rules([
+            is(clause_select_component).set("components"),
+            while_(token("+")).then([is(clause_select_component)
+                .set("components")
+                .hint("Trailing separators not allowed")]),
+        ])
+        .variables([list_var("components")])
+        .build();
+
     let clause_select = parser
         .grammar
         .new_node("select")
@@ -1347,10 +1386,7 @@ pub fn gen_parser<'src>() -> Parser<'static> {
             maybe(keyword("foreign")).set("foreign"),
             is(ident).set(IDENTIFIER).commit(),
             is(token(":")),
-            is(clause_select_component).set("components"),
-            while_(token("+")).then([is(clause_select_component)
-                .set("components")
-                .hint("Trailing separators not allowed")]),
+            is(clause_select_bundle),
         ])
         .variables([IDENTIFIER_VAR, list_var("components"), node_var("foreign")])
         .build();

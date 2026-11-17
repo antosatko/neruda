@@ -39,14 +39,14 @@ pub function ptr_test(n: &i32): i32 {
         return ptr_test(420.&)
     }
     match sadfs {
-        (a + a) => _
+        (Danda) => _
     }
 	return n.*
 }
 
 component Danda
 
-system a(a: a) => _
+system a(a: Danda + sdfas) => _
 
 // system MujSystem(a: i32) [
 //     e: mut Danda,

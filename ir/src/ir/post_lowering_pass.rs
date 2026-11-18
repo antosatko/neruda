@@ -138,6 +138,19 @@ fn block_dead_code_elim(
                 }
                 mark_used!(src);
             }
+            super::Instruction::GetField { src, dst, .. } => {
+                if !values.get_unchecked(dst).used {
+                    continue;
+                }
+                mark_used!(src);
+            }
+            super::Instruction::GetIndex { src, index, dst } => {
+                if !values.get_unchecked(dst).used {
+                    continue;
+                }
+                mark_used!(src);
+                mark_used!(index);
+            }
         }
         eliminated.push(instr.clone());
     }

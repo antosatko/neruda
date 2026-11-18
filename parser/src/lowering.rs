@@ -71,10 +71,16 @@ pub fn module_named(
                     generic_params(src, s.try_get_node("generic parameters"), &mut diagnostics);
                 let access = access(src, s);
 
+                let parameters = match s.try_get_node("parameters") {
+                    Some(params) => parameters(src, params, &mut diagnostics)?,
+                    None => Vec::with_capacity(0),
+                };
+
                 let obj = Object::System {
                     access,
                     ident: ident.clone(),
                     query,
+                    parameters,
                     docs,
                     body: sys_body,
                     before,
@@ -639,7 +645,10 @@ fn block(
                 let mut arms = Vec::new();
                 for arm in stmt_node.get_list("arms") {
                     let bndl_node = arm.expect_node("bundle");
-                    let bundle = span(bundle(src, bndl_node, diagnostics)?, bndl_node);
+                    let bundle = match bndl_node.is_node() {
+                        true => span(Some(bundle(src, bndl_node, diagnostics)?), bndl_node),
+                        false => span(None, bndl_node),
+                    };
                     let branch = body(src, arm.expect_node("branch"), diagnostics)?;
 
                     arms.push((bundle, branch));

@@ -888,6 +888,11 @@ impl Context {
 
                                 Ok(Addr::Value(right_value))
                             }
+                            Addr::Index { .. } => Err(Error {
+                                inner: Errors::Todo("Assignemnt to array location"),
+                                module,
+                                span: op.location,
+                            }),
                             Addr::Value(_) => Err(Error {
                                 inner: Errors::InvalidAssign("a runtime value", left_ty),
                                 module,
@@ -1198,6 +1203,132 @@ impl Context {
                                 todo!()
                             }
                         },
+                        Postfix::Field(field) => {
+                            let parent_ty = addr.type_of(self, ir).map_err(|inner| Error {
+                                inner,
+                                module,
+                                span: field.location,
+                            })?;
+                            let addr = match parent_ty.unwrap_full(&self.types) {
+                                AnyTypeKey::Reference(key) => {
+                                    let inner_ty = self.types.references.get_unchecked(&key).inner;
+                                    let src =
+                                        self.load_addr(ir, block_ctx, addr, &None, field.location)?;
+                                    Addr::MemoryRef { src, inner_ty }
+                                }
+                                _ => addr,
+                            };
+                            let full_ty = addr
+                                .type_of(self, ir)
+                                .map_err(|inner| Error {
+                                    inner,
+                                    module,
+                                    span: field.location,
+                                })?
+                                .unwrap_full(&self.types);
+                            let idx = match full_ty {
+                                AnyTypeKey::Struct(key) => self
+                                    .types
+                                    .structures
+                                    .get_unchecked(&key)
+                                    .parameters
+                                    .iter()
+                                    .position(|(name, _, _)| name == field.deref()),
+                                AnyTypeKey::Tuple(key) => {
+                                    field.deref().parse::<usize>().ok().filter(|idx| {
+                                        *idx < self
+                                            .types
+                                            .tuples
+                                            .get_unchecked(&key)
+                                            .parameters
+                                            .len()
+                                    })
+                                }
+                                _ => None,
+                            }
+                            .ok_or_else(|| Error {
+                                inner: Errors::Todo("field does not exist on this type"),
+                                module,
+                                span: field.location,
+                            })?;
+                            Addr::Field {
+                                src: Box::new(addr),
+                                idx,
+                            }
+                        }
+                        Postfix::Index(index_expr) => {
+                            let index_addr =
+                                self.lower_expression(ir, block_ctx, index_expr, &None)?;
+                            let index_ty = index_addr.type_of(self, ir).map_err(|inner| Error {
+                                inner,
+                                module,
+                                span: index_expr.location,
+                            })?;
+                            let index_ty = index_ty.unwrap_full(&self.types);
+                            if !matches!(
+                                index_ty,
+                                AnyTypeKey::Primitive(
+                                    PrimitiveType::I8
+                                        | PrimitiveType::I16
+                                        | PrimitiveType::I32
+                                        | PrimitiveType::I64
+                                        | PrimitiveType::I128
+                                        | PrimitiveType::U8
+                                        | PrimitiveType::U16
+                                        | PrimitiveType::U32
+                                        | PrimitiveType::U64
+                                        | PrimitiveType::U128
+                                )
+                            ) {
+                                return Err(Error {
+                                    inner: Errors::Todo("array index must be an integer"),
+                                    module,
+                                    span: index_expr.location,
+                                });
+                            }
+                            let index = self.load_addr(
+                                ir,
+                                block_ctx,
+                                index_addr,
+                                &None,
+                                index_expr.location,
+                            )?;
+                            let parent_ty = addr.type_of(self, ir).map_err(|inner| Error {
+                                inner,
+                                module,
+                                span: op.location,
+                            })?;
+                            let addr = match parent_ty.unwrap_full(&self.types) {
+                                AnyTypeKey::Reference(key) => {
+                                    let inner_ty = self.types.references.get_unchecked(&key).inner;
+                                    let src =
+                                        self.load_addr(ir, block_ctx, addr, &None, op.location)?;
+                                    Addr::MemoryRef { src, inner_ty }
+                                }
+                                _ => addr,
+                            };
+                            match addr
+                                .type_of(self, ir)
+                                .map_err(|inner| Error {
+                                    inner,
+                                    module,
+                                    span: op.location,
+                                })?
+                                .unwrap_full(&self.types)
+                            {
+                                AnyTypeKey::Array(_) | AnyTypeKey::Vector(_) => Addr::Index {
+                                    src: Box::new(addr),
+                                    index,
+                                },
+                                _ => Err(Error {
+                                    inner: Errors::Todo(
+                                        "indexing is only supported for arrays and vectors",
+                                    ),
+                                    module,
+                                    span: op.location,
+                                })?,
+                            }
+                        }
                         _ => Err(Error {
                             inner: Errors::Todo("Postfix notation is not fully implemented"),
                             module,
@@ -1304,13 +1435,67 @@ impl Context {
                 Ok(ir.void)
             }
             Addr::Field { src, idx } => {
-                src;
-                idx;
-                Err(Error {
-                    inner: Errors::Todo("implement field access"),
-                    module,
-                    span,
-                })
+                let src = self.load_addr(ir, block_ctx, *src, &None, span)?;
+                let parent_ty = self
+                    .ir_cache
+                    .get_unchecked(ir)
+                    .values
+                    .get_unchecked(&src)
+                    .ty;
+                let ty = parent_ty
+                    .field_by_idx(idx, &self.types)
+                    .map_err(|_| Error {
+                        inner: Errors::Todo("invalid field index"),
+                        module,
+                        span,
+                    })?;
+                if let Some(expect) = expect {
+                    ty.check(&mut self.types, expect).map_err(|inner| Error {
+                        inner,
+                        module,
+                        span,
+                    })?;
+                }
+                let ir = self.ir_cache.get_mut_unchecked(ir);
+                let dst = ir.values.push(Value::new(ty));
+                ir.blocks
+                    .get_mut_unchecked()
+                    .extend([Instruction::GetField { src, idx, dst }], span);
+                Ok(dst)
+            }
+            Addr::Index { src, index } => {
+                let src = self.load_addr(ir, block_ctx, *src, &None, span)?;
+                let parent_ty = self
+                    .ir_cache
+                    .get_unchecked(ir)
+                    .values
+                    .get_unchecked(&src)
+                    .ty
+                    .unwrap_full(&self.types);
+                let ty = match parent_ty {
+                    AnyTypeKey::Array(key) => self.types.arrays.get_unchecked(&key).element_type,
+                    AnyTypeKey::Vector(vector) => AnyTypeKey::Primitive(vector.element),
+                    _ => {
+                        return Err(Error {
+                            inner: Errors::Todo("type is not indexable"),
+                            module,
+                            span,
+                        });
+                    }
+                };
+                if let Some(expect) = expect {
+                    ty.check(&mut self.types, expect).map_err(|inner| Error {
+                        inner,
+                        module,
+                        span,
+                    })?;
+                }
+                let ir = self.ir_cache.get_mut_unchecked(ir);
+                let dst = ir.values.push(Value::new(ty));
+                ir.blocks
+                    .get_mut_unchecked()
+                    .extend([Instruction::GetIndex { src, index, dst }], span);
+                Ok(dst)
             }
             Addr::Var(key) => {
                 let ir = self.ir_cache.get_mut_unchecked(ir);
@@ -1618,11 +1803,15 @@ impl Addr {
             Addr::Never => Ok(AnyTypeKey::Never),
             Addr::Field { src, idx } => {
                 let parent = src.type_of(ctx, ir)?;
-                let dst_ty = parent
+                parent
                     .field_by_idx(*idx, &ctx.types)
-                    .expect("Field not found anymore");
-                todo!()
+                    .map_err(|_| Errors::Todo("invalid field index"))
             }
+            Addr::Index { src, .. } => match src.type_of(ctx, ir)?.unwrap_full(&ctx.types) {
+                AnyTypeKey::Array(key) => Ok(ctx.types.arrays.get_unchecked(&key).element_type),
+                AnyTypeKey::Vector(vector) => Ok(AnyTypeKey::Primitive(vector.element)),
+                _ => Err(Errors::Todo("type is not indexable")),
+            },
         }
     }
 }

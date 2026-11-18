@@ -352,6 +352,7 @@ impl IndexedWalk for ir::ast::Span<Object> {
                 ident,
                 docs: _,
                 query,
+                parameters,
                 body,
                 after,
                 before,
@@ -361,17 +362,11 @@ impl IndexedWalk for ir::ast::Span<Object> {
                 access.index(line_index, spans);
                 spans.push(self.span_word(Types::Keyword, line_index, "system"));
                 spans.push(ident.span(Types::Ident, line_index));
-                body.index(line_index, spans);
-                if let Some(before) = before {
-                    spans.push(before.span_word(Types::Keyword, line_index, "before"));
-                    before.inner.index(line_index, spans);
-                }
-                if let Some(after) = after {
-                    spans.push(after.span_word(Types::Keyword, line_index, "after"));
-                    after.inner.index(line_index, spans);
-                }
                 if let Some(generics) = generics {
                     spans.extend(generics.iter().map(|g| g.span(Types::Type, line_index)));
+                }
+                for param in parameters {
+                    param.index(line_index, spans);
                 }
                 for clause in query {
                     match clause.inner.as_ref() {
@@ -404,6 +399,15 @@ impl IndexedWalk for ir::ast::Span<Object> {
                             restriction.expression.index(line_index, spans);
                         }
                     }
+                }
+                if let Some(before) = before {
+                    spans.push(before.span_word(Types::Keyword, line_index, "before"));
+                    before.inner.index(line_index, spans);
+                }
+                body.index(line_index, spans);
+                if let Some(after) = after {
+                    spans.push(after.span_word(Types::Keyword, line_index, "after"));
+                    after.inner.index(line_index, spans);
                 }
             }
             Object::Import {
@@ -590,7 +594,10 @@ impl IndexedWalk for ir::ast::Span<Statement> {
                 spans.push(self.span_word(Types::Keyword, line_index, "match"));
                 expression.index(line_index, spans);
                 for (bundle, branch) in arms {
-                    bundle.index(line_index, spans);
+                    match bundle.deref() {
+                        Some(inner) => bundle.map(|_| inner).index(line_index, spans),
+                        None => spans.push(bundle.span_word(Types::Keyword, line_index, "_")),
+                    }
                     branch.index(line_index, spans);
                 }
             }

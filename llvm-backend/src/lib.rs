@@ -13,7 +13,7 @@ use inkwell::{
     builder::Builder,
     module::Module,
     types::{BasicType, BasicTypeEnum},
-    values::{BasicMetadataValueEnum, BasicValueEnum, FunctionValue, PointerValue},
+    values::{ArrayValue, BasicMetadataValueEnum, BasicValueEnum, FunctionValue, PointerValue},
 };
 
 use ir::{
@@ -136,7 +136,8 @@ impl<'a, 'ctx> LLVMLoweringContext<'a, 'ctx> {
             for instr in block.instructions() {
                 match instr.deref() {
                     ir::ir::Instruction::LoadConst { src, dst } => {
-                        self.load_const(&mut value_map, src, *dst);
+                        let dst_ty = fun.values.get_unchecked(dst).ty;
+                        self.load_const(&mut value_map, src, *dst, dst_ty).unwrap();
                     }
                     ir::ir::Instruction::BinOp { op, l, r, dst, ty } => {
                         let l = self.load_value(&value_map[l]).unwrap();
@@ -235,6 +236,63 @@ impl<'a, 'ctx> LLVMLoweringContext<'a, 'ctx> {
 
                         value_map.insert(*dst, ValueLocation::Value(value));
                     }
+                    ir::ir::Instruction::GetField { src, idx, dst } => {
+                        let aggregate = self.load_value(&value_map[src]).unwrap();
+                        let value = self
+                            .builder
+                            .build_extract_value(
+                                aggregate.into_struct_value(),
+                                *idx as u32,
+                                "field",
+                            )
+                            .unwrap();
+                        value_map.insert(*dst, ValueLocation::Value(value));
+                    }
+                    ir::ir::Instruction::GetIndex { src, index, dst } => {
+                        let aggregate = self.load_value(&value_map[src]).unwrap();
+                        let index = self.load_value(&value_map[index]).unwrap().into_int_value();
+                        let source_ty = fun
+                            .values
+                            .get_unchecked(src)
+                            .ty
+                            .unwrap_full(&self.ctx.types);
+                        let value = match source_ty {
+                            AnyTypeKey::Vector(_) => self
+                                .builder
+                                .build_extract_element(
+                                    aggregate.into_vector_value(),
+                                    index,
+                                    "index",
+                                )
+                                .unwrap(),
+                            AnyTypeKey::Array(_) => {
+                                let array_ty =
+                                    self.convert_type(source_ty).unwrap().into_array_type();
+                                let ptr = self
+                                    .builder
+                                    .build_alloca(array_ty, "indexable.array")
+                                    .unwrap();
+                                self.builder.build_store(ptr, aggregate).unwrap();
+                                let zero = self.llvm.i32_type().const_zero();
+                                let element_ptr = unsafe {
+                                    self.builder.build_gep(
+                                        array_ty,
+                                        ptr,
+                                        &[zero, index],
+                                        "array.index",
+                                    )
+                                }
+                                .unwrap();
+                                let element_ty =
+                                    self.convert_type(fun.values.get_unchecked(dst).ty).unwrap();
+                                self.builder
+                                    .build_load(element_ty, element_ptr, "index.load")
+                                    .unwrap()
+                            }
+                            _ => unreachable!("IR GetIndex source must be an array or vector"),
+                        };
+                        value_map.insert(*dst, ValueLocation::Value(value));
+                    }
                 }
             }
 
@@ -262,6 +320,15 @@ impl<'a, 'ctx> LLVMLoweringContext<'a, 'ctx> {
                         .load_value(&value_map[condition])
                         .unwrap()
                         .into_int_value();
+                    let condition = self
+                        .builder
+                        .build_int_compare(
+                            IntPredicate::NE,
+                            condition,
+                            condition.get_type().const_zero(),
+                            "branch.condition",
+                        )
+                        .unwrap();
 
                     self.builder
                         .build_conditional_branch(
@@ -307,6 +374,37 @@ impl<'a, 'ctx> LLVMLoweringContext<'a, 'ctx> {
         let ty = match ty {
             AnyTypeKey::Primitive(primitive) => self.convert_primitive_type(primitive)?,
             AnyTypeKey::Reference(_) => self.llvm.ptr_type(AddressSpace::default()).into(),
+            AnyTypeKey::Array(array) => {
+                let array = self.ctx.types.arrays.get_unchecked(&array);
+                let size = array
+                    .size
+                    .ok_or("Unsized arrays cannot be represented as LLVM value types")?;
+                self.convert_type(array.element_type)?
+                    .array_type(size as u32)
+                    .into()
+            }
+            AnyTypeKey::Tuple(tuple) => {
+                let tuple = self.ctx.types.tuples.get_unchecked(&tuple);
+                let fields = tuple
+                    .parameters
+                    .iter()
+                    .map(|ty| self.convert_type(*ty))
+                    .collect::<Result<Vec<_>, _>>()?;
+                self.llvm.struct_type(&fields, false).into()
+            }
+            AnyTypeKey::Struct(structure) => {
+                let structure = self.ctx.types.structures.get_unchecked(&structure);
+                let fields = structure
+                    .parameters
+                    .iter()
+                    .map(|(_, ty, _)| self.convert_type(*ty))
+                    .collect::<Result<Vec<_>, _>>()?;
+                self.llvm.struct_type(&fields, false).into()
+            }
+            AnyTypeKey::Enum(enumeration) => {
+                let enumeration = self.ctx.types.enums.get_unchecked(&enumeration);
+                self.convert_type(enumeration.repr)?
+            }
             AnyTypeKey::Vector(Vector { element, lanes }) => {
                 match self.convert_primitive_type(element)? {
                     BasicTypeEnum::FloatType(float_type) => float_type.vec_type(lanes as _).into(),
@@ -358,211 +456,144 @@ impl<'a, 'ctx> LLVMLoweringContext<'a, 'ctx> {
         ty: PrimitiveType,
     ) -> Result<BasicValueEnum<'ctx>, Box<dyn Error>> {
         let is_float = matches!(ty, PrimitiveType::F32 | PrimitiveType::F64);
+        let is_unsigned = matches!(
+            ty,
+            PrimitiveType::U8
+                | PrimitiveType::U16
+                | PrimitiveType::U32
+                | PrimitiveType::U64
+                | PrimitiveType::U128
+        );
 
-        let out = match (op, is_float) {
-            (ir::ast::Operator::Add, false) => self
-                .builder
-                .build_int_add(l.into_int_value(), r.into_int_value(), "add")
-                .unwrap()
-                .into(),
-            (ir::ast::Operator::Sub, false) => self
-                .builder
-                .build_int_sub(l.into_int_value(), r.into_int_value(), "sub")
-                .unwrap()
-                .into(),
-            (ir::ast::Operator::Mul, false) => self
-                .builder
-                .build_int_mul(l.into_int_value(), r.into_int_value(), "mul")
-                .unwrap()
-                .into(),
-            (ir::ast::Operator::Div, false) => self
-                .builder
-                .build_int_signed_div(l.into_int_value(), r.into_int_value(), "div")
-                .unwrap()
-                .into(),
-            (ir::ast::Operator::Mod, false) => self
-                .builder
-                .build_int_signed_rem(l.into_int_value(), r.into_int_value(), "mod")
-                .unwrap()
-                .into(),
-            (ir::ast::Operator::Add, true) => self
-                .builder
-                .build_float_add(l.into_float_value(), r.into_float_value(), "fadd")
-                .unwrap()
-                .into(),
-            (ir::ast::Operator::Sub, true) => self
-                .builder
-                .build_float_sub(l.into_float_value(), r.into_float_value(), "fsub")
-                .unwrap()
-                .into(),
-            (ir::ast::Operator::Mul, true) => self
-                .builder
-                .build_float_mul(l.into_float_value(), r.into_float_value(), "fmul")
-                .unwrap()
-                .into(),
-            (ir::ast::Operator::Div, true) => self
-                .builder
-                .build_float_div(l.into_float_value(), r.into_float_value(), "fdiv")
-                .unwrap()
-                .into(),
-            (ir::ast::Operator::Mod, true) => self
-                .builder
-                .build_float_rem(l.into_float_value(), r.into_float_value(), "frem")
-                .unwrap()
-                .into(),
-            (ir::ast::Operator::Eq, false) => self
-                .builder
-                .build_int_compare(
-                    IntPredicate::EQ,
-                    l.into_int_value(),
-                    r.into_int_value(),
-                    "eq",
-                )
-                .unwrap()
-                .into(),
-            (ir::ast::Operator::NEq, false) => self
-                .builder
-                .build_int_compare(
-                    IntPredicate::NE,
-                    l.into_int_value(),
-                    r.into_int_value(),
-                    "neq",
-                )
-                .unwrap()
-                .into(),
-            (ir::ast::Operator::Gr, false) => self
-                .builder
-                .build_int_compare(
-                    IntPredicate::SGT,
-                    l.into_int_value(),
-                    r.into_int_value(),
-                    "gt",
-                )
-                .unwrap()
-                .into(),
-            (ir::ast::Operator::Le, false) => self
-                .builder
-                .build_int_compare(
-                    IntPredicate::SLT,
-                    l.into_int_value(),
-                    r.into_int_value(),
-                    "lt",
-                )
-                .unwrap()
-                .into(),
-            (ir::ast::Operator::GrEq, false) => self
-                .builder
-                .build_int_compare(
-                    IntPredicate::SGE,
-                    l.into_int_value(),
-                    r.into_int_value(),
-                    "gte",
-                )
-                .unwrap()
-                .into(),
-            (ir::ast::Operator::LeEq, false) => self
-                .builder
-                .build_int_compare(
-                    IntPredicate::SLE,
-                    l.into_int_value(),
-                    r.into_int_value(),
-                    "lte",
-                )
-                .unwrap()
-                .into(),
-            (ir::ast::Operator::Eq, true) => self
-                .builder
-                .build_float_compare(
-                    FloatPredicate::OEQ,
-                    l.into_float_value(),
-                    r.into_float_value(),
-                    "feq",
-                )
-                .unwrap()
-                .into(),
-            (ir::ast::Operator::NEq, true) => self
-                .builder
-                .build_float_compare(
-                    FloatPredicate::ONE,
-                    l.into_float_value(),
-                    r.into_float_value(),
-                    "fneq",
-                )
-                .unwrap()
-                .into(),
-            (ir::ast::Operator::Gr, true) => self
-                .builder
-                .build_float_compare(
-                    FloatPredicate::OGT,
-                    l.into_float_value(),
-                    r.into_float_value(),
-                    "fgt",
-                )
-                .unwrap()
-                .into(),
-            (ir::ast::Operator::Le, true) => self
-                .builder
-                .build_float_compare(
-                    FloatPredicate::OLT,
-                    l.into_float_value(),
-                    r.into_float_value(),
-                    "flt",
-                )
-                .unwrap()
-                .into(),
-            (ir::ast::Operator::GrEq, true) => self
-                .builder
-                .build_float_compare(
-                    FloatPredicate::OGE,
-                    l.into_float_value(),
-                    r.into_float_value(),
-                    "fgte",
-                )
-                .unwrap()
-                .into(),
-            (ir::ast::Operator::LeEq, true) => self
-                .builder
-                .build_float_compare(
-                    FloatPredicate::OLE,
-                    l.into_float_value(),
-                    r.into_float_value(),
-                    "flte",
-                )
-                .unwrap()
-                .into(),
-            (ir::ast::Operator::And, false) => self
-                .builder
-                .build_and(l.into_int_value(), r.into_int_value(), "and")
-                .unwrap()
-                .into(),
-            (ir::ast::Operator::Or, false) => self
-                .builder
-                .build_or(l.into_int_value(), r.into_int_value(), "or")
-                .unwrap()
-                .into(),
-            (ir::ast::Operator::BitOr, false) => self
-                .builder
-                .build_or(l.into_int_value(), r.into_int_value(), "bitor")
-                .unwrap()
-                .into(),
-            (ir::ast::Operator::BitAnd, false) => self
-                .builder
-                .build_and(l.into_int_value(), r.into_int_value(), "bitand")
-                .unwrap()
-                .into(),
-            (
-                ir::ast::Operator::ModAssign
-                | ir::ast::Operator::DivAssign
-                | ir::ast::Operator::MulAssign
-                | ir::ast::Operator::SubAssign
-                | ir::ast::Operator::Assign
-                | ir::ast::Operator::AddAssign,
-                _,
-            ) => unreachable!("Assignment operator in LLVM IR"),
-            _ => return Err(format!("Unsupported operator: {op:?}").into()),
+        // LLVM comparisons produce i1. Neruda's bool is represented as i8,
+        // so widen comparison results before they enter the value map.
+        let comparison = match (op, is_float) {
+            (ir::ast::Operator::Eq, false) => Some(IntPredicate::EQ),
+            (ir::ast::Operator::NEq, false) => Some(IntPredicate::NE),
+            (ir::ast::Operator::Gr, false) => Some(if is_unsigned {
+                IntPredicate::UGT
+            } else {
+                IntPredicate::SGT
+            }),
+            (ir::ast::Operator::Le, false) => Some(if is_unsigned {
+                IntPredicate::ULT
+            } else {
+                IntPredicate::SLT
+            }),
+            (ir::ast::Operator::GrEq, false) => Some(if is_unsigned {
+                IntPredicate::UGE
+            } else {
+                IntPredicate::SGE
+            }),
+            (ir::ast::Operator::LeEq, false) => Some(if is_unsigned {
+                IntPredicate::ULE
+            } else {
+                IntPredicate::SLE
+            }),
+            _ => None,
         };
 
-        Ok(out)
+        if let Some(predicate) = comparison {
+            let result = self.builder.build_int_compare(
+                predicate,
+                l.into_int_value(),
+                r.into_int_value(),
+                "icmp",
+            )?;
+            return Ok(self
+                .builder
+                .build_int_z_extend(result, self.llvm.i8_type(), "bool.zext")?
+                .into());
+        }
+
+        if is_float {
+            let l = l.into_float_value();
+            let r = r.into_float_value();
+            let value = match op {
+                ir::ast::Operator::Add => self.builder.build_float_add(l, r, "fadd")?.into(),
+                ir::ast::Operator::Sub => self.builder.build_float_sub(l, r, "fsub")?.into(),
+                ir::ast::Operator::Mul => self.builder.build_float_mul(l, r, "fmul")?.into(),
+                ir::ast::Operator::Div => self.builder.build_float_div(l, r, "fdiv")?.into(),
+                ir::ast::Operator::Mod => self.builder.build_float_rem(l, r, "frem")?.into(),
+                ir::ast::Operator::Eq => self
+                    .builder
+                    .build_float_compare(FloatPredicate::OEQ, l, r, "fcmp")?
+                    .into(),
+                ir::ast::Operator::NEq => self
+                    .builder
+                    .build_float_compare(FloatPredicate::ONE, l, r, "fcmp")?
+                    .into(),
+                ir::ast::Operator::Gr => self
+                    .builder
+                    .build_float_compare(FloatPredicate::OGT, l, r, "fcmp")?
+                    .into(),
+                ir::ast::Operator::Le => self
+                    .builder
+                    .build_float_compare(FloatPredicate::OLT, l, r, "fcmp")?
+                    .into(),
+                ir::ast::Operator::GrEq => self
+                    .builder
+                    .build_float_compare(FloatPredicate::OGE, l, r, "fcmp")?
+                    .into(),
+                ir::ast::Operator::LeEq => self
+                    .builder
+                    .build_float_compare(FloatPredicate::OLE, l, r, "fcmp")?
+                    .into(),
+                _ => return Err(format!("Unsupported floating-point operator: {op:?}").into()),
+            };
+
+            return match value {
+                inkwell::values::BasicValueEnum::FloatValue(value) => Ok(value.into()),
+                inkwell::values::BasicValueEnum::IntValue(value) => Ok(self
+                    .builder
+                    .build_int_z_extend(value, self.llvm.i8_type(), "bool.zext")?
+                    .into()),
+                _ => Err("Unexpected LLVM value produced by floating-point operation".into()),
+            };
+        }
+
+        let l = l.into_int_value();
+        let r = r.into_int_value();
+        let value = match op {
+            ir::ast::Operator::Add => self.builder.build_int_add(l, r, "add")?.into(),
+            ir::ast::Operator::Sub => self.builder.build_int_sub(l, r, "sub")?.into(),
+            ir::ast::Operator::Mul => self.builder.build_int_mul(l, r, "mul")?.into(),
+            ir::ast::Operator::Div if is_unsigned => {
+                self.builder.build_int_unsigned_div(l, r, "udiv")?.into()
+            }
+            ir::ast::Operator::Div => self.builder.build_int_signed_div(l, r, "sdiv")?.into(),
+            ir::ast::Operator::Mod if is_unsigned => {
+                self.builder.build_int_unsigned_rem(l, r, "urem")?.into()
+            }
+            ir::ast::Operator::Mod => self.builder.build_int_signed_rem(l, r, "srem")?.into(),
+            ir::ast::Operator::And | ir::ast::Operator::BitAnd => {
+                self.builder.build_and(l, r, "and")?.into()
+            }
+            ir::ast::Operator::Or | ir::ast::Operator::BitOr => {
+                self.builder.build_or(l, r, "or")?.into()
+            }
+            ir::ast::Operator::Eq => self
+                .builder
+                .build_int_compare(IntPredicate::EQ, l, r, "icmp")?
+                .into(),
+            ir::ast::Operator::NEq => self
+                .builder
+                .build_int_compare(IntPredicate::NE, l, r, "icmp")?
+                .into(),
+            _ => return Err(format!("Unsupported integer operator: {op:?}").into()),
+        };
+
+        match value {
+            BasicValueEnum::IntValue(value)
+                if matches!(op, ir::ast::Operator::Eq | ir::ast::Operator::NEq) =>
+            {
+                Ok(self
+                    .builder
+                    .build_int_z_extend(value, self.llvm.i8_type(), "bool.zext")?
+                    .into())
+            }
+            other => Ok(other),
+        }
     }
 
     fn lower_unary(
@@ -584,7 +615,18 @@ impl<'a, 'ctx> LLVMLoweringContext<'a, 'ctx> {
                 .build_int_neg(src.into_int_value(), "ineg")
                 .unwrap()
                 .into(),
-            ir::ast::UnaryOp::Neg => todo!("Neg"),
+            ir::ast::UnaryOp::Neg => {
+                let value = src.into_int_value();
+                let is_zero = self.builder.build_int_compare(
+                    IntPredicate::EQ,
+                    value,
+                    value.get_type().const_zero(),
+                    "logical.not",
+                )?;
+                self.builder
+                    .build_int_z_extend(is_zero, self.llvm.i8_type(), "bool.zext")?
+                    .into()
+            }
             ir::ast::UnaryOp::Ref => unreachable!("Deprecated: ref"),
             ir::ast::UnaryOp::Deref => unreachable!("Deprecated: deref"),
         };
@@ -592,85 +634,149 @@ impl<'a, 'ctx> LLVMLoweringContext<'a, 'ctx> {
         Ok(out)
     }
 
+    fn lower_const_value(
+        &self,
+        value: &ir::ast::ConstValue,
+        dst_ty: AnyTypeKey,
+    ) -> Result<BasicValueEnum<'ctx>, Box<dyn Error>> {
+        use ir::ast::ConstValue;
+
+        let full_ty = dst_ty.unwrap_full(&self.ctx.types);
+        let result = match value {
+            ConstValue::Number(number) => match &number.value {
+                ir::ast::NumberValue::Float(v) => match full_ty {
+                    AnyTypeKey::Primitive(PrimitiveType::F32) => {
+                        self.llvm.f32_type().const_float(*v).into()
+                    }
+                    AnyTypeKey::Primitive(PrimitiveType::F64) => {
+                        self.llvm.f64_type().const_float(*v).into()
+                    }
+                    _ => {
+                        return Err(format!(
+                            "Floating-point constant has non-floating destination '{}'",
+                            dst_ty.stringify(&self.ctx.types)
+                        )
+                        .into());
+                    }
+                },
+                ir::ast::NumberValue::Uint(v) | ir::ast::NumberValue::Any(v) => {
+                    let ty = self.convert_type(dst_ty)?.into_int_type();
+                    ty.const_int(*v as u64, false).into()
+                }
+                ir::ast::NumberValue::Int(v) => {
+                    let ty = self.convert_type(dst_ty)?.into_int_type();
+                    ty.const_int(*v as u64, true).into()
+                }
+            },
+            ConstValue::String(value) => self
+                .builder
+                .build_global_string_ptr(value.as_str(), "str")?
+                .as_pointer_value()
+                .into(),
+            ConstValue::Char(value) => self.llvm.i32_type().const_int(*value as u64, false).into(),
+            ConstValue::Bool(value) => self.llvm.i8_type().const_int(*value as u64, false).into(),
+            ConstValue::EnumVariant { parent, variant } => {
+                let enumeration = match parent.unwrap_full(&self.ctx.types) {
+                    AnyTypeKey::Enum(key) => self.ctx.types.enums.get_unchecked(&key),
+                    _ => return Err("Enum variant constant has a non-enum parent type".into()),
+                };
+                let (_, value_key) = enumeration
+                    .variants
+                    .iter()
+                    .find(|(name, _)| name == variant)
+                    .ok_or_else(|| format!("Unknown enum variant '{variant}'"))?;
+                let inner = self.ctx.constants.data.get_unchecked(value_key);
+                return self.lower_const_value(inner, enumeration.repr);
+            }
+            ConstValue::Array { elements, .. } => {
+                let array_ty = match full_ty {
+                    AnyTypeKey::Array(key) => self.ctx.types.arrays.get_unchecked(&key),
+                    _ => return Err("Array constant has a non-array destination type".into()),
+                };
+                let element_ty = array_ty.element_type;
+                let values = elements
+                    .iter()
+                    .map(|element| self.lower_const_value(element.deref(), element_ty))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let llvm_ty = self.convert_type(dst_ty)?;
+                let array_ty = llvm_ty.into_array_type();
+                let expected = array_ty.len() as usize;
+                if expected != values.len() {
+                    return Err(format!(
+                        "Array constant has {} elements, expected {expected}",
+                        values.len()
+                    )
+                    .into());
+                }
+                let element_llvm_ty = array_ty.get_element_type();
+                for (index, value) in values.iter().enumerate() {
+                    if value.get_type() != element_llvm_ty {
+                        return Err(format!(
+                            "Array constant element {index} has LLVM type '{}', expected '{}'",
+                            value.get_type().print_to_string(),
+                            element_llvm_ty.print_to_string(),
+                        )
+                        .into());
+                    }
+                }
+
+                // Inkwell 0.10 exposes ArrayType::const_array only for arrays
+                // whose elements are themselves ArrayValues. For arbitrary
+                // element types, use the generic constructor after validating
+                // that every value has exactly the array's element type.
+                unsafe { ArrayValue::new_const_array(&element_llvm_ty, &values) }.into()
+            }
+            ConstValue::Tuple { elements, .. } => {
+                let tuple = match full_ty {
+                    AnyTypeKey::Tuple(key) => self.ctx.types.tuples.get_unchecked(&key),
+                    _ => return Err("Tuple constant has a non-tuple destination type".into()),
+                };
+                if elements.len() != tuple.parameters.len() {
+                    return Err("Tuple constant element count does not match its type".into());
+                }
+                let values = elements
+                    .iter()
+                    .zip(&tuple.parameters)
+                    .map(|(element, ty)| self.lower_const_value(element.deref(), *ty))
+                    .collect::<Result<Vec<_>, _>>()?;
+                self.llvm.const_struct(&values, false).into()
+            }
+            ConstValue::Structure { fields, .. } => {
+                let structure = match full_ty {
+                    AnyTypeKey::Struct(key) => self.ctx.types.structures.get_unchecked(&key),
+                    _ => return Err("Structure constant has a non-struct destination type".into()),
+                };
+                let mut values = Vec::with_capacity(structure.parameters.len());
+                for (name, field_ty, default) in &structure.parameters {
+                    let field = fields.iter().find(|field| field.deref().0.deref() == name);
+                    let field_value = if let Some(field) = field {
+                        field.deref().1.deref()
+                    } else if let Some(default) = default {
+                        default
+                    } else {
+                        return Err(format!("Missing field '{name}' in structure constant").into());
+                    };
+                    values.push(self.lower_const_value(field_value, *field_ty)?);
+                }
+                self.llvm.const_struct(&values, false).into()
+            }
+        };
+        Ok(result)
+    }
+
     fn load_const(
         &self,
         value_map: &mut HashMap<ValueKey, ValueLocation<'ctx>>,
         src: &ConstValueKey,
         dst: ValueKey,
-    ) {
+        dst_ty: AnyTypeKey,
+    ) -> Result<(), Box<dyn Error>> {
         let value = self.ctx.constants.data.get_unchecked(src);
 
-        let value: BasicValueEnum<'ctx> = match value {
-            ir::ast::ConstValue::Structure { fields, ty } => {
-                todo!("Structure constants")
-            }
-            ir::ast::ConstValue::Number(number) => match number.value {
-                ir::ast::NumberValue::Float(v) => self.llvm.f64_type().const_float(v).into(),
-                ir::ast::NumberValue::Uint(v) => {
-                    let bits = number.size.unwrap_or(32);
-
-                    let ty = self
-                        .llvm
-                        .custom_width_int_type(bits.try_into().unwrap())
-                        .unwrap();
-
-                    ty.const_int(v as u64, false).into()
-                }
-                ir::ast::NumberValue::Int(v) => {
-                    let bits = number.size.unwrap_or(32);
-
-                    let ty = self
-                        .llvm
-                        .custom_width_int_type(bits.try_into().unwrap())
-                        .unwrap();
-
-                    ty.const_int(v as u64, true).into()
-                }
-                ir::ast::NumberValue::Any(v) => {
-                    let bits = number.size.unwrap_or(32);
-
-                    let ty = self
-                        .llvm
-                        .custom_width_int_type(bits.try_into().unwrap())
-                        .unwrap();
-
-                    ty.const_int(v as u64, false).into()
-                }
-            },
-            ir::ast::ConstValue::String(s) => {
-                let global = self
-                    .builder
-                    .build_global_string_ptr(s.as_str(), "str")
-                    .unwrap();
-
-                global.as_pointer_value().into()
-            }
-            ir::ast::ConstValue::Char(c) => self.llvm.i32_type().const_int(*c as u64, false).into(),
-            ir::ast::ConstValue::Bool(b) => self.llvm.i8_type().const_int(*b as u64, false).into(),
-            ir::ast::ConstValue::EnumVariant { parent, variant } => {
-                let enum_obj = self.ctx.types.enums.get_unchecked(match parent {
-                    AnyTypeKey::Enum(e) => e,
-                    _ => unreachable!("Expected enum type"),
-                });
-
-                let (_, value) = enum_obj
-                    .variants
-                    .iter()
-                    .find(|(v, _)| v == variant)
-                    .unwrap();
-
-                return self.load_const(value_map, value, dst);
-            }
-
-            ir::ast::ConstValue::Array { elements, ty } => {
-                todo!("Array constants")
-            }
-            ir::ast::ConstValue::Tuple { elements, ty } => {
-                todo!("Tuple constants")
-            }
-        };
+        let value = self.lower_const_value(value, dst_ty)?;
 
         value_map.insert(dst, ValueLocation::Value(value));
+        Ok(())
     }
 
     pub fn emit_object(&self, path: impl AsRef<Path>) {

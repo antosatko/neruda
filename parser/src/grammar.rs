@@ -1176,9 +1176,10 @@ pub fn gen_parser<'src>() -> Parser<'static> {
         .grammar
         .new_node("match arm")
         .rules([
-            is(token("(")).commit(),
-            is(node("bundle")).set("bundle"),
-            is(token(")")),
+            is_one_of([
+                option(word("_")).set("bundle"),
+                option(token("(")).then([is(node("bundle")).set("bundle"), is(token(")"))]),
+            ]),
             is(code_body).set("branch"),
         ])
         .variables([node_var("bundle"), node_var("branch")])
@@ -1437,13 +1438,13 @@ pub fn gen_parser<'src>() -> Parser<'static> {
         .grammar
         .new_node("query")
         .rules([
-            is(token("(")).commit(),
+            is(token("[")).commit(),
             loop_().then([
                 maybe(clauses).set("clauses"),
                 is_one_of([
                     option(token(","))
                         .then([maybe(token(",")).fail(&grammar_errs::MULTIPLE_TRAILING_COMMAS)]),
-                    option(token(")")).return_node(),
+                    option(token("]")).return_node(),
                 ]),
             ]),
         ])
@@ -1473,6 +1474,7 @@ pub fn gen_parser<'src>() -> Parser<'static> {
             is(keyword("system")).commit().start(),
             is(ident).set(IDENTIFIER),
             maybe(generic_params).set("generic parameters"),
+            maybe(parameter_list).set("parameters"),
             is(query).set("query"),
             maybe(before_body).set("before body"),
             is(code_body)
@@ -1483,6 +1485,7 @@ pub fn gen_parser<'src>() -> Parser<'static> {
         .variables([
             IDENTIFIER_VAR,
             node_var("generic parameters"),
+            node_var("parameters"),
             node_var("query"),
             node_var("main body"),
             node_var("before body"),

@@ -91,6 +91,7 @@ pub enum Addr {
     UnresolvedFunction(FunctionObjKey),
     MemoryRef { src: ValueKey, inner_ty: AnyTypeKey },
     Field { src: Box<Addr>, idx: usize },
+    Index { src: Box<Addr>, index: ValueKey },
     Never,
 }
 
@@ -164,6 +165,16 @@ pub enum Instruction {
     },
     Deref {
         src: ValueKey,
+        dst: ValueKey,
+    },
+    GetField {
+        src: ValueKey,
+        idx: usize,
+        dst: ValueKey,
+    },
+    GetIndex {
+        src: ValueKey,
+        index: ValueKey,
         dst: ValueKey,
     },
 }

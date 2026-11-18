@@ -575,16 +575,17 @@ impl Context {
                 .deref()
             {
                 ast::Object::System {
-                    access,
-                    ident,
+                    access: _,
+                    ident: _,
                     generics,
-                    docs,
+                    parameters,
+                    docs: _,
                     query,
-                    before,
-                    body,
-                    after,
+                    before: _,
+                    body: _,
+                    after: _,
                 } => {
-                    let identifier = ident.deref().clone();
+                    self.push_generic_scope(generics, &mod_key)?;
                     for clause in query {
                         match clause.deref() {
                             ast::Clauses::Select(select_clause) => {
@@ -652,10 +653,17 @@ impl Context {
                                 module: mod_key,
                                 span: clause.ident.location,
                             })?,
-                            ast::Clauses::Restriction(restriction_clause) => todo!(),
+                            ast::Clauses::Restriction(_) => (),
                         }
                     }
+                    let mut params = Vec::new();
+                    for param in parameters {
+                        let ty = param.ty.lower(self, mod_key)?;
+                        params.push((param.ident.clone(), InitState::Done(ty)));
+                    }
                     let sys = self.objects.systems.get_mut_unchecked(&system_key);
+                    sys.data.params.extend_from_slice(&params);
+                    self.generic_ctx.pop();
                     sys
                 }
                 _ => unreachable!(),

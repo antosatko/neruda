@@ -93,6 +93,20 @@ fn generate_instr_elements(instr: &Instruction) -> Vec<IrElement> {
             Text(" = deref ".into()),
             Value { id: src },
         ],
+        Instruction::GetField { src, idx, dst } => vec![
+            Value { id: dst },
+            Text(" = ".into()),
+            Value { id: src },
+            Text(format!("[{idx}]")),
+        ],
+        Instruction::GetIndex { src, index, dst } => vec![
+            Value { id: dst },
+            Text(" = ".into()),
+            Value { id: src },
+            Text("[".into()),
+            Value { id: index },
+            Text("]".into()),
+        ],
     }
 }
 
@@ -140,6 +154,8 @@ fn instruction_description(instr: &Instruction) -> &'static str {
         Instruction::AddressOfVar { .. } => "Get the memory address of a variable",
         Instruction::AddressOfVal { .. } => "Get the memory address of a value",
         Instruction::Deref { .. } => "Dereference a pointer to a value",
+        Instruction::GetField { .. } => "Get a field specified by index",
+        Instruction::GetIndex { .. } => "Get an array elemnt specified by index value",
     }
 }
 

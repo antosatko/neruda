@@ -151,6 +151,7 @@ pub enum Object {
         access: Access,
         ident: Span<SmolStr>,
         generics: Option<Span<Vec<Span<GenericParameter>>>>,
+        parameters: Vec<Span<Parameter>>,
         docs: Vec<Span<SmolStr>>,
         query: Vec<Span<Clauses>>,
         before: Option<Span<Span<Body>>>,
@@ -359,7 +360,7 @@ pub enum Statement {
 
     Match {
         expression: Span<Expression>,
-        arms: Vec<(Span<Bundle>, Span<Body>)>,
+        arms: Vec<(Span<Option<Bundle>>, Span<Body>)>,
     },
 }
 

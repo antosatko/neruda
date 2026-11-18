@@ -1,7 +1,17 @@
 type Vec<T> = struct {
     data: &[T]
-    len: u32
-    cap: u32
+    len: u32 = 0
+    cap: u32 = 0
+}
+
+type A = struct {
+    a1: i32 = 1
+    a2: f32 = 2
+    a3: B = struct {}
+}
+
+type B = struct {
+    b1: i32 = 3
 }
 
 pub function fib(n: i32): i32 {
@@ -38,19 +48,18 @@ pub function ptr_test(n: &i32): i32 {
     if n.* < 100 {
         return ptr_test(420.&)
     }
-    match sadfs {
-        (Danda) => _
-    }
+    var aaa: A = struct {}
+    return aaa.a3.b1
 	return n.*
 }
 
 component Danda
 
-system a(a: Danda + sdfas) => _
-
-// system MujSystem(a: i32) [
-//     e: mut Danda,
-//     where e.Danda < 5,
-// ] {
-//
-// }
+system MujSystem(a: i32) [
+    e: ?Danda,
+] {
+    match e {
+        (Danda as d) => _
+        _ => _
+    }
+}

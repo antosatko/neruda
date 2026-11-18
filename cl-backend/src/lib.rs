@@ -338,6 +338,8 @@ impl<'a> CLLoweringCtx<'a> {
 
                         ir::ir::Instruction::AddressOfVal { val, dst } => todo!(),
                         ir::ir::Instruction::Deref { src, dst } => todo!(),
+                        ir::ir::Instruction::GetField { src, idx, dst } => todo!(),
+                        ir::ir::Instruction::GetIndex { src, index, dst } => todo!(),
                     }
                 }
                 match block.terminator().as_ref() {
